@@ -1,0 +1,32 @@
+# 로컬 개발 프로필 — 개발 서버 PostgreSQL 직접 연결 (07-sql/connection.md)
+spring:
+  config:
+    import: "optional:file:.env-local[.properties]"   # 로컬 시크릿(gitignore) — 존재하지 않으면 무시
+  datasource:
+    type: org.apache.commons.dbcp2.BasicDataSource   # DBCP2 (Spring Boot 기본 HikariCP 대체)
+    driver-class-name: org.postgresql.Driver
+    url: ${DB_URL:jdbc:postgresql://s3.java21.net:8000/crowfoot?currentSchema=crowfoot_core}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    dbcp2:
+      initial-size: 5
+      max-total: 20
+      max-idle: 10
+      min-idle: 5
+      max-wait-millis: 3000
+      validation-query: SELECT 1
+      test-on-borrow: true
+      test-while-idle: true
+      time-between-eviction-runs-millis: 30000
+      min-evictable-idle-time-millis: 60000
+
+logging:
+  level:
+    net.java21.crowfoot: INFO
+
+crowfoot:
+  auth:
+    base-url: http://localhost:8081   # 로컬 인증 서버 (운영은 k8s Service DNS — application.yml)
+
+server:
+  port: 8082   # 로컬 개발 — 프로세스별 포트 분리(운영은 전부 8080)

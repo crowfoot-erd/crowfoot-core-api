@@ -1,0 +1,23 @@
+# 공통 설정 — 프로필 무관하게 같은 값만 둔다. 프로필별 값은 application-local.yml / application-prod.yml
+spring:
+  application:
+    name: crowfoot-core-api
+  # 기본 프로필 — 지정 없이 기동하면 local. 운영은 SPRING_PROFILES_ACTIVE=prod (k8s)
+  profiles:
+    default: local
+  # 시크릿 파일 import는 프로필별로 나뉜다 — local은 .env-local, prod는 .env-prod (각 application-{profile}.yml). 모든 서버 리포 공통 규칙 (tech-stack.md Section 1.7)
+  # Instant는 Jackson 3 기본값 그대로 ISO-8601 UTC(2026-09-10T08:30:00Z)로 직렬화한다
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none                     # 스키마는 07-sql/db.sql로 관리
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health                  # 헬스체크만 노출 (내부 포트 전용 규칙)
+
+crowfoot:
+  rotation:
+    grace-seconds: 30                    # Refresh Rotation 유예 (02-auth/requirements.md Section 1.4.4)
