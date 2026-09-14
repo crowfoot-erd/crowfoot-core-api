@@ -1,0 +1,58 @@
+---
+name: CI - Build & Push Docker Image
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/crowfoot-core-api
+  APP_NAME: crowfoot-core-api
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Package with Maven
+        run: mvn -B package -DskipTests
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Update manifest repo
+        run: |
+          git clone https://x-access-token:${{ secrets.MANIFEST_REPO_TOKEN }}@github.com/crowfoot-erd/crowfoot-manifests.git
+          cd crowfoot-manifests
+          sed -i "s|image: ghcr.io/crowfoot-erd/${APP_NAME}:.*|image: ghcr.io/crowfoot-erd/${APP_NAME}:${{ github.sha }}|" apps/${APP_NAME}/deployment.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/${APP_NAME}/deployment.yaml
+          git commit -m "chore: update ${APP_NAME} image to ${{ github.sha }}" || echo "No changes to commit"
+          git push
