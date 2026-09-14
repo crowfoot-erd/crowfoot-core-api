@@ -38,10 +38,10 @@ public class Model {
     /** 데이터베이스 종류 — database_types 코드 논리 참조(생성 시점 고정) */
     private String databaseType;
 
-    /** 캔버스 크기(px) — 에디터 초기 배경 크기 */
-    private int canvasWidth;
+    /** 캔버스 크기(px) — API에서 폐지(#123): 에디터가 무한 캔버스라 의미 없는 상수만 기록. 컬럼은 NOT NULL이라 유지 */
+    private int canvasWidth = DEFAULT_CANVAS_WIDTH;
 
-    private int canvasHeight;
+    private int canvasHeight = DEFAULT_CANVAS_HEIGHT;
 
     private String content;
 
@@ -55,14 +55,17 @@ public class Model {
     @UpdateTimestamp
     private Instant updatedAt;
 
+    /** 폐지된 캔버스 크기의 기록값 — 변경 사유·경위는 08-core/02-model.md Section 1.2 */
+    public static final int DEFAULT_CANVAS_WIDTH = 1920;
+
+    public static final int DEFAULT_CANVAS_HEIGHT = 1080;
+
     public Model(Long workspaceId, String name, String description, String databaseType,
-                 int canvasWidth, int canvasHeight, String content, Long createdBy) {
+                 String content, Long createdBy) {
         this.workspaceId = workspaceId;
         this.name = name;
         this.description = description;
         this.databaseType = databaseType;
-        this.canvasWidth = canvasWidth;
-        this.canvasHeight = canvasHeight;
         this.content = content;
         this.version = 0L;
         this.createdBy = createdBy;

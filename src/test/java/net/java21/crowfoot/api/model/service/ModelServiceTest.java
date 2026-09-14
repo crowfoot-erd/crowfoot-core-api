@@ -8,6 +8,9 @@ import net.java21.crowfoot.api.model.domain.ModelDiagram;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.ModelResponse;
 import net.java21.crowfoot.api.model.dto.ModelSummaryResponse;
+import net.java21.crowfoot.api.model.dto.ModelVersionResponse;
+import net.java21.crowfoot.api.model.dto.SaveContentRequest;
+import net.java21.crowfoot.api.model.dto.SaveContentResponse;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository;
@@ -18,16 +21,17 @@ import tools.jackson.databind.ObjectMapper;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
 import tools.jackson.databind.JsonNode;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,7 +48,8 @@ import static org.mockito.Mockito.verify;
 
 /**
  * ERD 문서 API 단위 테스트 (08-core/02-model.md Section 1) —
- * 생성 2-INSERT(모델·main 다이어그램)·databaseType 코드 검증·이름 중복·목록 페이징을 검증한다.
+ * 생성 2-INSERT(모델·main 다이어그램)·databaseType 코드 검증·이름 중복·목록 페이징·
+ * content 저장(낙관적 잠금 409·JSON/5MB 검증)을 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class ModelServiceTest {
@@ -64,8 +69,14 @@ class ModelServiceTest {
     @Mock
     private AuditRecorder auditRecorder;
 
-    @InjectMocks
     private ModelService modelService;
+
+    @BeforeEach
+    void setUp() {
+        // ObjectMapper는 실물 — JSON 파싱 검증 자체가 테스트 대상이다
+        modelService = new ModelService(modelRepository, modelDiagramRepository, modelQueryRepository,
+                databaseTypeRepository, userRepository, roleChecker, auditRecorder, new ObjectMapper());
+    }
 
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -75,12 +86,16 @@ class ModelServiceTest {
     }
 
     private static CreateModelRequest request() {
-        return new CreateModelRequest("주문 서비스 ERD", "설명", "postgresql", 1920, 1080);
+        return new CreateModelRequest("주문 서비스 ERD", "설명", "postgresql");
     }
 
+    /** 빈 Canonical 문서 v1 (1.5.1) — 생성 초기값과 동일 */
+    private static final String V1_EMPTY =
+            "{\"schemaVersion\":1,\"model\":{\"tables\":[],\"relationships\":[]},\"diagram\":{\"nodes\":{},\"notes\":[],\"viewport\":null}}";
+
     private static Model persisted() {
-        Model model = new Model(77L, "주문 서비스 ERD", "설명", "postgresql", 1920, 1080,
-                "{\"tables\":[],\"relationships\":[]}", 7L);
+        Model model = new Model(77L, "주문 서비스 ERD", "설명", "postgresql",
+                V1_EMPTY, 7L);
         ReflectionTestUtils.setField(model, "id", 501L);
         return model;
     }
@@ -108,13 +123,11 @@ class ModelServiceTest {
         assertThat(diagram.getValue().isMain()).isTrue();
         assertThat(diagram.getValue().getLayoutContent()).contains("nodes").contains("viewport");
 
-        // then: 응답 — databaseType·캔버스 크기·빈 content·생성자 이름
+        // then: 응답 — databaseType·빈 content·생성자 이름
         assertThat(response.modelId()).isEqualTo("501");
         assertThat(response.databaseType()).isEqualTo("postgresql");
-        assertThat(response.canvasWidth()).isEqualTo(1920);
-        assertThat(response.canvasHeight()).isEqualTo(1080);
         assertThat(response.version()).isZero();
-        assertThat(response.content()).isEqualTo("{\"tables\":[],\"relationships\":[]}");
+        assertThat(response.content()).isEqualTo(V1_EMPTY);
         assertThat(response.createdBy().name()).isEqualTo("marco");
 
         // then: 감사
@@ -127,7 +140,7 @@ class ModelServiceTest {
         given(databaseTypeRepository.findByCodeAndIsActiveTrue("oracle")).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> modelService.create(7L, 77L,
-                new CreateModelRequest("주문 ERD", null, "oracle", 1920, 1080)))
+                new CreateModelRequest("주문 ERD", null, "oracle")))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
 
@@ -156,9 +169,9 @@ class ModelServiceTest {
         given(modelQueryRepository.count(77L, null)).willReturn(2L);
         given(modelQueryRepository.search(77L, null, 1, 20)).willReturn(List.of(
                 new ModelQueryRepository.ModelRow(501L, 77L, "주문 서비스 ERD", "설명", "postgresql",
-                        1920, 1080, 3L, 7L, "marco", Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-02T00:00:00Z")),
+                        3L, 7L, "marco", Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-02T00:00:00Z")),
                 new ModelQueryRepository.ModelRow(502L, 77L, "회원 서비스 ERD", null, "mysql",
-                        1280, 720, 1L, 8L, "jenny", Instant.parse("2026-09-03T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"))));
+                        1L, 8L, "jenny", Instant.parse("2026-09-03T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"))));
 
         // when
         ListApiResponse<ModelSummaryResponse> response = modelService.list(7L, 77L, null, null, null);
@@ -169,7 +182,6 @@ class ModelServiceTest {
         ModelSummaryResponse first = response.responses().get(0);
         assertThat(first.modelId()).isEqualTo("501");
         assertThat(first.databaseType()).isEqualTo("postgresql");
-        assertThat(first.canvasWidth()).isEqualTo(1920);
         assertThat(first.createdBy().name()).isEqualTo("marco");
         verify(roleChecker).requireMember(7L, 77L);
     }
@@ -249,9 +261,7 @@ class ModelServiceTest {
         verify(roleChecker).requireMember(7L, 77L);
         assertThat(response.modelId()).isEqualTo("501");
         assertThat(response.databaseType()).isEqualTo("postgresql");
-        assertThat(response.canvasWidth()).isEqualTo(1920);
-        assertThat(response.canvasHeight()).isEqualTo(1080);
-        assertThat(response.content()).isEqualTo("{\"tables\":[],\"relationships\":[]}");
+        assertThat(response.content()).isEqualTo(V1_EMPTY);
         assertThat(response.createdBy().name()).isEqualTo("marco");
     }
 
@@ -266,11 +276,113 @@ class ModelServiceTest {
     }
 
     @Test
+    @DisplayName("버전 경량 조회는 version·갱신 일시만 내린다 — 프로젝션 행, Viewer 멤버 검사")
+    void versionReturnsProjectionRow() {
+        // given
+        Instant updatedAt = Instant.parse("2026-09-14T05:00:00Z");
+        given(modelRepository.findVersionRowByIdAndWorkspaceId(501L, 77L))
+                .willReturn(Collections.singletonList(new Object[] {12L, updatedAt}));
+
+        // when
+        ModelVersionResponse response = modelService.version(7L, 77L, 501L);
+
+        // then
+        verify(roleChecker).requireMember(7L, 77L);
+        assertThat(response.version()).isEqualTo(12);
+        assertThat(response.updatedAt()).isEqualTo(updatedAt);
+    }
+
+    @Test
+    @DisplayName("버전 조회도 없는 모델은 404 MODEL_NOT_FOUND다 — 감사 없음(폴링)")
+    void versionRejectsUnknownModel() {
+        given(modelRepository.findVersionRowByIdAndWorkspaceId(501L, 77L)).willReturn(List.of());
+
+        assertThatThrownBy(() -> modelService.version(7L, 77L, 501L))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
+    }
+
+    @Test
     @DisplayName("다른 Workspace 소속 모델 접근은 404 MODEL_NOT_FOUND로 은닉된다")
     void patchRejectsModelOfOtherWorkspace() {
         given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> modelService.patch(7L, 77L, 501L, jsonNode("{\"name\":\"X\"}")))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("content 저장은 조건부 갱신 1행이면 version+1·갱신 일시를 응답하고 감사를 남긴다")
+    void saveContentBumpsVersionAndAudits() {
+        // given
+        String content = "{\"schemaVersion\":1,\"model\":{\"tables\":[],\"relationships\":[]},\"diagram\":{}}";
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+        given(modelRepository.updateContentIfVersionMatches(eq(501L), eq(77L), eq(3L), eq(content), any())).willReturn(1);
+        Model saved = persisted(); // 갱신 후 재조회 — version 4로 증가
+        ReflectionTestUtils.setField(saved, "version", 4L);
+        ReflectionTestUtils.setField(saved, "updatedAt", Instant.parse("2026-09-12T05:00:00Z"));
+        given(modelRepository.findById(501L)).willReturn(Optional.of(saved));
+
+        // when
+        SaveContentResponse response = modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(3, content));
+
+        // then
+        assertThat(response.version()).isEqualTo(4);
+        assertThat(response.updatedAt()).isEqualTo(Instant.parse("2026-09-12T05:00:00Z"));
+        verify(roleChecker).requireEditor(7L, 77L);
+        verify(auditRecorder).record(eq(7L), eq("MODEL_UPDATED"), eq("MODEL"), eq("501"), any());
+    }
+
+    @Test
+    @DisplayName("버전 불일치 저장은 409 VERSION_CONFLICT이다 — 갱신 0행, 감사 없음")
+    void saveContentRejectsVersionMismatch() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+        given(modelRepository.updateContentIfVersionMatches(eq(501L), eq(77L), eq(2L), anyString(), any())).willReturn(0);
+
+        assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(2, "{\"a\":1}")))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.VERSION_CONFLICT));
+
+        verify(auditRecorder, never()).record(any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("비JSON content 저장은 400 INVALID_REQUEST이다 — 갱신 실행 없음")
+    void saveContentRejectsNonJson() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+
+        assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(3, "not-json{")))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+
+        verify(modelRepository, never()).updateContentIfVersionMatches(anyLong(), anyLong(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("5MB(UTF-8 바이트) 초과 content는 400 INVALID_REQUEST이다")
+    void saveContentRejectsOversized() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+        String oversized = "{\"a\":\"" + "x".repeat(5 * 1024 * 1024) + "\"}";
+
+        assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(3, oversized)))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+
+        verify(modelRepository, never()).updateContentIfVersionMatches(anyLong(), anyLong(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("다른 Workspace 소속 모델의 content 저장은 404 MODEL_NOT_FOUND로 은닉된다")
+    void saveContentRejectsModelOfOtherWorkspace() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(0, "{}")))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
     }

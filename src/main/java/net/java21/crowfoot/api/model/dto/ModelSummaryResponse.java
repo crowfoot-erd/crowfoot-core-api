@@ -13,8 +13,6 @@ public record ModelSummaryResponse(
         String name,
         String description,
         String databaseType,
-        int canvasWidth,
-        int canvasHeight,
         int version,
         UserRefResponse createdBy,
         Instant createdAt,

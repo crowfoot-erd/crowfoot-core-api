@@ -1,6 +1,8 @@
 package net.java21.crowfoot.api.model.service;
 
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
@@ -11,6 +13,9 @@ import net.java21.crowfoot.api.model.domain.ModelDiagram;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.ModelResponse;
 import net.java21.crowfoot.api.model.dto.ModelSummaryResponse;
+import net.java21.crowfoot.api.model.dto.ModelVersionResponse;
+import net.java21.crowfoot.api.model.dto.SaveContentRequest;
+import net.java21.crowfoot.api.model.dto.SaveContentResponse;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository;
@@ -23,12 +28,13 @@ import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
 /**
- * ERD 문서 실체 API (08-core/02-model.md Section 1) — 목록·상세·생성·메타 변경·삭제.
- * content 저장은 에디터 단계에서 구현한다.
+ * ERD 문서 실체 API (08-core/02-model.md Section 1) — 목록·상세·생성·메타 변경·삭제·content 저장.
  *
  * <p>생성 시 대표 다이어그램(main)을 같은 트랜잭션으로 자동 생성한다 —
  * 모델 진입 시 여는 화면이 항상 존재하도록 (06-erd/00-domain.md Section 3.10).
@@ -37,11 +43,14 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ModelService {
 
-    /** 빈 Canonical 문서 (1.2 동작 — 빈 객체 직렬화) */
-    private static final String EMPTY_CONTENT = "{\"tables\":[],\"relationships\":[]}";
+    /** 빈 Canonical 문서 v1 (1.2 동작 — schemaVersion 1, 08-core/02-model.md Section 1.5.1) */
+    private static final String EMPTY_CONTENT =
+            "{\"schemaVersion\":1,\"model\":{\"tables\":[],\"relationships\":[]},\"diagram\":{\"nodes\":{},\"notes\":[],\"viewport\":null}}";
     /** 빈 레이아웃 초기값 (2.3 상세 형태와 동일 구조) */
     private static final String EMPTY_LAYOUT = "{\"nodes\":[],\"edges\":[],\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1}}";
     private static final String MAIN_DIAGRAM_NAME = "main";
+    /** content 상한 — UTF-8 바이트 기준 5MB (1.5) */
+    private static final int MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
     private final ModelRepository modelRepository;
     private final ModelDiagramRepository modelDiagramRepository;
@@ -50,6 +59,7 @@ public class ModelService {
     private final UserRepository userRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
+    private final ObjectMapper objectMapper;
 
     /** 목록(Viewer 이상) — keyword·offset 페이징, 정렬 updatedAt desc */
     @Transactional(readOnly = true)
@@ -83,6 +93,18 @@ public class ModelService {
         return toResponse(model);
     }
 
+    /** 버전 경량 조회(Viewer 이상 — 1.9 협업 폴링) — content를 로드하지 않는 프로젝션 */
+    @Transactional(readOnly = true)
+    public ModelVersionResponse version(long userId, long workspaceId, long modelId) {
+        roleChecker.requireMember(userId, workspaceId);
+        List<Object[]> rows = modelRepository.findVersionRowByIdAndWorkspaceId(modelId, workspaceId);
+        if (rows.isEmpty()) {
+            throw new BusinessException(ErrorCode.MODEL_NOT_FOUND);
+        }
+        Object[] row = rows.get(0);
+        return new ModelVersionResponse(((Number) row[0]).intValue(), (Instant) row[1]);
+    }
+
     /** 생성(Editor 이상) — main 다이어그램 자동 생성, 이름 중복은 409, 비활성 databaseType은 400 */
     @Transactional
     public ModelResponse create(long userId, long workspaceId, CreateModelRequest request) {
@@ -96,7 +118,7 @@ public class ModelService {
 
         Model model = modelRepository.save(new Model(
                 workspaceId, request.name(), request.description(), request.databaseType(),
-                request.canvasWidth(), request.canvasHeight(), EMPTY_CONTENT, userId));
+                EMPTY_CONTENT, userId));
         modelDiagramRepository.save(new ModelDiagram(model.getId(), MAIN_DIAGRAM_NAME, EMPTY_LAYOUT, true));
         auditRecorder.record(userId, "MODEL_CREATED", "MODEL",
                 Long.toString(model.getId()), Map.of(
@@ -147,6 +169,41 @@ public class ModelService {
         return toSummary(model);
     }
 
+    /**
+     * 문서 본체 저장(Editor 이상 — 1.5) — 문서 단위 통짜 저장 + 낙관적 잠금.
+     * 검증은 JSON 구문 파싱 가능·UTF-8 5MB 상한만 — Canonical 스키마 해석은 에디터가 담당한다(1.5.1).
+     * version 일치 조건부 UPDATE(원자적)로 0행이면 409 VERSION_CONFLICT.
+     */
+    @Transactional
+    public SaveContentResponse saveContent(long userId, long workspaceId, long modelId, SaveContentRequest request) {
+        roleChecker.requireEditor(userId, workspaceId);
+        if (modelRepository.findByIdAndWorkspaceId(modelId, workspaceId).isEmpty()) {
+            throw new BusinessException(ErrorCode.MODEL_NOT_FOUND);
+        }
+        String content = request.content();
+        if (content.getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 크기가 상한(5MB)을 초과했습니다");
+        }
+        try {
+            objectMapper.readTree(content);
+        } catch (JacksonException e) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "content는 유효한 JSON이어야 합니다");
+        }
+
+        int updated = modelRepository.updateContentIfVersionMatches(modelId, workspaceId,
+                request.baseVersion(), content, Instant.now());
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.VERSION_CONFLICT);
+        }
+        Model model = modelRepository.findById(modelId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
+        auditRecorder.record(userId, "MODEL_UPDATED", "MODEL",
+                Long.toString(modelId), Map.of(
+                        "baseVersion", request.baseVersion(),
+                        "version", model.getVersion()));
+        return new SaveContentResponse((int) model.getVersion(), model.getUpdatedAt());
+    }
+
     private ModelSummaryResponse toSummary(Model model) {
         User creator = userRepository.findById(model.getCreatedBy()).orElse(null);
         UserRefResponse createdBy = creator == null
@@ -158,8 +215,6 @@ public class ModelService {
                 model.getName(),
                 model.getDescription(),
                 model.getDatabaseType(),
-                model.getCanvasWidth(),
-                model.getCanvasHeight(),
                 (int) model.getVersion(),
                 createdBy,
                 model.getCreatedAt(),
@@ -176,8 +231,6 @@ public class ModelService {
                 row.name(),
                 row.description(),
                 row.databaseType(),
-                row.canvasWidth(),
-                row.canvasHeight(),
                 (int) row.version(),
                 createdBy,
                 row.createdAt(),
@@ -195,8 +248,6 @@ public class ModelService {
                 model.getName(),
                 model.getDescription(),
                 model.getDatabaseType(),
-                model.getCanvasWidth(),
-                model.getCanvasHeight(),
                 model.getContent(),
                 (int) model.getVersion(),
                 createdBy,

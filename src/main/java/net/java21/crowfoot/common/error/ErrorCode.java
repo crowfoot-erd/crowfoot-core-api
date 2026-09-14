@@ -46,7 +46,22 @@ public enum ErrorCode {
 
     // Model (08-core/02-model.md Section 1)
     MODEL_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_NOT_FOUND", "모델을 찾을 수 없습니다"),
-    DUPLICATED_NAME(HttpStatus.CONFLICT, "DUPLICATED_NAME", "이미 존재하는 이름입니다");
+    DUPLICATED_NAME(HttpStatus.CONFLICT, "DUPLICATED_NAME", "이미 존재하는 이름입니다"),
+    VERSION_CONFLICT(HttpStatus.CONFLICT, "VERSION_CONFLICT", "다른 클라이언트가 먼저 저장했습니다"),
+
+    // Connection (08-core/06-connection.md Section 3.7)
+    CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "CONNECTION_NOT_FOUND", "커넥션을 찾을 수 없습니다"),
+    INVALID_DBMS_TYPE(HttpStatus.BAD_REQUEST, "INVALID_DBMS_TYPE", "지원하지 않는 데이터베이스 종류입니다"),
+    CONNECTION_UNREACHABLE(HttpStatus.BAD_GATEWAY, "CONNECTION_UNREACHABLE", "데이터베이스에 접속할 수 없습니다"),
+    REVERSE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "REVERSE_FAILED", "스키마를 문서로 만들지 못했습니다"),
+
+    // Managed database (08-core/07-managed-database.md Section 3.7)
+    MANAGED_INSTANCE_NOT_FOUND(HttpStatus.NOT_FOUND, "MANAGED_INSTANCE_NOT_FOUND", "매니지드 인스턴스를 찾을 수 없습니다"),
+    MANAGED_INSTANCE_UNREACHABLE(HttpStatus.BAD_GATEWAY, "MANAGED_INSTANCE_UNREACHABLE", "매니지드 인스턴스에 접속할 수 없습니다"),
+    MANAGED_INSTANCE_IN_USE(HttpStatus.CONFLICT, "MANAGED_INSTANCE_IN_USE", "발급이 남아 있는 인스턴스는 삭제할 수 없습니다"),
+    MANAGED_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "MANAGED_LIMIT_EXCEEDED", "발급 한도에 도달했습니다"),
+    MANAGED_PROVISION_FAILED(HttpStatus.BAD_GATEWAY, "MANAGED_PROVISION_FAILED", "발급 스키마 프로비저닝에 실패했습니다"),
+    MANAGED_DATABASE_NOT_FOUND(HttpStatus.NOT_FOUND, "MANAGED_DATABASE_NOT_FOUND", "매니지드 발급을 찾을 수 없습니다");
 
     private final HttpStatus status;
     private final String code;

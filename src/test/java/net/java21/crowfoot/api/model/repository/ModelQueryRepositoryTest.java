@@ -39,11 +39,11 @@ class ModelQueryRepositoryTest {
         marcoId = userRepository.save(new User("marco@x.com", "marco", true)).getId();
 
         modelRepository.save(new Model(77L, "주문 서비스 ERD", "결제 도메인", "postgresql",
-                1920, 1080, "{}", marcoId));
+                "{}", marcoId));
         modelRepository.save(new Model(77L, "회원 서비스 ERD", null, "mysql",
-                1280, 720, "{}", marcoId));
+                "{}", marcoId));
         modelRepository.save(new Model(88L, "다른 워크스페이스 ERD", null, "postgresql",
-                1920, 1080, "{}", marcoId)); // Workspace 경계 밖
+                "{}", marcoId)); // Workspace 경계 밖
     }
 
     @Test
@@ -56,7 +56,6 @@ class ModelQueryRepositoryTest {
         assertThat(rows.get(1).name()).isEqualTo("주문 서비스 ERD");
         assertThat(rows.get(0).createdByName()).isEqualTo("marco");
         assertThat(rows.get(0).databaseType()).isEqualTo("mysql");
-        assertThat(rows.get(0).canvasWidth()).isEqualTo(1280);
         assertThat(rows.get(1).databaseType()).isEqualTo("postgresql");
     }
 

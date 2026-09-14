@@ -14,8 +14,6 @@ public record ModelResponse(
         String name,
         String description,
         String databaseType,
-        int canvasWidth,
-        int canvasHeight,
         String content,
         int version,
         UserRefResponse createdBy,
