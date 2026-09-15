@@ -12,6 +12,8 @@ import jakarta.validation.constraints.Size;
 public record UpdateManagedInstanceRequest(
         @Size(min = 1, max = 100) String displayName,
         @Size(min = 1, max = 255) String host,
+        /** 사용자 노출 주소(선택) — 표기 전용이라 재검증 대상이 아니다. null은 변경 없음, 빈 칸("")은 제거(host 폴백) */
+        @Size(max = 255) String publicHost,
         @Min(1) @Max(65535) Integer port,
         @Size(min = 1, max = 100) String databaseName,
         @Size(min = 1, max = 100) String username,

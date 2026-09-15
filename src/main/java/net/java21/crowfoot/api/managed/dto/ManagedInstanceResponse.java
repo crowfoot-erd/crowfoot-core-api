@@ -13,6 +13,7 @@ public record ManagedInstanceResponse(
         String displayName,
         String dbmsType,
         String host,
+        String publicHost,
         int port,
         String databaseName,
         String username,

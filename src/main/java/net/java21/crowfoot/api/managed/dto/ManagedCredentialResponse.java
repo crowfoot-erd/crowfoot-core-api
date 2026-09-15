@@ -7,6 +7,7 @@ package net.java21.crowfoot.api.managed.dto;
  * <p>발급 커넥션과 같은 매핑(PostgreSQL: database=인스턴스 것·schema=발급 스키마 /
  * MySQL: database=발급 이름·schema=null)으로, 프로비저너 전략에서 다시 계산한다 —
  * 커넥션 이름 변경과 무관하게 항상 발급 시점의 접속 정보를 보여준다.
+ * host는 사용자 노출 주소(publicHost ?? host)다 — 프로비저닝·철회는 항상 내부 host로 수행한다.
  * 조회 시마다 복호화해 내려가며 감사(MANAGED_DATABASE_CREDENTIAL_VIEWED)를 남긴다.
  */
 public record ManagedCredentialResponse(

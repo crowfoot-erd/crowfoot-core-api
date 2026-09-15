@@ -98,7 +98,7 @@ class ManagedDatabaseServiceTest {
                 settingRepository, connectionRepository, userRepository, roleChecker, adminGuard,
                 auditRecorder, new ConnectionCrypto(DEV_KEY),
                 new ManagedProvisioners(List.of(provisioner, mysqlProvisioner)));
-        instance = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", 8000,
+        instance = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", null, 8000,
                 "crowfoot", "crowfoot", new ConnectionCrypto(DEV_KEY).encrypt("crowfoot123!"),
                 true, 2L);
         ReflectionTestUtils.setField(instance, "id", 1L);
@@ -204,6 +204,7 @@ class ManagedDatabaseServiceTest {
         verify(connectionRepository).save(connectionCaptor.capture());
         DbConnection stored = connectionCaptor.getValue();
         assertThat(stored.getName()).isEqualTo("Academy PG #1");
+        assertThat(stored.getHost()).isEqualTo("s3.java21.net");   // publicHost 미지정 → 접속 host 폴백
         assertThat(stored.getSchemaName()).isEqualTo("cf_u2_d1");
         assertThat(stored.getDatabaseName()).isEqualTo("crowfoot");
         // 커넥션 자격은 전부 발급 계정이다 — 인스턴스 루트(crowfoot)를 내주지 않는다
@@ -224,11 +225,38 @@ class ManagedDatabaseServiceTest {
     }
 
     @Test
+    @DisplayName("발급 — 커넥션 주소는 노출 주소(publicHost)를 쓰되 프로비저닝·보상은 내부 host로 수행한다")
+    void issueUsesPublicHostForConnectionButInternalForProvisioning() {
+        instance.setPublicHost("db.crowfoot.java21.net");
+        given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
+        given(databaseRepository.countByWorkspaceIdAndUserId(7L, 2L)).willReturn(0L);
+        given(databaseRepository.findByInstanceIdAndSchemaName(1L, "cf_u2_d1")).willReturn(Optional.empty());
+        given(connectionRepository.save(any())).willAnswer(inv -> {
+            DbConnection stored = inv.getArgument(0);
+            ReflectionTestUtils.setField(stored, "id", 905L);
+            return stored;
+        });
+        given(databaseRepository.save(any())).willThrow(new IllegalStateException("db down"));
+
+        // 저장 실패 → 보상 withdraw도 내부 host로 수행됨을 함께 검증한다
+        assertThatThrownBy(() -> databaseService.issue(2L, 7L, new IssueManagedDatabaseRequest(1L)))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(provisioner).provision(eq("s3.java21.net"), eq(8000), eq("crowfoot"), eq("crowfoot"),
+                eq("crowfoot123!"), eq("cf_u2_d1"), eq("cf_u2_d1"), anyString());
+        verify(provisioner).withdraw(eq("s3.java21.net"), eq(8000), eq("crowfoot"), eq("crowfoot"),
+                eq("crowfoot123!"), eq("cf_u2_d1"), eq("cf_u2_d1"));
+        ArgumentCaptor<DbConnection> connectionCaptor = ArgumentCaptor.forClass(DbConnection.class);
+        verify(connectionRepository).save(connectionCaptor.capture());
+        assertThat(connectionCaptor.getValue().getHost()).isEqualTo("db.crowfoot.java21.net");
+    }
+
+    @Test
     @DisplayName("발급(MySQL) — 발급 이름이 곧 database라 커넥션 databaseName=발급 이름·schemaName=null로 매핑한다")
     void issueMySqlMapsConnectionToIssuedDatabase() {
         when(mysqlProvisioner.connectionDatabaseName(null, "root", "cf_u2_d1")).thenReturn("cf_u2_d1");
         when(mysqlProvisioner.connectionSchemaName("cf_u2_d1")).thenReturn(null);
-        ManagedInstance mysql = new ManagedInstance("Academy MySQL", "mysql", "s4.java21.net", 13306,
+        ManagedInstance mysql = new ManagedInstance("Academy MySQL", "mysql", "s4.java21.net", null, 13306,
                 null, "root", new ConnectionCrypto(DEV_KEY).encrypt("Nhn123!@#"),
                 true, 2L);
         ReflectionTestUtils.setField(mysql, "id", 2L);
@@ -262,7 +290,7 @@ class ManagedDatabaseServiceTest {
     @Test
     @DisplayName("발급(PG database 생략) — 커넥션 databaseName은 username 폴백으로 확정해 채운다")
     void issuePostgresWithoutDatabaseFallsBackToUsername() {
-        ManagedInstance noDatabase = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", 8000,
+        ManagedInstance noDatabase = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", null, 8000,
                 null, "crowfoot", new ConnectionCrypto(DEV_KEY).encrypt("crowfoot123!"),
                 true, 2L);
         ReflectionTestUtils.setField(noDatabase, "id", 3L);
@@ -413,11 +441,30 @@ class ManagedDatabaseServiceTest {
     }
 
     @Test
+    @DisplayName("접속 정보 — 노출 주소(publicHost)가 있으면 접속 host 대신 그 값을 내준다(조회 시점 계산)")
+    void credentialPrefersPublicHost() {
+        instance.setPublicHost("db.crowfoot.java21.net");
+        ManagedDatabase mine = new ManagedDatabase(1L, 2L, 7L, "cf_u2_d1", "cf_u2_d1",
+                new ConnectionCrypto(DEV_KEY).encrypt("issued-pass-123!"), 901L);
+        ReflectionTestUtils.setField(mine, "id", 31L);
+        given(databaseRepository.findByIdAndWorkspaceId(31L, 7L)).willReturn(Optional.of(mine));
+        given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
+
+        ManagedCredentialResponse response = databaseService.credential(2L, 7L, 31L);
+
+        // 사용자에게는 노출 주소 — 이미 발급된 이력도 조회 시점에 계산되므로 즉시 반영된다
+        assertThat(response.host()).isEqualTo("db.crowfoot.java21.net");
+        assertThat(response.port()).isEqualTo(8000);
+        assertThat(response.databaseName()).isEqualTo("crowfoot");
+        assertThat(response.schemaName()).isEqualTo("cf_u2_d1");
+    }
+
+    @Test
     @DisplayName("접속 정보(MySQL) — 발급 이름이 곧 database라 databaseName=발급 이름·schemaName=null로 매핑한다")
     void credentialMySqlMapsIssuedDatabase() {
         when(mysqlProvisioner.connectionDatabaseName(null, "root", "cf_u2_d1")).thenReturn("cf_u2_d1");
         when(mysqlProvisioner.connectionSchemaName("cf_u2_d1")).thenReturn(null);
-        ManagedInstance mysql = new ManagedInstance("Academy MySQL", "mysql", "s4.java21.net", 13306,
+        ManagedInstance mysql = new ManagedInstance("Academy MySQL", "mysql", "s4.java21.net", null, 13306,
                 null, "root", new ConnectionCrypto(DEV_KEY).encrypt("Nhn123!@#"), true, 2L);
         ReflectionTestUtils.setField(mysql, "id", 2L);
         ManagedDatabase mine = new ManagedDatabase(2L, 2L, 7L, "cf_u2_d1", "cf_u2_d1",

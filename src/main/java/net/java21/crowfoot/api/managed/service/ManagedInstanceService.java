@@ -64,11 +64,12 @@ public class ManagedInstanceService {
         String dbmsType = request.dbmsType().trim();
         ManagedProvisioner provisioner = requireProvisioner(dbmsType);
         String databaseName = resolveDatabaseName(request.databaseName());
+        String publicHost = resolvePublicHost(request.publicHost());
         provisioner.verify(request.host().trim(), request.port(), databaseName,
                 request.username().trim(), request.password());
 
         ManagedInstance saved = instanceRepository.save(new ManagedInstance(
-                request.displayName().trim(), dbmsType, request.host().trim(), request.port(),
+                request.displayName().trim(), dbmsType, request.host().trim(), publicHost, request.port(),
                 databaseName, request.username().trim(),
                 crypto.encrypt(request.password()),
                 request.isActive() == null || request.isActive(),
@@ -81,7 +82,8 @@ public class ManagedInstanceService {
         return toResponse(saved);
     }
 
-    /** 변경 — PATCH 의미론(null은 변경 없음). 자격(host·port·database·username·password)이 하나라도 오면 새 조합으로 재검증한다 */
+    /** 변경 — PATCH 의미론(null은 변경 없음). 자격(host·port·database·username·password)이 하나라도 오면 새 조합으로 재검증한다.
+     *  publicHost는 표기 전용이라 재검증을 트리거하지 않는다(빈 칸 전송 = 노출 주소 제거) */
     @Transactional
     public ManagedInstanceResponse update(long adminId, long instanceId, UpdateManagedInstanceRequest request) {
         adminGuard.requireAdmin(adminId);
@@ -97,6 +99,10 @@ public class ManagedInstanceService {
         String databaseName = request.databaseName() != null
                 ? resolveDatabaseName(request.databaseName())
                 : instance.getDatabaseName();
+        // publicHost도 같은 정규화를 따르되 재검증(credentialTouched) 대상이 아니다 — 표기 전용
+        String publicHost = request.publicHost() != null
+                ? resolvePublicHost(request.publicHost())
+                : instance.getPublicHost();
         String username = request.username() != null ? request.username().trim() : instance.getUsername();
         if (credentialTouched) {
             String password = request.password() != null ? request.password()
@@ -108,6 +114,7 @@ public class ManagedInstanceService {
             instance.setDisplayName(request.displayName().trim());
         }
         instance.setHost(host);
+        instance.setPublicHost(publicHost);
         instance.setPort(port);
         instance.setDatabaseName(databaseName);
         instance.setUsername(username);
@@ -166,6 +173,12 @@ public class ManagedInstanceService {
         return trimmed == null || trimmed.isEmpty() ? null : trimmed;
     }
 
+    /** publicHost 정규화 — 표기 전용 노출 주소. 빈 칸은 null(= host 폴백)로 정규화한다 */
+    private static String resolvePublicHost(String requested) {
+        String trimmed = requested == null ? null : requested.trim();
+        return trimmed == null || trimmed.isEmpty() ? null : trimmed;
+    }
+
     private ManagedInstanceResponse toResponse(ManagedInstance instance) {
         User creator = userRepository.findById(instance.getCreatedBy()).orElse(null);
         UserRefResponse createdBy = creator == null
@@ -176,6 +189,7 @@ public class ManagedInstanceService {
                 instance.getDisplayName(),
                 instance.getDbmsType(),
                 instance.getHost(),
+                instance.getPublicHost(),
                 instance.getPort(),
                 instance.getDatabaseName(),
                 instance.getUsername(),

@@ -37,6 +37,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -76,7 +77,7 @@ class ManagedInstanceServiceTest {
     }
 
     private static ManagedInstance saved(long id) {
-        ManagedInstance instance = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", 8000,
+        ManagedInstance instance = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", null, 8000,
                 "crowfoot", "crowfoot", new ConnectionCrypto(DEV_KEY).encrypt("crowfoot123!"),
                 true, 2L);
         ReflectionTestUtils.setField(instance, "id", id);
@@ -88,7 +89,7 @@ class ManagedInstanceServiceTest {
     @DisplayName("등록 — 프로비저너 전략이 없는 DBMS는 INVALID_REQUEST(지원: postgresql·mysql)")
     void createRejectsUnsupportedDbms() {
         assertThatThrownBy(() -> instanceService.create(2L, new CreateManagedInstanceRequest(
-                "Oracle 인스턴스", "oracle", "db.dev", 1521, "orcl", "app", "pw", null)))
+                "Oracle 인스턴스", "oracle", "db.dev", null, 1521, "orcl", "app", "pw", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -105,7 +106,7 @@ class ManagedInstanceServiceTest {
         });
 
         ManagedInstanceResponse response = instanceService.create(2L, new CreateManagedInstanceRequest(
-                "Academy MySQL", "mysql", "s4.java21.net", 13306, null,
+                "Academy MySQL", "mysql", "s4.java21.net", null, 13306, null,
                 "root", "Nhn123!@#", null));
 
         verify(mysqlProvisioner).verify("s4.java21.net", 13306, null, "root", "Nhn123!@#");
@@ -125,7 +126,7 @@ class ManagedInstanceServiceTest {
         });
 
         instanceService.create(2L, new CreateManagedInstanceRequest(
-                "Academy PG", "postgresql", "s3.java21.net", 8000, "  ",
+                "Academy PG", "postgresql", "s3.java21.net", null, 8000, "  ",
                 "crowfoot", "crowfoot123!", null));
 
         // 빈 칸은 null로 정규화 — pgjdbc 폴백(username database)으로 접속 검증
@@ -133,6 +134,33 @@ class ManagedInstanceServiceTest {
         ArgumentCaptor<ManagedInstance> captor = ArgumentCaptor.forClass(ManagedInstance.class);
         verify(instanceRepository).save(captor.capture());
         assertThat(captor.getValue().getDatabaseName()).isNull();
+    }
+
+    @Test
+    @DisplayName("등록 — publicHost는 trim 정규화해 저장하고 응답에 내려간다(빈 칸→null = host 노출)")
+    void createNormalizesPublicHost() {
+        given(instanceRepository.save(any())).willAnswer(inv -> {
+            ManagedInstance stored = inv.getArgument(0);
+            ReflectionTestUtils.setField(stored, "id", 12L);
+            return stored;
+        });
+
+        ManagedInstanceResponse response = instanceService.create(2L, new CreateManagedInstanceRequest(
+                "Academy PG", "postgresql", "s3.java21.net", " db.crowfoot.java21.net ", 8000, "crowfoot",
+                "crowfoot", "crowfoot123!", null));
+
+        ArgumentCaptor<ManagedInstance> captor = ArgumentCaptor.forClass(ManagedInstance.class);
+        verify(instanceRepository).save(captor.capture());
+        assertThat(captor.getValue().getPublicHost()).isEqualTo("db.crowfoot.java21.net");
+        assertThat(response.publicHost()).isEqualTo("db.crowfoot.java21.net");
+
+        // 빈 칸은 null로 정규화 — 접속 host를 그대로 노출(폴백)
+        instanceService.create(2L, new CreateManagedInstanceRequest(
+                "Academy PG", "postgresql", "s3.java21.net", "  ", 8000, "crowfoot",
+                "crowfoot", "crowfoot123!", null));
+        ArgumentCaptor<ManagedInstance> blankCaptor = ArgumentCaptor.forClass(ManagedInstance.class);
+        verify(instanceRepository, times(2)).save(blankCaptor.capture());
+        assertThat(blankCaptor.getValue().getPublicHost()).isNull();
     }
 
     @Test
@@ -145,7 +173,7 @@ class ManagedInstanceServiceTest {
         });
 
         ManagedInstanceResponse response = instanceService.create(2L, new CreateManagedInstanceRequest(
-                "Academy PG", "postgresql", "s3.java21.net", 8000, "crowfoot",
+                "Academy PG", "postgresql", "s3.java21.net", null, 8000, "crowfoot",
                 "crowfoot", "crowfoot123!", null));
 
         verify(provisioner).verify("s3.java21.net", 8000, "crowfoot", "crowfoot", "crowfoot123!");
@@ -166,7 +194,7 @@ class ManagedInstanceServiceTest {
                 .given(provisioner).verify(anyString(), anyInt(), anyString(), anyString(), anyString());
 
         assertThatThrownBy(() -> instanceService.create(2L, new CreateManagedInstanceRequest(
-                "깨진 자격", "postgresql", "s3.java21.net", 8000, "crowfoot",
+                "깨진 자격", "postgresql", "s3.java21.net", null, 8000, "crowfoot",
                 "crowfoot", "wrong", null)))
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.MANAGED_INSTANCE_UNREACHABLE);
@@ -180,7 +208,7 @@ class ManagedInstanceServiceTest {
         given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
 
         instanceService.update(2L, 1L, new UpdateManagedInstanceRequest(
-                null, "s3.java21.net", 5432, null, null, null, null));
+                null, "s3.java21.net", null, 5432, null, null, null, null));
 
         // host·port가 바뀌었으니 기존 password(crowfoot123!)로 된 새 조합 검증
         verify(provisioner).verify("s3.java21.net", 5432, "crowfoot", "crowfoot", "crowfoot123!");
@@ -193,11 +221,46 @@ class ManagedInstanceServiceTest {
         given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
 
         instanceService.update(2L, 1L, new UpdateManagedInstanceRequest(
-                "새 이름", null, null, null, null, null, false));
+                "새 이름", null, null, null, null, null, null, false));
 
         verify(provisioner, never()).verify(anyString(), anyInt(), anyString(), anyString(), anyString());
         assertThat(instance.getDisplayName()).isEqualTo("새 이름");
         assertThat(instance.isActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("변경 — publicHost만 바꿀 때는 자격 재검증을 돌리지 않는다(표기 전용)")
+    void updatePublicHostSkipsReverify() {
+        ManagedInstance instance = saved(1L);
+        given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
+
+        ManagedInstanceResponse response = instanceService.update(2L, 1L, new UpdateManagedInstanceRequest(
+                null, null, "db.crowfoot.java21.net", null, null, null, null, null));
+
+        verify(provisioner, never()).verify(anyString(), anyInt(), anyString(), anyString(), anyString());
+        assertThat(instance.getPublicHost()).isEqualTo("db.crowfoot.java21.net");
+        assertThat(response.publicHost()).isEqualTo("db.crowfoot.java21.net");
+        // 접속 host는 그대로 — 노출 주소 변경이 자격에 스며들지 않는다
+        assertThat(instance.getHost()).isEqualTo("s3.java21.net");
+    }
+
+    @Test
+    @DisplayName("변경 — publicHost 빈 칸 전송은 노출 주소를 제거하고(host 폴백) null 전송은 유지한다")
+    void updatePublicHostBlankRemovesNullKeeps() {
+        ManagedInstance instance = saved(1L);
+        instance.setPublicHost("db.crowfoot.java21.net");
+        given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
+
+        // null = 변경 없음
+        instanceService.update(2L, 1L, new UpdateManagedInstanceRequest(
+                null, null, null, null, null, null, null, null));
+        assertThat(instance.getPublicHost()).isEqualTo("db.crowfoot.java21.net");
+
+        // 빈 칸 = 제거(host 폴백)
+        instanceService.update(2L, 1L, new UpdateManagedInstanceRequest(
+                null, null, "  ", null, null, null, null, null));
+        assertThat(instance.getPublicHost()).isNull();
+        verify(provisioner, never()).verify(anyString(), anyInt(), anyString(), anyString(), anyString());
     }
 
     @Test

@@ -17,6 +17,8 @@ public record CreateManagedInstanceRequest(
         @NotBlank @Size(max = 100) String displayName,
         @NotBlank @Size(max = 50) String dbmsType,
         @NotBlank @Size(max = 255) String host,
+        /** 사용자 노출 주소(선택) — 표기 전용이라 접속 검증 대상이 아니다. 빈 칸은 null(= host 노출)로 정규화 */
+        @Size(max = 255) String publicHost,
         @NotNull @Min(1) @Max(65535) Integer port,
         @Size(max = 100) String databaseName,
         @NotBlank @Size(max = 100) String username,

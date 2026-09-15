@@ -38,6 +38,9 @@ public class ManagedInstance {
 
     private String host;
 
+    /** 사용자 노출 주소(선택) — NULL이면 host를 그대로 노출. 표기 전용이라 접속 검증·프로비저닝에 쓰이지 않는다 */
+    private String publicHost;
+
     private int port;
 
     /** 접속 database — PostgreSQL은 필수, MySQL은 발급 시 database를 새로 만들어 NULL */
@@ -58,12 +61,13 @@ public class ManagedInstance {
     @UpdateTimestamp
     private Instant updatedAt;
 
-    public ManagedInstance(String displayName, String dbmsType, String host, int port,
+    public ManagedInstance(String displayName, String dbmsType, String host, String publicHost, int port,
                            String databaseName, String username, byte[] password,
                            boolean isActive, Long createdBy) {
         this.displayName = displayName;
         this.dbmsType = dbmsType;
         this.host = host;
+        this.publicHost = publicHost;
         this.port = port;
         this.databaseName = databaseName;
         this.username = username;

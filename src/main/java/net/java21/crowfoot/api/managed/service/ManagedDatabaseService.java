@@ -164,12 +164,13 @@ public class ManagedDatabaseService {
         try {
             // 커넥션 매핑은 전략이 정한다 — PG: database=인스턴스 것·schemaName=발급 스키마(#130 계약),
             // MySQL: database=스키마가 곧 database라 databaseName=발급 이름·schemaName=null.
-            // 자격은 전부 발급 계정이다(인스턴스 루트는 내주지 않는다)
+            // 자격은 전부 발급 계정이다(인스턴스 루트는 내주지 않는다).
+            // 커넥션 주소는 사용자 노출 주소(publicHost 폴백) — 프로비저닝은 내부 host로 수행했다
             DbConnection connection = connectionRepository.save(new DbConnection(
                     workspaceId,
                     instance.getDisplayName() + " #" + schemaSuffix(schemaName),
                     instance.getDbmsType(),
-                    instance.getHost(),
+                    displayHost(instance),
                     instance.getPort(),
                     provisioner.connectionDatabaseName(instance.getDatabaseName(), instance.getUsername(),
                             schemaName),
@@ -260,7 +261,7 @@ public class ManagedDatabaseService {
                 Long.toString(managed.getId()),
                 instance.getDisplayName(),
                 instance.getDbmsType(),
-                instance.getHost(),
+                displayHost(instance),
                 instance.getPort(),
                 provisioner.connectionDatabaseName(instance.getDatabaseName(), instance.getUsername(),
                         managed.getSchemaName()),
@@ -301,6 +302,12 @@ public class ManagedDatabaseService {
     private static String schemaSuffix(String schemaName) {
         int index = schemaName.lastIndexOf("_d");
         return schemaName.substring(index + 2);
+    }
+
+    /** 사용자 노출 주소 — publicHost가 있으면 그 값, 없으면 접속 host(하위 호환 폴백).
+     *  프로비저닝·철회 등 서버 접속은 항상 내부 host를 쓴다 */
+    private static String displayHost(ManagedInstance instance) {
+        return instance.getPublicHost() != null ? instance.getPublicHost() : instance.getHost();
     }
 
     private ManagedDatabaseResponse toResponse(ManagedDatabase managed) {
