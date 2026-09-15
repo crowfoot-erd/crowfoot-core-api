@@ -5,6 +5,7 @@ import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
+import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
@@ -16,8 +17,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 문서 공유 링크 API (08-core/02-model.md Section 1.10) — 발급·목록·철회(관리, Editor 이상)와
@@ -92,9 +97,7 @@ public class ShareService {
     public PublicShareResponse resolve(String token) {
         ModelShare share = shareRepository.findByShareToken(token)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
-        Instant now = Instant.now();
-        if ((share.getStartsAt() != null && now.isBefore(share.getStartsAt()))
-                || (share.getEndsAt() != null && now.isAfter(share.getEndsAt()))) {
+        if (!isActive(share, Instant.now())) {
             throw new BusinessException(ErrorCode.SHARE_INACTIVE);
         }
         Model model = modelRepository.findById(share.getModelId())
@@ -107,6 +110,48 @@ public class ShareService {
                 model.getContent(),
                 share.getStartsAt(),
                 share.getEndsAt());
+    }
+
+    /**
+     * 공개 갤러리(무인증, 08-core/02-model.md Section 1.10.5) — 현재 공유 중인 문서의 목록.
+     * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개, 문서 갱신순으로 내려준다.
+     * 본문(content, 최대 5MB)은 미포함 — 랜딩 카드는 메타만 보여준다.
+     */
+    @Transactional(readOnly = true)
+    public List<GalleryShareResponse> gallery() {
+        Instant now = Instant.now();
+        Map<Long, ModelShare> latestByModel = new LinkedHashMap<>();
+        for (ModelShare share : shareRepository.findAllByOrderByCreatedAtDescIdDesc()) {
+            if (isActive(share, now)) {
+                latestByModel.putIfAbsent(share.getModelId(), share); // 최근 발급순이라 선두가 그 문서의 최신 링크
+            }
+        }
+        if (latestByModel.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Model> models = modelRepository.findAllById(latestByModel.keySet()).stream()
+                .collect(Collectors.toMap(Model::getId, Function.identity()));
+        return latestByModel.entrySet().stream()
+                .filter(entry -> models.containsKey(entry.getKey())) // 방어 — CASCADE 삭제로 사실상 없는 경우
+                .map(entry -> {
+                    Model model = models.get(entry.getKey());
+                    ModelShare share = entry.getValue();
+                    return new GalleryShareResponse(
+                            share.getShareToken(),
+                            model.getName(),
+                            model.getDescription(),
+                            model.getDatabaseType(),
+                            model.getUpdatedAt(),
+                            share.getCreatedAt());
+                })
+                .sorted(Comparator.comparing(GalleryShareResponse::updatedAt).reversed())
+                .toList();
+    }
+
+    /** 링크 기간 판정 — 시작일 null은 즉시, 종료일 null은 무제한 */
+    private static boolean isActive(ModelShare share, Instant now) {
+        return (share.getStartsAt() == null || !now.isBefore(share.getStartsAt()))
+                && (share.getEndsAt() == null || !now.isAfter(share.getEndsAt()));
     }
 
     private static ModelShareResponse toResponse(ModelShare share) {

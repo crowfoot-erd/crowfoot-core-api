@@ -1,6 +1,7 @@
 package net.java21.crowfoot.api.model.controller;
 
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
+import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
 import net.java21.crowfoot.api.model.service.ShareService;
@@ -114,5 +115,20 @@ class ModelShareControllerWebTest {
         mockMvc.perform(get("/core/shares/nope"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.header.resultCode").value("SHARE_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("갤러리는 X-USER-ID 없이도 200으로 목록 포맷을 내려준다 — 본문 없이 메타만")
+    void galleryIsPublicWithoutUserId() throws Exception {
+        given(shareService.gallery()).willReturn(List.of(new GalleryShareResponse(
+                "Ab3xYz0123456789QrStUv", "주문 ERD", "설명", "postgresql",
+                Instant.parse("2026-09-16T09:00:00Z"), Instant.parse("2026-09-15T07:30:00Z"))));
+
+        mockMvc.perform(get("/core/shares"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.responses[0].shareToken").value("Ab3xYz0123456789QrStUv"))
+                .andExpect(jsonPath("$.responses[0].modelName").value("주문 ERD"))
+                .andExpect(jsonPath("$.responses[0].content").doesNotExist())
+                .andExpect(jsonPath("$.totalCount").value(1));
     }
 }

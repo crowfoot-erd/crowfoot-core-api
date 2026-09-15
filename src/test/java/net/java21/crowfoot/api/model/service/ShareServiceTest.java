@@ -4,6 +4,7 @@ import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
+import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
@@ -36,7 +37,8 @@ import static org.mockito.Mockito.never;
 
 /**
  * 문서 공유 링크 API 단위 테스트 (08-core/02-model.md Section 1.10) —
- * 발급(기간 검증·토큰 생성)·목록·철회·공개 조회(기간 밖 410·토큰 없음 404)를 검증한다.
+ * 발급(기간 검증·토큰 생성)·목록·철회·공개 조회(기간 밖 410·토큰 없음 404)·
+ * 공개 갤러리(활성만·문서당 최근 링크 1개·갱신순)를 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class ShareServiceTest {
@@ -187,5 +189,57 @@ class ShareServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.SHARE_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("갤러리는 활성 링크만, 문서당 최근 링크 1개씩, 문서 갱신순으로 메타를 내려준다")
+    void galleryListsActiveSharesDedupedByModel() {
+        // given — 최근 발급순: 회원 ERD 최신 링크 → 주문 ERD 링크 → 회원 ERD 옛 링크 → 종료된 링크 → 시작 전 링크
+        given(shareRepository.findAllByOrderByCreatedAtDescIdDesc()).willReturn(List.of(
+                share(502L, "tokB2", null, null, "2026-09-15T10:00:00Z", 12L),
+                share(501L, "tokA", null, null, "2026-09-14T10:00:00Z", 11L),
+                share(502L, "tokB1", PAST, FUTURE, "2026-09-13T10:00:00Z", 10L),
+                share(503L, "tokC", PAST, PAST, "2026-09-12T10:00:00Z", 9L),
+                share(504L, "tokD", FUTURE, null, "2026-09-11T10:00:00Z", 8L)));
+        given(modelRepository.findAllById(any())).willReturn(List.of(
+                model(501L, "주문 ERD", "2026-09-16T09:00:00Z"),
+                model(502L, "회원 ERD", "2026-09-15T09:00:00Z")));
+
+        // when
+        List<GalleryShareResponse> gallery = shareService.gallery();
+
+        // then — 주문 ERD(최근 갱신) 먼저, 회원 ERD는 최신 링크 토큰만, 종료·예약 링크 문서는 없다
+        assertThat(gallery).hasSize(2);
+        assertThat(gallery.get(0).modelName()).isEqualTo("주문 ERD");
+        assertThat(gallery.get(0).shareToken()).isEqualTo("tokA");
+        assertThat(gallery.get(0).sharedAt()).isEqualTo(Instant.parse("2026-09-14T10:00:00Z"));
+        assertThat(gallery.get(0).updatedAt()).isEqualTo(Instant.parse("2026-09-16T09:00:00Z"));
+        assertThat(gallery.get(1).modelName()).isEqualTo("회원 ERD");
+        assertThat(gallery.get(1).shareToken()).isEqualTo("tokB2");
+    }
+
+    @Test
+    @DisplayName("갤러리는 활성 링크가 없으면 빈 목록이고 문서를 조회하지 않는다")
+    void galleryReturnsEmptyWhenNoActiveShare() {
+        given(shareRepository.findAllByOrderByCreatedAtDescIdDesc())
+                .willReturn(List.of(share(503L, "tokC", PAST, PAST, "2026-09-12T10:00:00Z", 9L)));
+
+        assertThat(shareService.gallery()).isEmpty();
+        then(modelRepository).shouldHaveNoInteractions();
+    }
+
+    private static ModelShare share(long modelId, String token, Instant startsAt, Instant endsAt,
+                                    String createdAt, long id) {
+        ModelShare share = new ModelShare(modelId, token, startsAt, endsAt, 7L);
+        ReflectionTestUtils.setField(share, "id", id);
+        ReflectionTestUtils.setField(share, "createdAt", Instant.parse(createdAt));
+        return share;
+    }
+
+    private static Model model(long id, String name, String updatedAt) {
+        Model model = new Model(77L, name, "설명", "postgresql", "{}", 7L);
+        ReflectionTestUtils.setField(model, "id", id);
+        ReflectionTestUtils.setField(model, "updatedAt", Instant.parse(updatedAt));
+        return model;
     }
 }

@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
+import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
 import net.java21.crowfoot.api.model.service.ShareService;
@@ -24,8 +25,9 @@ import java.util.List;
 
 /**
  * 문서 공유 링크 API (08-core/02-model.md Section 1.10) — 관리 경로 /core/workspaces/**(인증)와
- * 공개 경로 /core/shares/{token}(무인증 — XUserIdFilter 제외, Gateway 화이트리스트).
- * 공개 조회는 토큰을 아는 누구나 문서를 읽기 전용으로 볼 수 있게 한다.
+ * 공개 경로 /core/shares/**(무인증 — XUserIdFilter 제외, Gateway 화이트리스트).
+ * 공개 조회는 토큰을 아는 누구나 문서를 읽기 전용으로 볼 수 있게 하고,
+ * 공개 갤러리 목록은 현재 공유 중인 문서를 랜딩 페이지에 나열한다.
  */
 @RestController
 @RequiredArgsConstructor
@@ -71,5 +73,11 @@ public class ModelShareController {
     @GetMapping("/core/shares/{token}")
     public ApiResponse<PublicShareResponse> resolve(@PathVariable("token") String token) {
         return ApiResponse.success(shareService.resolve(token));
+    }
+
+    /** 공유 갤러리 목록 — 무인증, 현재 공유 중인 문서의 메타(랜딩 페이지 카드) */
+    @GetMapping("/core/shares")
+    public ListApiResponse<GalleryShareResponse> gallery() {
+        return ListApiResponse.of(shareService.gallery());
     }
 }
