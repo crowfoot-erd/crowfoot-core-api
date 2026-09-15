@@ -50,9 +50,16 @@ jobs:
         run: |
           git clone https://x-access-token:${{ secrets.MANIFEST_REPO_TOKEN }}@github.com/crowfoot-erd/crowfoot-manifests.git
           cd crowfoot-manifests
-          sed -i "s|image: ghcr.io/crowfoot-erd/${APP_NAME}:.*|image: ghcr.io/crowfoot-erd/${APP_NAME}:${{ github.sha }}|" apps/${APP_NAME}/deployment.yaml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add apps/${APP_NAME}/deployment.yaml
-          git commit -m "chore: update ${APP_NAME} image to ${{ github.sha }}" || echo "No changes to commit"
-          git push
+          # 여러 리포 CI가 동시에 이 리포에 push — 거부(non-fast-forward)되면 rebase 후 재시도
+          for i in 1 2 3 4 5; do
+            sed -i "s|image: ghcr.io/crowfoot-erd/${APP_NAME}:.*|image: ghcr.io/crowfoot-erd/${APP_NAME}:${{ github.sha }}|" apps/${APP_NAME}/deployment.yaml
+            git add apps/${APP_NAME}/deployment.yaml
+            git commit -m "chore: update ${APP_NAME} image to ${{ github.sha }}" || echo "No changes to commit"
+            if git push; then exit 0; fi
+            echo "::warning::manifest push rejected (concurrent update) — retry $i/5"
+            git pull --rebase
+          done
+          echo "manifest repo update failed after 5 attempts" >&2
+          exit 1
