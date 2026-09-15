@@ -31,3 +31,4 @@ logging:
 
 server:
   port: 8080   # 운영 — 모든 서버 8080
+  shutdown: graceful   # 무중단 롤아웃 — SIGTERM 후 처리 중 요청을 마무리하고 종료 (k8s RollingUpdate)
