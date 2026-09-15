@@ -49,6 +49,10 @@ public enum ErrorCode {
     DUPLICATED_NAME(HttpStatus.CONFLICT, "DUPLICATED_NAME", "이미 존재하는 이름입니다"),
     VERSION_CONFLICT(HttpStatus.CONFLICT, "VERSION_CONFLICT", "다른 클라이언트가 먼저 저장했습니다"),
 
+    // Share (08-core/02-model.md Section 1.10)
+    SHARE_NOT_FOUND(HttpStatus.NOT_FOUND, "SHARE_NOT_FOUND", "공유 링크를 찾을 수 없습니다"),
+    SHARE_INACTIVE(HttpStatus.GONE, "SHARE_INACTIVE", "공유 기간이 아니거나 만료되었습니다"),
+
     // Connection (08-core/06-connection.md Section 3.7)
     CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "CONNECTION_NOT_FOUND", "커넥션을 찾을 수 없습니다"),
     INVALID_DBMS_TYPE(HttpStatus.BAD_REQUEST, "INVALID_DBMS_TYPE", "지원하지 않는 데이터베이스 종류입니다"),

@@ -20,7 +20,7 @@ import java.io.IOException;
  * <p>구현 경로 {@code /core/**}는 Gateway가 주입한 X-USER-ID(sub 문자열)를 요구한다 —
  * 헤더 없는 요청은 Gateway를 거치지 않은 요청이므로 401로 거부한다(공통 실패 포맷).
  * 제외 경로: {@code /internal/**}(내부망 — 인증 서버 호출), {@code /core/providers}(공개),
- * {@code /actuator/**}(헬스체크).
+ * {@code /core/shares/**}(공유 문서 공개 조회 — 토큰이 자격), {@code /actuator/**}(헬스체크).
  */
 @Component
 @RequiredArgsConstructor
@@ -35,6 +35,7 @@ public class XUserIdFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return !path.startsWith("/core")                       // /core/** 외에는 인증 대상 아님
                 || "/core/providers".equals(path)              // 활성 제공자 목록 — 공개
+                || path.startsWith("/core/shares")             // 공유 문서 공개 조회 — 토큰이 자격
                 || "OPTIONS".equalsIgnoreCase(request.getMethod());
     }
 
