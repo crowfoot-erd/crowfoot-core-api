@@ -40,7 +40,9 @@ public class PostgresIntrospector implements SchemaIntrospector {
             Map.entry("date", "DATE"),
             Map.entry("time", "TIME"),
             Map.entry("timetz", "TIME"),
-            Map.entry("timestamp", "TIMESTAMP"),
+            // timestamp(타임존 없음)↔DATETIME, timestamptz(UTC 순간)↔TIMESTAMP —
+            // 정방향 매핑(DATETIME→TIMESTAMP, TIMESTAMP→TIMESTAMPTZ)과 왕복이 일치한다
+            Map.entry("timestamp", "DATETIME"),
             Map.entry("timestamptz", "TIMESTAMP"),
             Map.entry("json", "JSON"),
             Map.entry("jsonb", "JSON"),

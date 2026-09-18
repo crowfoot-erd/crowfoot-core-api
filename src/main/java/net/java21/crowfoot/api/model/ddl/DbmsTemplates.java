@@ -25,7 +25,7 @@ public final class DbmsTemplates {
     private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR");
 
     /** 정밀도+스케일(p,s) 지정 가능 타입 */
-    private static final Set<String> PRECISION_TYPES = Set.of("DECIMAL");
+    private static final Set<String> PRECISION_TYPES = Set.of("DECIMAL", "NUMERIC");
 
     private static final List<DbmsTemplate> TEMPLATES = List.of(
             new DbmsTemplate("common", "공용(논리)", Map.of()),
@@ -34,13 +34,18 @@ public final class DbmsTemplates {
                     "UUID", "CHAR(36)")),
             new DbmsTemplate("postgres", "PostgreSQL", Map.of(
                     "INT", "INTEGER",
+                    "TINYINT", "SMALLINT",
                     "DATETIME", "TIMESTAMP",
+                    "TIMESTAMP", "TIMESTAMPTZ",
                     "DOUBLE", "DOUBLE PRECISION",
                     "FLOAT", "REAL",
                     "BLOB", "BYTEA")),
             new DbmsTemplate("oracle", "Oracle", Map.ofEntries(
                     Map.entry("BIGINT", "NUMBER(19)"),
                     Map.entry("SMALLINT", "NUMBER(5)"),
+                    Map.entry("TINYINT", "NUMBER(3)"),
+                    Map.entry("DECIMAL", "NUMBER"),
+                    Map.entry("NUMERIC", "NUMBER"),
                     Map.entry("VARCHAR", "VARCHAR2"),
                     Map.entry("TEXT", "CLOB"),
                     Map.entry("BOOLEAN", "NUMBER(1)"),

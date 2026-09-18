@@ -111,6 +111,23 @@ class DdlGeneratorTest {
     }
 
     @Test
+    @DisplayName("타입 보강 — NUMERIC(p,s)·PG TINYINT→SMALLINT·TIMESTAMP→TIMESTAMPTZ·Oracle NUMERIC→NUMBER")
+    void typeAuditAdditions() {
+        String modified = SAMPLE.replace(
+                "{\"id\": \"c-active\", \"physicalName\": \"active\", \"dataType\": \"BOOLEAN\", \"nullable\": false}",
+                "{\"id\": \"c-active\", \"physicalName\": \"active\", \"dataType\": \"BOOLEAN\", \"nullable\": false},\n"
+                        + "                      {\"id\": \"c-ratio\", \"physicalName\": \"ratio\", \"dataType\": \"NUMERIC\", \"precision\": 8, \"scale\": 3},\n"
+                        + "                      {\"id\": \"c-sort\", \"physicalName\": \"sort_order\", \"dataType\": \"TINYINT\"},\n"
+                        + "                      {\"id\": \"c-at\", \"physicalName\": \"created_at\", \"dataType\": \"TIMESTAMP\"}");
+        assertThat(generate(modified, "postgres", null).sql())
+                .contains("ratio NUMERIC(8,3)") // NUMERIC도 DECIMAL과 같은 (p,s) 부착
+                .contains("sort_order SMALLINT") // PG에 tinyint는 없다
+                .contains("created_at TIMESTAMPTZ"); // UTC 순간 타입 — DATETIME(TIMESTAMP)과 라벨이 갈라진다
+        assertThat(generate(modified, "oracle", null).sql())
+                .contains("ratio NUMBER(8,3)"); // Oracle 숫자 계열은 NUMBER로 모은다
+    }
+
+    @Test
     @DisplayName("DB COMMENT의 원천은 논리명 — comment 필드는 문서 설명이라 DDL에 나가지 않는다")
     void commentSourceIsLogicalName() {
         String modified = SAMPLE.replace(
