@@ -89,4 +89,31 @@ class CommunityPostQueryRepositoryTest {
         assertThat(rows.get(2).title()).isEqualTo("v1.4.0 릴리스 노트");
         assertThat(rows).allSatisfy(row -> assertThat(row.authorName()).isEqualTo("marco"));
     }
+
+    @Test
+    @DisplayName("게시판별 최근글 — RELEASE_NOTE만 최신순(공개 조회, DB 단계 필터)")
+    void recentByBoardFiltersReleaseNotesOnly() {
+        List<PostRow> rows = communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, 20);
+
+        assertThat(rows).extracting(PostRow::title)
+                .containsExactly("v1.4.0 릴리스 노트", "v1.3.0 릴리스 노트");
+        assertThat(rows).allSatisfy(row -> assertThat(row.board()).isEqualTo(CommunityBoard.RELEASE_NOTE));
+        assertThat(rows.get(0).authorName()).isEqualTo("marco");
+    }
+
+    @Test
+    @DisplayName("게시판별 최근글 — FEEDBACK 보드로는 FEEDBACK만")
+    void recentByBoardFiltersFeedbackOnly() {
+        assertThat(communityPostQueryRepository.recentByBoard(CommunityBoard.FEEDBACK, 20))
+                .extracting(PostRow::board)
+                .containsOnly(CommunityBoard.FEEDBACK);
+    }
+
+    @Test
+    @DisplayName("게시판별 최근글 — limit이 행 수보다 작으면 최신 limit건만")
+    void recentByBoardAppliesLimit() {
+        assertThat(communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, 1))
+                .extracting(PostRow::title)
+                .containsExactly("v1.4.0 릴리스 노트");
+    }
 }

@@ -66,6 +66,21 @@ public class CommunityPostQueryRepository {
                 .fetch();
     }
 
+    /** 게시판별 최근글 — 릴리스 노트 공개 조회(Section 3.11)가 DB 단계에서 RELEASE_NOTE만 걸러내도록 */
+    public List<PostRow> recentByBoard(CommunityBoard board, int limit) {
+        QCommunityPost post = QCommunityPost.communityPost;
+        QUser author = QUser.user;
+        return query
+                .select(Projections.constructor(PostRow.class, post.id, post.board, post.title,
+                        post.createdBy, author.name, post.createdAt, post.updatedAt))
+                .from(post)
+                .leftJoin(author).on(post.createdBy.eq(author.id))
+                .where(boardEq(post, board))
+                .orderBy(post.id.desc())
+                .limit(limit)
+                .fetch();
+    }
+
     private static BooleanExpression boardEq(QCommunityPost post, CommunityBoard board) {
         return board == null ? null : post.board.eq(board);
     }

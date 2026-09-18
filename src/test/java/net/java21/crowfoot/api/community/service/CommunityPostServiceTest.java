@@ -8,6 +8,7 @@ import net.java21.crowfoot.api.community.domain.CommunityBoard;
 import net.java21.crowfoot.api.community.domain.CommunityPost;
 import net.java21.crowfoot.api.community.dto.CommunityPostDetailResponse;
 import net.java21.crowfoot.api.community.dto.CommunityPostSummaryResponse;
+import net.java21.crowfoot.api.community.dto.CommunityRecentPostResponse;
 import net.java21.crowfoot.api.community.dto.CreateCommunityPostRequest;
 import net.java21.crowfoot.api.community.dto.UpdateCommunityPostRequest;
 import net.java21.crowfoot.api.community.repository.CommunityCommentQueryRepository;
@@ -34,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -220,6 +222,60 @@ class CommunityPostServiceTest {
         // then
         then(communityPostQueryRepository).should().recent(5);
         then(communityPostQueryRepository).should().recent(20);
+    }
+
+    @Test
+    @DisplayName("공개 최근 릴리스 노트는 RELEASE_NOTE 보드로 조회하고 limit을 조정한다")
+    void recentReleaseNotesQueriesReleaseNoteBoardWithClampedLimit() {
+        // given
+        given(communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, 3)).willReturn(List.of(
+                new PostRow(9L, CommunityBoard.RELEASE_NOTE, "v1.08", 1L, "관리자",
+                        Instant.parse("2026-09-18T00:00:00Z"), Instant.parse("2026-09-18T00:00:00Z"))));
+        given(communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, 20)).willReturn(List.of());
+        given(communityCommentQueryRepository.countByPostIds(anyList())).willReturn(Map.of());
+
+        // when
+        ListApiResponse<CommunityRecentPostResponse> clamped = communityPostService.recentReleaseNotes(99);
+        ListApiResponse<CommunityRecentPostResponse> three = communityPostService.recentReleaseNotes(3);
+
+        // then
+        then(communityPostQueryRepository).should().recentByBoard(CommunityBoard.RELEASE_NOTE, 20); // 99 → 20
+        assertThat(three.responses()).hasSize(1);
+        assertThat(three.responses().get(0).board()).isEqualTo("RELEASE_NOTE");
+        assertThat(three.responses().get(0).title()).isEqualTo("v1.08");
+        assertThat(clamped.responses()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("공개 상세는 RELEASE_NOTE 글이면 마크다운 원문을 내려준다")
+    void releaseNoteDetailReturnsReleaseNote() {
+        // given
+        CommunityPost post = new CommunityPost(CommunityBoard.RELEASE_NOTE, "v1.08", "## 주요 기능", 1L);
+        post.setId(9L);
+        given(communityPostRepository.findById(9L)).willReturn(Optional.of(post));
+        given(userRepository.findById(1L)).willReturn(Optional.of(new User("admin@x.com", "관리자", true)));
+
+        // when
+        CommunityPostDetailResponse response = communityPostService.releaseNoteDetail(9L);
+
+        // then
+        assertThat(response.postId()).isEqualTo("9");
+        assertThat(response.board()).isEqualTo("RELEASE_NOTE");
+        assertThat(response.content()).isEqualTo("## 주요 기능");
+    }
+
+    @Test
+    @DisplayName("공개 상세는 다른 게시판(FEEDBACK)의 post-id면 404 — 존재 은닉")
+    void releaseNoteDetailHidesFeedbackPost() {
+        // given
+        CommunityPost post = new CommunityPost(CommunityBoard.FEEDBACK, "제안", "본문", 7L);
+        post.setId(802L);
+        given(communityPostRepository.findById(802L)).willReturn(Optional.of(post));
+
+        // when & then
+        assertThatThrownBy(() -> communityPostService.releaseNoteDetail(802L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.COMMUNITY_POST_NOT_FOUND));
     }
 
     @Test

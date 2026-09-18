@@ -74,20 +74,32 @@ public class CommunityPostService {
     /** 최근글 — 게시판 무관 최신순(대시보드 통합 위젯) */
     @Transactional(readOnly = true)
     public ListApiResponse<CommunityRecentPostResponse> recent(Integer limit) {
-        int resolved = (limit == null || limit < 1) ? DEFAULT_RECENT_LIMIT : Math.min(limit, MAX_RECENT_LIMIT);
-        List<PostRow> rows = communityPostQueryRepository.recent(resolved);
-        Map<Long, Long> commentCounts = communityCommentQueryRepository.countByPostIds(idsOf(rows));
-        List<CommunityRecentPostResponse> responses = rows.stream()
-                .map(row -> new CommunityRecentPostResponse(row.id().toString(), row.board().name(), row.title(),
-                        toAuthor(row), commentCounts.getOrDefault(row.id(), 0L), row.createdAt()))
-                .toList();
-        return ListApiResponse.of(responses);
+        List<PostRow> rows = communityPostQueryRepository.recent(resolveRecentLimit(limit));
+        return toRecentResponses(rows);
+    }
+
+    /** 공개 최근 릴리스 노트 — RELEASE_NOTE만 최신순(랜딩 위젯, 무인증) */
+    @Transactional(readOnly = true)
+    public ListApiResponse<CommunityRecentPostResponse> recentReleaseNotes(Integer limit) {
+        List<PostRow> rows = communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE,
+                resolveRecentLimit(limit));
+        return toRecentResponses(rows);
     }
 
     /** 상세 — 마크다운 원문 포함 */
     @Transactional(readOnly = true)
     public CommunityPostDetailResponse detail(long postId) {
         CommunityPost post = requirePost(postId);
+        return toDetail(post);
+    }
+
+    /** 공개 릴리스 노트 상세 — RELEASE_NOTE가 아니면 404(존재 은닉, 무인증) */
+    @Transactional(readOnly = true)
+    public CommunityPostDetailResponse releaseNoteDetail(long postId) {
+        CommunityPost post = requirePost(postId);
+        if (post.getBoard() != CommunityBoard.RELEASE_NOTE) {
+            throw new BusinessException(ErrorCode.COMMUNITY_POST_NOT_FOUND);
+        }
         return toDetail(post);
     }
 
@@ -141,6 +153,20 @@ public class CommunityPostService {
 
     private static List<Long> idsOf(List<PostRow> rows) {
         return rows.stream().map(PostRow::id).toList();
+    }
+
+    /** 최근글 limit 정규화 — null·1 미만이면 기본값, 상한 20 */
+    private static int resolveRecentLimit(Integer limit) {
+        return (limit == null || limit < 1) ? DEFAULT_RECENT_LIMIT : Math.min(limit, MAX_RECENT_LIMIT);
+    }
+
+    private ListApiResponse<CommunityRecentPostResponse> toRecentResponses(List<PostRow> rows) {
+        Map<Long, Long> commentCounts = communityCommentQueryRepository.countByPostIds(idsOf(rows));
+        List<CommunityRecentPostResponse> responses = rows.stream()
+                .map(row -> new CommunityRecentPostResponse(row.id().toString(), row.board().name(), row.title(),
+                        toAuthor(row), commentCounts.getOrDefault(row.id(), 0L), row.createdAt()))
+                .toList();
+        return ListApiResponse.of(responses);
     }
 
     private CommunityPostSummaryResponse toSummary(PostRow row, long commentCount) {
