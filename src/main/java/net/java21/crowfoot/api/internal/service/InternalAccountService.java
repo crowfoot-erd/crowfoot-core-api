@@ -37,12 +37,18 @@ public class InternalAccountService {
     @Transactional
     public GetOrCreateUserResponse getOrCreate(GetOrCreateUserRequest request) {
         return userIdentityRepository.findByProviderAndProviderUserId(request.provider(), request.providerUserId())
-                .map(identity -> existing(identity.getUserId()))
+                .map(identity -> existing(identity, request))
                 .orElseGet(() -> provision(request));
     }
 
-    private GetOrCreateUserResponse existing(long userId) {
-        User user = userRepository.findById(userId)
+    private GetOrCreateUserResponse existing(UserIdentity identity, GetOrCreateUserRequest request) {
+        // 핸들 갱신 — GitHub login은 숫자 ID로 도출 불가라 매 로그인 때 최신값을 저장한다
+        // (기존 사용자의 provider_username은 여기서 채워진다. blank 전달은 기존값 유지)
+        String handle = request.providerUsername();
+        if (handle != null && !handle.isBlank() && !handle.equals(identity.getProviderUsername())) {
+            identity.setProviderUsername(handle);
+        }
+        User user = userRepository.findById(identity.getUserId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
         if (user.isWithdrawn()) {
             // 탈퇴한 계정 — 인증 서버는 302 ?error=USER_WITHDRAWN로 로그인을 거부한다
@@ -57,7 +63,7 @@ public class InternalAccountService {
 
         User user = userRepository.save(new User(request.email(), request.name(), bootstrapAdmin));
         userIdentityRepository.save(new UserIdentity(user.getId(), request.provider(),
-                request.providerUserId(), request.email(), request.name()));
+                request.providerUserId(), request.providerUsername(), request.email(), request.name()));
 
         Workspace workspace = workspaceRepository.save(new Workspace(
                 WorkspaceConstants.DEFAULT_WORKSPACE_NAME, null, user.getId(), true, user.getId()));

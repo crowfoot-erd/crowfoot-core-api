@@ -53,14 +53,14 @@ class InternalAccountServiceTest {
     private InternalAccountService internalAccountService;
 
     private final GetOrCreateUserRequest githubRequest =
-            new GetOrCreateUserRequest("github", "gh-1", "alice@x.com", "앨리스");
+            new GetOrCreateUserRequest("github", "gh-1", "octocat", "alice@x.com", "앨리스");
 
     @Test
     @DisplayName("기존 연동이면 created=false로 사용자를 돌려준다 — INSERT 없음")
     void getOrCreateReturnsExistingUser() {
         // given
         given(userIdentityRepository.findByProviderAndProviderUserId("github", "gh-1"))
-                .willReturn(Optional.of(new UserIdentity(7L, "github", "gh-1", "alice@x.com", "앨리스")));
+                .willReturn(Optional.of(new UserIdentity(7L, "github", "gh-1", "octocat", "alice@x.com", "앨리스")));
         given(userRepository.findById(7L)).willReturn(Optional.of(user(true)));
 
         // when
@@ -74,13 +74,45 @@ class InternalAccountServiceTest {
     }
 
     @Test
+    @DisplayName("기존 사용자 로그인 때 GitHub 핸들을 갱신 저장한다 — 기존 사용자의 provider_username은 여기서 채워진다")
+    void getOrCreateRefreshesHandleOnExistingLogin() {
+        // given — 핸들 없던 기존 연동에 로그인이 핸들을 실어 온다
+        UserIdentity identity = new UserIdentity(7L, "github", "gh-1", null, "alice@x.com", "앨리스");
+        given(userIdentityRepository.findByProviderAndProviderUserId("github", "gh-1"))
+                .willReturn(Optional.of(identity));
+        given(userRepository.findById(7L)).willReturn(Optional.of(user(true)));
+
+        // when
+        internalAccountService.getOrCreate(githubRequest);
+
+        // then — dirty checking으로 갱신(별도 save 없음)
+        assertThat(identity.getProviderUsername()).isEqualTo("octocat");
+    }
+
+    @Test
+    @DisplayName("요청이 핸들을 안 실으면(다른 제공자 등) 기존 핸들을 유지한다")
+    void getOrCreateKeepsHandleWhenRequestOmitsIt() {
+        // given — 핸들 있는 기존 연동, 요청은 핸들 없음(Google 등)
+        UserIdentity identity = new UserIdentity(7L, "github", "gh-1", "octocat", "alice@x.com", "앨리스");
+        given(userIdentityRepository.findByProviderAndProviderUserId("github", "gh-1"))
+                .willReturn(Optional.of(identity));
+        given(userRepository.findById(7L)).willReturn(Optional.of(user(true)));
+
+        // when
+        internalAccountService.getOrCreate(new GetOrCreateUserRequest("github", "gh-1", null, "alice@x.com", "앨리스"));
+
+        // then
+        assertThat(identity.getProviderUsername()).isEqualTo("octocat");
+    }
+
+    @Test
     @DisplayName("탈퇴한 계정의 재로그인은 409 USER_WITHDRAWN")
     void getOrCreateRejectsWithdrawnUser() {
         // given
         User withdrawn = user(false);
         withdrawn.setWithdrawnAt(Instant.parse("2026-09-01T00:00:00Z"));
         given(userIdentityRepository.findByProviderAndProviderUserId("github", "gh-1"))
-                .willReturn(Optional.of(new UserIdentity(7L, "github", "gh-1", "alice@x.com", "앨리스")));
+                .willReturn(Optional.of(new UserIdentity(7L, "github", "gh-1", "octocat", "alice@x.com", "앨리스")));
         given(userRepository.findById(7L)).willReturn(Optional.of(withdrawn));
 
         // when & then
@@ -122,6 +154,10 @@ class InternalAccountServiceTest {
                 && m.getGranteeType() == GranteeType.USER
                 && m.getUserId() == 7L
                 && m.getRole() == RoleCode.OWNER));
+        // 연동 INSERT에 핸들이 함께 저장된다
+        verify(userIdentityRepository).save(argThat(id -> id.getUserId() == 7L
+                && "gh-1".equals(id.getProviderUserId())
+                && "octocat".equals(id.getProviderUsername())));
     }
 
     @Test

@@ -2,6 +2,7 @@ package net.java21.crowfoot.api.account.service;
 
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.domain.User;
+import net.java21.crowfoot.api.account.domain.UserIdentity;
 import net.java21.crowfoot.api.account.dto.MeResponse;
 import net.java21.crowfoot.api.account.repository.UserIdentityQueryRepository;
 import net.java21.crowfoot.api.account.repository.UserRepository;
@@ -42,11 +43,33 @@ public class AccountService {
     public MeResponse me(long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
-        List<String> providers = userIdentityQueryRepository.findByUserId(userId).stream()
+        List<UserIdentity> identities = userIdentityQueryRepository.findByUserId(userId);
+        List<String> providers = identities.stream()
                 .map(identity -> identity.getProvider())
                 .toList();
         return new MeResponse(Long.toString(user.getId()), user.getEmail(), user.getName(),
-                providers, user.isAdmin(), user.getCreatedAt());
+                githubAvatarUrl(identities), githubLogin(identities), providers, user.isAdmin(), user.getCreatedAt());
+    }
+
+    /** GitHub 프로필 사진 URL — 저장 없이 identity의 제공자 사용자 ID(숫자)에서 도출한다.
+     *  GitHub 아바타 CDN은 계정 ID로 이미지를 serve하며(avatars.githubusercontent.com/u/{id}) 항상
+     *  최신 프로필 사진을 돌려준다. Google은 공개된 ID→사진 규칙이 없어 null(웹 이니셜 폴백). */
+    private String githubAvatarUrl(List<UserIdentity> identities) {
+        return identities.stream()
+                .filter(identity -> "github".equals(identity.getProvider()))
+                .findFirst()
+                .map(identity -> "https://avatars.githubusercontent.com/u/" + identity.getProviderUserId() + "?v=4")
+                .orElse(null);
+    }
+
+    /** GitHub 핸들(login) — avatarUrl과 달리 숫자 ID에서 도출 불가라 로그인 시 저장된 값을 돌려준다.
+     *  Google은 핸들이 없어 null(웹은 @표시 생략). */
+    private String githubLogin(List<UserIdentity> identities) {
+        return identities.stream()
+                .filter(identity -> "github".equals(identity.getProvider()))
+                .findFirst()
+                .map(UserIdentity::getProviderUsername)
+                .orElse(null);
     }
 
     /** 회원 탈퇴(soft) — 204 또는 409 WITHDRAW_BLOCKED. 데이터는 전부 보존한다. */

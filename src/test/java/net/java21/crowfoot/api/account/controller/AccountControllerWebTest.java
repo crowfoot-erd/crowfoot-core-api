@@ -35,7 +35,8 @@ class AccountControllerWebTest {
     void meWithUserIdHeader() throws Exception {
         // given
         given(accountService.me(7L)).willReturn(new MeResponse(
-                "7", "alice@x.com", "앨리스", List.of("github"), false, Instant.parse("2026-09-01T00:00:00Z")));
+                "7", "alice@x.com", "앨리스", "https://avatars.githubusercontent.com/u/77?v=4", "octocat",
+                List.of("github"), false, Instant.parse("2026-09-01T00:00:00Z")));
 
         // when & then
         mockMvc.perform(get("/core/accounts/me").header("X-USER-ID", "7"))
@@ -43,6 +44,8 @@ class AccountControllerWebTest {
                 .andExpect(jsonPath("$.header.isSuccessful").value(true))
                 .andExpect(jsonPath("$.header.resultCode").value("SUCCESS"))
                 .andExpect(jsonPath("$.response.userId").value("7"))
+                .andExpect(jsonPath("$.response.avatarUrl").value("https://avatars.githubusercontent.com/u/77?v=4"))
+                .andExpect(jsonPath("$.response.githubLogin").value("octocat"))
                 .andExpect(jsonPath("$.response.providers[0]").value("github"));
     }
 

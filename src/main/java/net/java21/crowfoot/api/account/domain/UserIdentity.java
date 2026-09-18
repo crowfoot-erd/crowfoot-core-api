@@ -39,6 +39,9 @@ public class UserIdentity {
 
     private String providerUserId;
 
+    /** 제공자 핸들(GitHub login) — 숫자 ID로는 도출 불가라 로그인 시마다 갱신해 저장. Google은 null */
+    private String providerUsername;
+
     private String email;
 
     private String name;
@@ -46,10 +49,12 @@ public class UserIdentity {
     @CreationTimestamp
     private Instant linkedAt;
 
-    public UserIdentity(Long userId, String provider, String providerUserId, String email, String name) {
+    public UserIdentity(Long userId, String provider, String providerUserId, String providerUsername,
+                        String email, String name) {
         this.userId = userId;
         this.provider = provider;
         this.providerUserId = providerUserId;
+        this.providerUsername = providerUsername;
         this.email = email;
         this.name = name;
     }

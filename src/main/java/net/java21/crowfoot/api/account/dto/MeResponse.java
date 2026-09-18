@@ -10,6 +10,8 @@ public record MeResponse(
         String userId,
         String email,
         String name,
+        String avatarUrl,
+        String githubLogin,
         List<String> providers,
         boolean admin,
         Instant createdAt

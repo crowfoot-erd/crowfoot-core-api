@@ -61,8 +61,8 @@ class AdminUserServiceTest {
         given(userQueryRepository.countAdminUsers("철")).willReturn(2L);
         given(userQueryRepository.searchAdminUsers("철", 0L, 20)).willReturn(List.of(kim, old));
         given(userIdentityQueryRepository.findByUserIdIn(List.of(3L, 4L))).willReturn(List.of(
-                new UserIdentity(3L, "github", "gh-1", "kim@x.com", "김철수"),
-                new UserIdentity(3L, "google", "g-1", "kim@x.com", "김철수")));
+                new UserIdentity(3L, "github", "gh-1", null, "kim@x.com", "김철수"),
+                new UserIdentity(3L, "google", "g-1", null, "kim@x.com", "김철수")));
 
         // when
         ListApiResponse<AdminUserResponse> result = adminUserService.users(2L, "철", 1, 20);
@@ -135,7 +135,7 @@ class AdminUserServiceTest {
         user.setId(3L);
         given(userRepository.findById(3L)).willReturn(Optional.of(user));
         given(userIdentityQueryRepository.findByUserId(3L)).willReturn(List.of(
-                new UserIdentity(3L, "github", "gh-1", "kim@x.com", "김철수")));
+                new UserIdentity(3L, "github", "gh-1", null, "kim@x.com", "김철수")));
 
         // when
         AdminUserResponse response = adminUserService.user(2L, "3");

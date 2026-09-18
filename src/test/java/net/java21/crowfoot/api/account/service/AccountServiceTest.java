@@ -71,8 +71,8 @@ class AccountServiceTest {
         // given
         given(userRepository.findById(7L)).willReturn(Optional.of(activeUser()));
         given(userIdentityQueryRepository.findByUserId(7L)).willReturn(List.of(
-                new UserIdentity(7L, "github", "gh-1", "alice@x.com", "앨리스"),
-                new UserIdentity(7L, "kakao", "k-1", "alice@x.com", "앨리스")));
+                new UserIdentity(7L, "github", "gh-1", "octocat", "alice@x.com", "앨리스"),
+                new UserIdentity(7L, "kakao", "k-1", null, "alice@x.com", "앨리스")));
 
         // when
         MeResponse response = accountService.me(7L);
@@ -81,6 +81,66 @@ class AccountServiceTest {
         assertThat(response.userId()).isEqualTo("7");
         assertThat(response.providers()).containsExactly("github", "kakao");
         assertThat(response.admin()).isTrue();
+    }
+
+    @Test
+    @DisplayName("GitHub 연동 사용자는 identity의 제공자 ID에서 아바타 URL을 도출한다(저장 없음)")
+    void meDerivesAvatarUrlFromGithubIdentity() {
+        // given
+        given(userRepository.findById(7L)).willReturn(Optional.of(activeUser()));
+        given(userIdentityQueryRepository.findByUserId(7L)).willReturn(List.of(
+                new UserIdentity(7L, "github", "77", "octocat", "alice@x.com", "앨리스")));
+
+        // when
+        MeResponse response = accountService.me(7L);
+
+        // then — GitHub 아바타 CDN은 계정 숫자 ID로 serve한다(avatar_url 실제 형태)
+        assertThat(response.avatarUrl()).isEqualTo("https://avatars.githubusercontent.com/u/77?v=4");
+    }
+
+    @Test
+    @DisplayName("GitHub 연동이 없으면 avatarUrl은 null — 웹은 이니셜로 폴백한다")
+    void meYieldsNullAvatarWithoutGithubIdentity() {
+        // given
+        given(userRepository.findById(7L)).willReturn(Optional.of(activeUser()));
+        given(userIdentityQueryRepository.findByUserId(7L)).willReturn(List.of(
+                new UserIdentity(7L, "google", "g-1", null, "alice@x.com", "앨리스")));
+
+        // when
+        MeResponse response = accountService.me(7L);
+
+        // then
+        assertThat(response.avatarUrl()).isNull();
+    }
+
+    @Test
+    @DisplayName("githubLogin은 로그인 시 저장한 GitHub 핸들을 그대로 돌려준다(도출 아님)")
+    void meReturnsStoredGithubLogin() {
+        // given
+        given(userRepository.findById(7L)).willReturn(Optional.of(activeUser()));
+        given(userIdentityQueryRepository.findByUserId(7L)).willReturn(List.of(
+                new UserIdentity(7L, "github", "77", "octocat", "alice@x.com", "앨리스")));
+
+        // when
+        MeResponse response = accountService.me(7L);
+
+        // then
+        assertThat(response.githubLogin()).isEqualTo("octocat");
+    }
+
+    @Test
+    @DisplayName("GitHub 연동이 없거나 핸들이 비면 githubLogin은 null — 웹은 @표시를 생략한다")
+    void meYieldsNullGithubLoginWithoutHandle() {
+        // given
+        given(userRepository.findById(7L)).willReturn(Optional.of(activeUser()));
+        given(userIdentityQueryRepository.findByUserId(7L)).willReturn(List.of(
+                new UserIdentity(7L, "google", "g-1", null, "alice@x.com", "앨리스")));
+
+        // when
+        MeResponse response = accountService.me(7L);
+
+        // then
+        assertThat(response.githubLogin()).isNull();
     }
 
     @Test
