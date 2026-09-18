@@ -65,7 +65,13 @@ public enum ErrorCode {
     MANAGED_INSTANCE_IN_USE(HttpStatus.CONFLICT, "MANAGED_INSTANCE_IN_USE", "발급이 남아 있는 인스턴스는 삭제할 수 없습니다"),
     MANAGED_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "MANAGED_LIMIT_EXCEEDED", "발급 한도에 도달했습니다"),
     MANAGED_PROVISION_FAILED(HttpStatus.BAD_GATEWAY, "MANAGED_PROVISION_FAILED", "발급 스키마 프로비저닝에 실패했습니다"),
-    MANAGED_DATABASE_NOT_FOUND(HttpStatus.NOT_FOUND, "MANAGED_DATABASE_NOT_FOUND", "매니지드 발급을 찾을 수 없습니다");
+    MANAGED_DATABASE_NOT_FOUND(HttpStatus.NOT_FOUND, "MANAGED_DATABASE_NOT_FOUND", "매니지드 발급을 찾을 수 없습니다"),
+
+    // Community (08-core/08-community.md Section 2)
+    COMMUNITY_POST_NOT_FOUND(HttpStatus.NOT_FOUND, "COMMUNITY_POST_NOT_FOUND", "게시글을 찾을 수 없습니다"),
+    COMMUNITY_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "COMMUNITY_COMMENT_NOT_FOUND", "코멘트를 찾을 수 없습니다"),
+    COMMUNITY_COMMENT_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "COMMUNITY_COMMENT_NOT_ALLOWED",
+            "이 게시판에서는 코멘트를 사용할 수 없습니다");
 
     private final HttpStatus status;
     private final String code;
