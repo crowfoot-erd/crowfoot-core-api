@@ -25,6 +25,7 @@ public class ModelQueryRepository {
             String name,
             String description,
             String databaseType,
+            Long sourceConnectionId,
             long version,
             Long createdById,
             String createdByName,
@@ -39,7 +40,7 @@ public class ModelQueryRepository {
         QUser creator = QUser.user;
         return query.select(Projections.constructor(ModelRow.class,
                         model.id, model.workspaceId, model.name, model.description,
-                        model.databaseType, model.version,
+                        model.databaseType, model.sourceConnectionId, model.version,
                         model.createdBy, creator.name, model.createdAt, model.updatedAt))
                 .from(model)
                 .leftJoin(creator).on(model.createdBy.eq(creator.id))

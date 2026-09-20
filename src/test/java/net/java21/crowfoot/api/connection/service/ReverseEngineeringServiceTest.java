@@ -130,6 +130,8 @@ class ReverseEngineeringServiceTest {
         verify(modelRepository).save(modelCaptor.capture());
         assertThat(modelCaptor.getValue().getContent()).contains("\"physicalName\":\"orders\"");
         assertThat(modelCaptor.getValue().getContent()).contains("\"schemaVersion\":1");
+        // 원천 커넥션 연관 — 이 문서가 어느 연결에서 왔는지 기억한다(동기화 버튼 노출 근거)
+        assertThat(modelCaptor.getValue().getSourceConnectionId()).isEqualTo(11L);
         ArgumentCaptor<ModelDiagram> diagramCaptor = ArgumentCaptor.forClass(ModelDiagram.class);
         verify(modelDiagramRepository).save(diagramCaptor.capture());
         assertThat(diagramCaptor.getValue().isMain()).isTrue();

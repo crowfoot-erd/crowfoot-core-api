@@ -4,12 +4,14 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
 import net.java21.crowfoot.api.connection.dto.ConnectionResponse;
+import net.java21.crowfoot.api.connection.dto.ConnectionSchemaResponse;
 import net.java21.crowfoot.api.connection.dto.ConnectionTestResponse;
 import net.java21.crowfoot.api.connection.dto.CreateConnectionRequest;
 import net.java21.crowfoot.api.connection.dto.ReverseEngineeringRequest;
 import net.java21.crowfoot.api.connection.dto.ReverseEngineeringResponse;
 import net.java21.crowfoot.api.connection.service.ConnectionService;
 import net.java21.crowfoot.api.connection.service.ReverseEngineeringService;
+import net.java21.crowfoot.api.connection.service.SchemaIntrospectionService;
 import net.java21.crowfoot.common.ApiResponse;
 import net.java21.crowfoot.common.ListApiResponse;
 import org.springframework.http.HttpStatus;
@@ -36,6 +38,7 @@ public class ConnectionController {
 
     private final ConnectionService connectionService;
     private final ReverseEngineeringService reverseEngineeringService;
+    private final SchemaIntrospectionService schemaIntrospectionService;
 
     /** 커넥션 목록 — 멤버 전체, 페이징 메타 없는 목록 */
     @GetMapping("/core/workspaces/{workspace-id}/connections")
@@ -98,5 +101,15 @@ public class ConnectionController {
                 .created(URI.create("/api/v1/core/workspaces/" + workspaceId
                         + "/models/" + response.model().modelId()))
                 .body(ApiResponse.success(response));
+    }
+
+    /** 스키마 조회 — Editor 이상. 동기화 원천 content만 반환한다(문서 생성 없음 — 06-connection.md Section 3.7) */
+    @PostMapping("/core/workspaces/{workspace-id}/connections/{connection-id}/schema")
+    public ApiResponse<ConnectionSchemaResponse> schema(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("connection-id") long connectionId) {
+        return ApiResponse.success(
+                schemaIntrospectionService.introspect(
+                        CurrentUserHolder.get().userId(), workspaceId, connectionId));
     }
 }

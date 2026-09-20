@@ -13,6 +13,7 @@ public record ModelSummaryResponse(
         String name,
         String description,
         String databaseType,
+        String sourceConnectionId,
         int version,
         UserRefResponse createdBy,
         Instant createdAt,

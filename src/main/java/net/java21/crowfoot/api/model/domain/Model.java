@@ -38,6 +38,10 @@ public class Model {
     /** 데이터베이스 종류 — database_types 코드 논리 참조(생성 시점 고정) */
     private String databaseType;
 
+    /** 리버스 엔지니어링 원천 커넥션 — db_connections.id 논리 참조(FK 없음). 직접 생성 문서는 null.
+     *  설정된 문서만 에디터에 DB 동기화 버튼이 노출된다(05-editor/04-dbms-engineering.md Section 3.3). */
+    private Long sourceConnectionId;
+
     /** 캔버스 크기(px) — API에서 폐지(#123): 에디터가 무한 캔버스라 의미 없는 상수만 기록. 컬럼은 NOT NULL이라 유지 */
     private int canvasWidth = DEFAULT_CANVAS_WIDTH;
 

@@ -169,9 +169,9 @@ class ModelServiceTest {
         given(modelQueryRepository.count(77L, null)).willReturn(2L);
         given(modelQueryRepository.search(77L, null, 1, 20)).willReturn(List.of(
                 new ModelQueryRepository.ModelRow(501L, 77L, "주문 서비스 ERD", "설명", "postgresql",
-                        3L, 7L, "marco", Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-02T00:00:00Z")),
+                        301L, 3L, 7L, "marco", Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-09-02T00:00:00Z")),
                 new ModelQueryRepository.ModelRow(502L, 77L, "회원 서비스 ERD", null, "mysql",
-                        1L, 8L, "jenny", Instant.parse("2026-09-03T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"))));
+                        null, 1L, 8L, "jenny", Instant.parse("2026-09-03T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"))));
 
         // when
         ListApiResponse<ModelSummaryResponse> response = modelService.list(7L, 77L, null, null, null);
@@ -182,7 +182,9 @@ class ModelServiceTest {
         ModelSummaryResponse first = response.responses().get(0);
         assertThat(first.modelId()).isEqualTo("501");
         assertThat(first.databaseType()).isEqualTo("postgresql");
+        assertThat(first.sourceConnectionId()).isEqualTo("301");
         assertThat(first.createdBy().name()).isEqualTo("marco");
+        assertThat(response.responses().get(1).sourceConnectionId()).isNull();
         verify(roleChecker).requireMember(7L, 77L);
     }
 

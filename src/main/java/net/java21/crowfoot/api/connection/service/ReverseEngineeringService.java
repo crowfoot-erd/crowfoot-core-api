@@ -92,6 +92,8 @@ public class ReverseEngineeringService {
 
         Model model = modelRepository.save(new Model(workspaceId, modelName, request.description(),
                 connection.getDbmsType(), assembled.content(), userId));
+        // 원천 커넥션 연관 — 이 문서가 어느 연결에서 왔는지 기억해 동기화 버튼 노출 근거가 된다
+        model.setSourceConnectionId(connectionId);
         modelDiagramRepository.save(new ModelDiagram(model.getId(), MAIN_DIAGRAM_NAME, EMPTY_LAYOUT, true));
         auditRecorder.record(userId, "CONNECTION_REVERSE_ENGINEERED", "CONNECTION",
                 Long.toString(connectionId), Map.of(
@@ -127,6 +129,7 @@ public class ReverseEngineeringService {
                 model.getName(),
                 model.getDescription(),
                 model.getDatabaseType(),
+                model.getSourceConnectionId() == null ? null : Long.toString(model.getSourceConnectionId()),
                 model.getContent(),
                 (int) model.getVersion(),
                 createdBy,

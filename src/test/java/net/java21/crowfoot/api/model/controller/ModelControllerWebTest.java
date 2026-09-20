@@ -53,7 +53,7 @@ class ModelControllerWebTest {
         // given
         given(modelService.create(eq(7L), eq(77L), eq(new net.java21.crowfoot.api.model.dto.CreateModelRequest(
                 "주문 서비스 ERD", null, "postgresql"))))
-                .willReturn(new ModelResponse("501", "77", "주문 서비스 ERD", null, "postgresql",
+                .willReturn(new ModelResponse("501", "77", "주문 서비스 ERD", null, "postgresql", null,
                         "{\"tables\":[],\"relationships\":[]}", 0,
                         new UserRefResponse("7", "marco"),
                         Instant.parse("2026-09-10T00:00:00Z"), Instant.parse("2026-09-10T00:00:00Z")));
@@ -83,7 +83,7 @@ class ModelControllerWebTest {
     void listReturnsPagedSummaries() throws Exception {
         // given
         given(modelService.list(7L, 77L, "주문", 1, 20)).willReturn(ListApiResponse.paged(
-                List.of(new ModelSummaryResponse("501", "77", "주문 서비스 ERD", null, "postgresql",
+                List.of(new ModelSummaryResponse("501", "77", "주문 서비스 ERD", null, "postgresql", null,
                         0, new UserRefResponse("7", "marco"),
                         Instant.parse("2026-09-10T00:00:00Z"), Instant.parse("2026-09-10T00:00:00Z"))),
                 1, 20, 1));
@@ -106,7 +106,7 @@ class ModelControllerWebTest {
     void detailReturnsFullModel() throws Exception {
         // given
         given(modelService.detail(7L, 77L, 501L)).willReturn(new ModelResponse("501", "77", "주문 서비스 ERD",
-                "설명", "postgresql", "{\"tables\":[],\"relationships\":[]}", 3,
+                "설명", "postgresql", "301", "{\"tables\":[],\"relationships\":[]}", 3,
                 new UserRefResponse("7", "marco"),
                 Instant.parse("2026-09-10T00:00:00Z"), Instant.parse("2026-09-10T00:00:00Z")));
 
@@ -115,6 +115,7 @@ class ModelControllerWebTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.response.modelId").value("501"))
                 .andExpect(jsonPath("$.response.databaseType").value("postgresql"))
+                .andExpect(jsonPath("$.response.sourceConnectionId").value("301"))
                 .andExpect(jsonPath("$.response.version").value(3))
                 .andExpect(jsonPath("$.response.content").value("{\"tables\":[],\"relationships\":[]}"));
     }

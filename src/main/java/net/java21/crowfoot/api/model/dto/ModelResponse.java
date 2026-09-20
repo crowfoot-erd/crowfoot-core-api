@@ -14,6 +14,7 @@ public record ModelResponse(
         String name,
         String description,
         String databaseType,
+        String sourceConnectionId,
         String content,
         int version,
         UserRefResponse createdBy,

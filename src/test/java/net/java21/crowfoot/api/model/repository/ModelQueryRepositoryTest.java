@@ -86,4 +86,19 @@ class ModelQueryRepositoryTest {
         assertThat(modelQueryRepository.count(88L, null)).isEqualTo(1);
         assertThat(modelQueryRepository.count(77L, "없는단어")).isZero();
     }
+
+    @Test
+    @DisplayName("sourceConnectionId 라운드트립 — 리버스 생성 문서만 값, 직접 생성 문서는 null")
+    void sourceConnectionIdRoundTrip() {
+        Model reverseEngineered = modelRepository.save(new Model(77L, "리버스 ERD", null, "mysql",
+                "{}", marcoId));
+        reverseEngineered.setSourceConnectionId(11L);
+
+        List<ModelRow> rows = modelQueryRepository.search(77L, null, 1, 20);
+
+        assertThat(rows).extracting(ModelRow::name, ModelRow::sourceConnectionId)
+                .contains(
+                        org.assertj.core.groups.Tuple.tuple("리버스 ERD", 11L),
+                        org.assertj.core.groups.Tuple.tuple("주문 서비스 ERD", null));
+    }
 }
