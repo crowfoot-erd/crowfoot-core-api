@@ -48,6 +48,7 @@ public enum ErrorCode {
     MODEL_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_NOT_FOUND", "모델을 찾을 수 없습니다"),
     DUPLICATED_NAME(HttpStatus.CONFLICT, "DUPLICATED_NAME", "이미 존재하는 이름입니다"),
     VERSION_CONFLICT(HttpStatus.CONFLICT, "VERSION_CONFLICT", "다른 클라이언트가 먼저 저장했습니다"),
+    MODEL_VERSION_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_VERSION_NOT_FOUND", "버전 기록을 찾을 수 없습니다"),
 
     // Share (08-core/02-model.md Section 1.10)
     SHARE_NOT_FOUND(HttpStatus.NOT_FOUND, "SHARE_NOT_FOUND", "공유 링크를 찾을 수 없습니다"),

@@ -5,6 +5,7 @@ import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelDiagram;
+import net.java21.crowfoot.api.model.domain.ModelVersion;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.ModelResponse;
 import net.java21.crowfoot.api.model.dto.ModelSummaryResponse;
@@ -15,6 +16,7 @@ import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
+import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.ListApiResponse;
 import tools.jackson.databind.ObjectMapper;
@@ -49,7 +51,7 @@ import static org.mockito.Mockito.verify;
 /**
  * ERD 문서 API 단위 테스트 (08-core/02-model.md Section 1) —
  * 생성 2-INSERT(모델·main 다이어그램)·databaseType 코드 검증·이름 중복·목록 페이징·
- * content 저장(낙관적 잠금 409·JSON/5MB 검증)을 검증한다.
+ * content 저장(낙관적 잠금 409·JSON/5MB 검증·버전 스냅샷 동행 1.11)을 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class ModelServiceTest {
@@ -63,6 +65,8 @@ class ModelServiceTest {
     @Mock
     private DatabaseTypeRepository databaseTypeRepository;
     @Mock
+    private ModelVersionRepository modelVersionRepository;
+    @Mock
     private UserRepository userRepository;
     @Mock
     private RoleChecker roleChecker;
@@ -75,7 +79,8 @@ class ModelServiceTest {
     void setUp() {
         // ObjectMapper는 실물 — JSON 파싱 검증 자체가 테스트 대상이다
         modelService = new ModelService(modelRepository, modelDiagramRepository, modelQueryRepository,
-                databaseTypeRepository, userRepository, roleChecker, auditRecorder, new ObjectMapper());
+                databaseTypeRepository, modelVersionRepository, userRepository, roleChecker,
+                auditRecorder, new ObjectMapper());
     }
 
 
@@ -122,6 +127,15 @@ class ModelServiceTest {
         assertThat(diagram.getValue().getName()).isEqualTo("main");
         assertThat(diagram.getValue().isMain()).isTrue();
         assertThat(diagram.getValue().getLayoutContent()).contains("nodes").contains("viewport");
+
+        // then: v0 스냅샷 동행(1.11) — 요약 없음: 웹이 "문서 생성"으로 렌더
+        ArgumentCaptor<ModelVersion> snapshot = ArgumentCaptor.forClass(ModelVersion.class);
+        verify(modelVersionRepository).save(snapshot.capture());
+        assertThat(snapshot.getValue().getModelId()).isEqualTo(501L);
+        assertThat(snapshot.getValue().getVersion()).isZero();
+        assertThat(snapshot.getValue().getContent()).isEqualTo(V1_EMPTY);
+        assertThat(snapshot.getValue().getChangeSummary()).isNull();
+        assertThat(snapshot.getValue().getCreatedBy()).isEqualTo(7L);
 
         // then: 응답 — databaseType·빈 content·생성자 이름
         assertThat(response.modelId()).isEqualTo("501");
@@ -335,10 +349,42 @@ class ModelServiceTest {
         assertThat(response.updatedAt()).isEqualTo(Instant.parse("2026-09-12T05:00:00Z"));
         verify(roleChecker).requireEditor(7L, 77L);
         verify(auditRecorder).record(eq(7L), eq("MODEL_UPDATED"), eq("MODEL"), eq("501"), any());
+
+        // then: 스냅샷 동행(1.11) — 요약 미첨부면 changeSummary 없이 새 version으로 기록
+        ArgumentCaptor<ModelVersion> snapshot = ArgumentCaptor.forClass(ModelVersion.class);
+        verify(modelVersionRepository).save(snapshot.capture());
+        assertThat(snapshot.getValue().getModelId()).isEqualTo(501L);
+        assertThat(snapshot.getValue().getVersion()).isEqualTo(4L);
+        assertThat(snapshot.getValue().getContent()).isEqualTo(content);
+        assertThat(snapshot.getValue().getChangeSummary()).isNull();
+        assertThat(snapshot.getValue().getMemo()).isNull();
+        assertThat(snapshot.getValue().getCreatedBy()).isEqualTo(7L);
     }
 
     @Test
-    @DisplayName("버전 불일치 저장은 409 VERSION_CONFLICT이다 — 갱신 0행, 감사 없음")
+    @DisplayName("changeSummary를 첨부한 저장은 요약을 해석 없이 스냅샷에 그대로 보관한다 (1.11)")
+    void saveContentStoresChangeSummaryVerbatim() {
+        // given
+        String content = "{\"schemaVersion\":1}";
+        String summary = "{\"items\":[{\"kind\":\"table\",\"action\":\"add\",\"name\":\"member\"}],\"layoutOnly\":false}";
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+        given(modelRepository.updateContentIfVersionMatches(eq(501L), eq(77L), eq(3L), eq(content), any())).willReturn(1);
+        Model saved = persisted();
+        ReflectionTestUtils.setField(saved, "version", 4L);
+        given(modelRepository.findById(501L)).willReturn(Optional.of(saved));
+
+        // when
+        modelService.saveContent(7L, 77L, 501L, new SaveContentRequest(3, content, summary));
+
+        // then: 서버는 내용을 해석하지 않는다 — 원문 보관만
+        ArgumentCaptor<ModelVersion> snapshot = ArgumentCaptor.forClass(ModelVersion.class);
+        verify(modelVersionRepository).save(snapshot.capture());
+        assertThat(snapshot.getValue().getVersion()).isEqualTo(4L);
+        assertThat(snapshot.getValue().getChangeSummary()).isEqualTo(summary);
+    }
+
+    @Test
+    @DisplayName("버전 불일치 저장은 409 VERSION_CONFLICT이다 — 갱신 0행, 감사·스냅샷 없음")
     void saveContentRejectsVersionMismatch() {
         given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
         given(modelRepository.updateContentIfVersionMatches(eq(501L), eq(77L), eq(2L), anyString(), any())).willReturn(0);
@@ -349,6 +395,36 @@ class ModelServiceTest {
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.VERSION_CONFLICT));
 
         verify(auditRecorder, never()).record(any(), anyString(), anyString(), anyString(), any());
+        verify(modelVersionRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("64KB(UTF-8 바이트) 초과 changeSummary는 400 INVALID_REQUEST이다 — 갱신 실행 없음")
+    void saveContentRejectsOversizedChangeSummary() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+        String oversizedSummary = "{\"a\":\"" + "x".repeat(64 * 1024) + "\"}";
+
+        assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(3, "{\"a\":1}", oversizedSummary)))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+
+        verify(modelRepository, never()).updateContentIfVersionMatches(anyLong(), anyLong(), anyLong(), anyString(), any());
+        verify(modelVersionRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("비JSON changeSummary는 400 INVALID_REQUEST이다 — 요약은 문서가 아니어도 JSON이어야 한다")
+    void saveContentRejectsNonJsonChangeSummary() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+
+        assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
+                new SaveContentRequest(3, "{\"a\":1}", "not-json{")))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+
+        verify(modelRepository, never()).updateContentIfVersionMatches(anyLong(), anyLong(), anyLong(), anyString(), any());
+        verify(modelVersionRepository, never()).save(any());
     }
 
     @Test

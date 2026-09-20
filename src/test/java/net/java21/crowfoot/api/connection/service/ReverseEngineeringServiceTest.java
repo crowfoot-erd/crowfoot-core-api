@@ -14,8 +14,10 @@ import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.connection.reverse.ReverseContentAssembler;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelDiagram;
+import net.java21.crowfoot.api.model.domain.ModelVersion;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
+import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -61,6 +63,8 @@ class ReverseEngineeringServiceTest {
     @Mock
     private ModelDiagramRepository modelDiagramRepository;
     @Mock
+    private ModelVersionRepository modelVersionRepository;
+    @Mock
     private UserRepository userRepository;
     @Mock
     private RoleChecker roleChecker;
@@ -88,7 +92,7 @@ class ReverseEngineeringServiceTest {
     @BeforeEach
     void setUp() {
         service = new ReverseEngineeringService(connectionRepository, modelRepository, modelDiagramRepository,
-                userRepository, roleChecker, auditRecorder,
+                modelVersionRepository, userRepository, roleChecker, auditRecorder,
                 new ConnectionCrypto(DEV_KEY), introspectors, new ReverseContentAssembler());
     }
 
@@ -135,6 +139,14 @@ class ReverseEngineeringServiceTest {
         ArgumentCaptor<ModelDiagram> diagramCaptor = ArgumentCaptor.forClass(ModelDiagram.class);
         verify(modelDiagramRepository).save(diagramCaptor.capture());
         assertThat(diagramCaptor.getValue().isMain()).isTrue();
+        // v0 스냅샷 — 리버스 태생 요약은 고정형 JSON {created,tables,relationships} (02-model.md 1.11)
+        ArgumentCaptor<ModelVersion> snapshotCaptor = ArgumentCaptor.forClass(ModelVersion.class);
+        verify(modelVersionRepository).save(snapshotCaptor.capture());
+        assertThat(snapshotCaptor.getValue().getModelId()).isEqualTo(501L);
+        assertThat(snapshotCaptor.getValue().getVersion()).isZero();
+        assertThat(snapshotCaptor.getValue().getContent()).contains("\"physicalName\":\"orders\"");
+        assertThat(snapshotCaptor.getValue().getChangeSummary())
+                .isEqualTo("{\"created\":true,\"tables\":1,\"relationships\":0}");
         verify(auditRecorder).record(eq(2L), eq("CONNECTION_REVERSE_ENGINEERED"), eq("CONNECTION"),
                 eq("11"), any());
     }

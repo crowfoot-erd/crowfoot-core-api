@@ -17,9 +17,11 @@ import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.connection.reverse.ReverseContentAssembler;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelDiagram;
+import net.java21.crowfoot.api.model.domain.ModelVersion;
 import net.java21.crowfoot.api.model.dto.ModelResponse;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
+import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -52,6 +54,7 @@ public class ReverseEngineeringService {
     private final DbConnectionRepository connectionRepository;
     private final ModelRepository modelRepository;
     private final ModelDiagramRepository modelDiagramRepository;
+    private final ModelVersionRepository modelVersionRepository;
     private final UserRepository userRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
@@ -95,6 +98,9 @@ public class ReverseEngineeringService {
         // 원천 커넥션 연관 — 이 문서가 어느 연결에서 왔는지 기억해 동기화 버튼 노출 근거가 된다
         model.setSourceConnectionId(connectionId);
         modelDiagramRepository.save(new ModelDiagram(model.getId(), MAIN_DIAGRAM_NAME, EMPTY_LAYOUT, true));
+        // v0 스냅샷 — 리버스로 태어난 문서의 요약은 고정형 JSON(08-core/02-model.md 1.11)
+        modelVersionRepository.save(new ModelVersion(model.getId(), model.getVersion(),
+                assembled.content(), reverseSummary(assembled), null, userId, model.getCreatedAt()));
         auditRecorder.record(userId, "CONNECTION_REVERSE_ENGINEERED", "CONNECTION",
                 Long.toString(connectionId), Map.of(
                         "modelId", Long.toString(model.getId()),
@@ -102,6 +108,12 @@ public class ReverseEngineeringService {
                         "relationships", assembled.relationshipCount()));
         return new ReverseEngineeringResponse(toResponse(model), assembled.tableCount(),
                 assembled.relationshipCount(), assembled.skipped());
+    }
+
+    /** 리버스 v0 요약 — {created:true, tables:N, relationships:M} (웹이 이 형태를 인식해 렌더) */
+    private static String reverseSummary(ReverseContentAssembler.AssembledContent assembled) {
+        return "{\"created\":true,\"tables\":%d,\"relationships\":%d}"
+                .formatted(assembled.tableCount(), assembled.relationshipCount());
     }
 
     /** 문서 이름 — 요청 값 우선, 생략하면 "{커넥션 이름} ERD" (06-connection.md 3.6) */

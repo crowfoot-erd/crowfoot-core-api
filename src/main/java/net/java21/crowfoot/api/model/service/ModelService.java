@@ -10,6 +10,7 @@ import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelDiagram;
+import net.java21.crowfoot.api.model.domain.ModelVersion;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.ModelResponse;
 import net.java21.crowfoot.api.model.dto.ModelSummaryResponse;
@@ -21,6 +22,7 @@ import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository.ModelRow;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
+import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.ListApiResponse;
 import net.java21.crowfoot.common.error.BusinessException;
@@ -51,11 +53,14 @@ public class ModelService {
     private static final String MAIN_DIAGRAM_NAME = "main";
     /** content 상한 — UTF-8 바이트 기준 5MB (1.5) */
     private static final int MAX_CONTENT_BYTES = 5 * 1024 * 1024;
+    /** 변경 요약 상한 — UTF-8 바이트 기준 64KB (1.11) — 웹 diff 상한(항목 50)보다 여유 있게 */
+    private static final int MAX_CHANGE_SUMMARY_BYTES = 64 * 1024;
 
     private final ModelRepository modelRepository;
     private final ModelDiagramRepository modelDiagramRepository;
     private final ModelQueryRepository modelQueryRepository;
     private final DatabaseTypeRepository databaseTypeRepository;
+    private final ModelVersionRepository modelVersionRepository;
     private final UserRepository userRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
@@ -120,6 +125,9 @@ public class ModelService {
                 workspaceId, request.name(), request.description(), request.databaseType(),
                 EMPTY_CONTENT, userId));
         modelDiagramRepository.save(new ModelDiagram(model.getId(), MAIN_DIAGRAM_NAME, EMPTY_LAYOUT, true));
+        // v0 스냅샷 — changeSummary 없음(빈 문서): 웹이 "문서 생성"으로 렌더 (1.11)
+        modelVersionRepository.save(new ModelVersion(model.getId(), model.getVersion(),
+                EMPTY_CONTENT, null, null, userId, model.getCreatedAt()));
         auditRecorder.record(userId, "MODEL_CREATED", "MODEL",
                 Long.toString(model.getId()), Map.of(
                         "name", model.getName(),
@@ -173,6 +181,8 @@ public class ModelService {
      * 문서 본체 저장(Editor 이상 — 1.5) — 문서 단위 통짜 저장 + 낙관적 잠금.
      * 검증은 JSON 구문 파싱 가능·UTF-8 5MB 상한만 — Canonical 스키마 해석은 에디터가 담당한다(1.5.1).
      * version 일치 조건부 UPDATE(원자적)로 0행이면 409 VERSION_CONFLICT.
+     * 저장이 성공하면 같은 트랜잭션에서 버전 스냅샷을 1:1로 남긴다(1.11) — changeSummary는
+     * 웹이 만든 변경 요약 JSON을 가드(64KB·JSON 구문) 후 해석 없이 보관한다.
      */
     @Transactional
     public SaveContentResponse saveContent(long userId, long workspaceId, long modelId, SaveContentRequest request) {
@@ -189,19 +199,40 @@ public class ModelService {
         } catch (JacksonException e) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "content는 유효한 JSON이어야 합니다");
         }
+        String changeSummary = requireValidChangeSummary(request.changeSummary());
 
+        Instant now = Instant.now();
         int updated = modelRepository.updateContentIfVersionMatches(modelId, workspaceId,
-                request.baseVersion(), content, Instant.now());
+                request.baseVersion(), content, now);
         if (updated == 0) {
             throw new BusinessException(ErrorCode.VERSION_CONFLICT);
         }
         Model model = modelRepository.findById(modelId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
+        // 스냅샷 createdAt은 bulk UPDATE가 기록한 models.updated_at과 같은 시각(1.11 정합 규칙)
+        modelVersionRepository.save(new ModelVersion(modelId, model.getVersion(),
+                content, changeSummary, null, userId, now));
         auditRecorder.record(userId, "MODEL_UPDATED", "MODEL",
                 Long.toString(modelId), Map.of(
                         "baseVersion", request.baseVersion(),
                         "version", model.getVersion()));
         return new SaveContentResponse((int) model.getVersion(), model.getUpdatedAt());
+    }
+
+    /** 변경 요약 가드(1.11) — null 통과, 64KB 상한·JSON 구문만 본다(내용 해석은 클라이언트 소유) */
+    private String requireValidChangeSummary(String changeSummary) {
+        if (changeSummary == null) {
+            return null;
+        }
+        if (changeSummary.getBytes(StandardCharsets.UTF_8).length > MAX_CHANGE_SUMMARY_BYTES) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "변경 요약이 상한(64KB)을 초과했습니다");
+        }
+        try {
+            objectMapper.readTree(changeSummary);
+        } catch (JacksonException e) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "changeSummary는 유효한 JSON이어야 합니다");
+        }
+        return changeSummary;
     }
 
     private ModelSummaryResponse toSummary(Model model) {
