@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.DeployModelRequest;
+import net.java21.crowfoot.api.model.dto.MigrationDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelDeployResponse;
 import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelResponse;
@@ -14,6 +15,7 @@ import net.java21.crowfoot.api.model.dto.ModelVersionResponse;
 import net.java21.crowfoot.api.model.dto.SaveContentRequest;
 import net.java21.crowfoot.api.model.dto.SaveContentResponse;
 import net.java21.crowfoot.api.model.service.DdlService;
+import net.java21.crowfoot.api.model.service.MigrationDdlService;
 import net.java21.crowfoot.api.model.service.DeployService;
 import net.java21.crowfoot.api.model.service.ModelService;
 import net.java21.crowfoot.common.ApiResponse;
@@ -44,6 +46,7 @@ public class ModelController {
     private final ModelService modelService;
     private final DdlService ddlService;
     private final DeployService deployService;
+    private final MigrationDdlService migrationDdlService;
 
     /** 모델 목록(요약 — content 제외) — Viewer */
     @GetMapping("/core/workspaces/{workspace-id}/models")
@@ -117,6 +120,16 @@ public class ModelController {
             @Valid @RequestBody DeployModelRequest request) {
         return ApiResponse.success(deployService.deploy(CurrentUserHolder.get().userId(), workspaceId, modelId,
                 Long.parseLong(request.connectionId())));
+    }
+
+    /** 실제 DB→문서 마이그레이션 DDL 생성(생성만 — 실행 미제공) — Editor 이상, 커넥션 스키마 조회 기반 (1.7.1) */
+    @GetMapping("/core/workspaces/{workspace-id}/models/{model-id}/connections/{connection-id}/migration")
+    public ApiResponse<MigrationDdlResponse> connectionMigration(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @PathVariable("connection-id") long connectionId) {
+        return ApiResponse.success(migrationDdlService.generateConnectionMigration(
+                CurrentUserHolder.get().userId(), workspaceId, modelId, connectionId));
     }
 
     /** 모델 삭제 — Owner 전용, 본문 없음 */

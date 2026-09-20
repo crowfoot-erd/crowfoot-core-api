@@ -142,4 +142,15 @@ class SchemaIntrospectionServiceTest {
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.CONNECTION_UNREACHABLE);
     }
+
+    @Test
+    @DisplayName("본문 추출 — introspectContent는 content만 반환하고 감사를 남기지 않는다(마이그레이션 DDL 재사용)")
+    void introspectContentSkipsAudit() throws SQLException {
+        stubJdbc();
+
+        String content = service.introspectContent(connection());
+
+        assertThat(content).contains("\"physicalName\":\"orders\"");
+        verify(auditRecorder, org.mockito.Mockito.never()).record(any(), any(), any(), any(), any());
+    }
 }

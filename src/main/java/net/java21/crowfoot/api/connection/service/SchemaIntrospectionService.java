@@ -49,6 +49,23 @@ public class SchemaIntrospectionService {
         DbConnection connection = connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
 
+        ReverseContentAssembler.AssembledContent assembled = doIntrospect(connection);
+
+        auditRecorder.record(userId, "CONNECTION_SCHEMA_INTROSPECTED", "CONNECTION",
+                Long.toString(connectionId), Map.of(
+                        "tables", assembled.tableCount(),
+                        "relationships", assembled.relationshipCount()));
+        return new ConnectionSchemaResponse(assembled.content(), assembled.tableCount(),
+                assembled.relationshipCount(), assembled.skipped());
+    }
+
+    /** 조립된 content만 반환(역할·감사 없음) — 문서↔DB 마이그레이션 DDL(02-model.md 1.7.1)이 재사용 */
+    public String introspectContent(DbConnection connection) {
+        return doIntrospect(connection).content();
+    }
+
+    /** 접속 → introspect → Canonical 조립 본문 — 읽기 절반(리버스 3.6과 같은 규칙) */
+    private ReverseContentAssembler.AssembledContent doIntrospect(DbConnection connection) {
         SchemaIntrospector introspector = introspectors.forDbmsType(connection.getDbmsType());
         if (introspector == null) {
             throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
@@ -68,12 +85,6 @@ public class SchemaIntrospectionService {
             throw new BusinessException(ErrorCode.REVERSE_FAILED,
                     "스키마가 너무 커 문서 상한(5MB)을 초과했습니다 — 대상 스키마를 줄여 다시 시도하세요");
         }
-
-        auditRecorder.record(userId, "CONNECTION_SCHEMA_INTROSPECTED", "CONNECTION",
-                Long.toString(connectionId), Map.of(
-                        "tables", assembled.tableCount(),
-                        "relationships", assembled.relationshipCount()));
-        return new ConnectionSchemaResponse(assembled.content(), assembled.tableCount(),
-                assembled.relationshipCount(), assembled.skipped());
+        return assembled;
     }
 }

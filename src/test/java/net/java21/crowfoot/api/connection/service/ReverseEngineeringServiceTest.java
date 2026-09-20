@@ -18,6 +18,7 @@ import net.java21.crowfoot.api.model.domain.ModelVersion;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
+import net.java21.crowfoot.api.model.service.ModelVersionPruner;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -65,6 +66,8 @@ class ReverseEngineeringServiceTest {
     @Mock
     private ModelVersionRepository modelVersionRepository;
     @Mock
+    private ModelVersionPruner modelVersionPruner;
+    @Mock
     private UserRepository userRepository;
     @Mock
     private RoleChecker roleChecker;
@@ -92,7 +95,7 @@ class ReverseEngineeringServiceTest {
     @BeforeEach
     void setUp() {
         service = new ReverseEngineeringService(connectionRepository, modelRepository, modelDiagramRepository,
-                modelVersionRepository, userRepository, roleChecker, auditRecorder,
+                modelVersionRepository, modelVersionPruner, userRepository, roleChecker, auditRecorder,
                 new ConnectionCrypto(DEV_KEY), introspectors, new ReverseContentAssembler());
     }
 

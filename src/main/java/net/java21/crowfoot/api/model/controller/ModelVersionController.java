@@ -6,8 +6,10 @@ import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
 import net.java21.crowfoot.api.model.dto.ModelVersionDetailResponse;
 import net.java21.crowfoot.api.model.dto.ModelVersionEntryResponse;
+import net.java21.crowfoot.api.model.dto.MigrationDdlResponse;
 import net.java21.crowfoot.api.model.dto.RestoreModelVersionRequest;
 import net.java21.crowfoot.api.model.dto.SaveContentResponse;
+import net.java21.crowfoot.api.model.service.MigrationDdlService;
 import net.java21.crowfoot.api.model.service.ModelVersionService;
 import net.java21.crowfoot.common.ApiResponse;
 import net.java21.crowfoot.common.ListApiResponse;
@@ -28,15 +30,18 @@ import org.springframework.web.bind.annotation.RestController;
 public class ModelVersionController {
 
     private final ModelVersionService modelVersionService;
+    private final MigrationDdlService migrationDdlService;
 
-    /** 버전 기록 목록(요약 — content 제외, 최신순) — Viewer */
+    /** 버전 기록 목록(요약 — content 제외, 최신순) — Viewer. keyword는 메모 부분 일치 */
     @GetMapping("/core/workspaces/{workspace-id}/models/{model-id}/versions")
     public ListApiResponse<ModelVersionEntryResponse> list(
             @PathVariable("workspace-id") long workspaceId,
             @PathVariable("model-id") long modelId,
+            @RequestParam(name = "keyword", required = false) String keyword,
             @RequestParam(name = "page", required = false) Integer page,
             @RequestParam(name = "size", required = false) Integer size) {
-        return modelVersionService.list(CurrentUserHolder.get().userId(), workspaceId, modelId, page, size);
+        return modelVersionService.list(CurrentUserHolder.get().userId(), workspaceId, modelId,
+                keyword, page, size);
     }
 
     /** 버전 상세(해당 시점 content 전문) — Viewer, 버전 뷰어가 여는 호출 */
@@ -69,5 +74,16 @@ public class ModelVersionController {
             @Valid @RequestBody RestoreModelVersionRequest request) {
         return ApiResponse.success(modelVersionService.restore(
                 CurrentUserHolder.get().userId(), workspaceId, modelId, version, request));
+    }
+
+    /** 버전 간 마이그레이션 DDL 생성(from → to, 생성만 — 실행 미제공) — Viewer (1.7.1) */
+    @GetMapping("/core/workspaces/{workspace-id}/models/{model-id}/versions/{from}/migration")
+    public ApiResponse<MigrationDdlResponse> versionMigration(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @PathVariable("from") long from,
+            @RequestParam("to") long to) {
+        return ApiResponse.success(migrationDdlService.generateVersionMigration(
+                CurrentUserHolder.get().userId(), workspaceId, modelId, from, to));
     }
 }

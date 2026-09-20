@@ -61,6 +61,7 @@ public class ModelService {
     private final ModelQueryRepository modelQueryRepository;
     private final DatabaseTypeRepository databaseTypeRepository;
     private final ModelVersionRepository modelVersionRepository;
+    private final ModelVersionPruner modelVersionPruner;
     private final UserRepository userRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
@@ -128,6 +129,7 @@ public class ModelService {
         // v0 스냅샷 — changeSummary 없음(빈 문서): 웹이 "문서 생성"으로 렌더 (1.11)
         modelVersionRepository.save(new ModelVersion(model.getId(), model.getVersion(),
                 EMPTY_CONTENT, null, null, userId, model.getCreatedAt()));
+        modelVersionPruner.prune(model.getId(), model.getVersion(), userId);
         auditRecorder.record(userId, "MODEL_CREATED", "MODEL",
                 Long.toString(model.getId()), Map.of(
                         "name", model.getName(),
@@ -212,6 +214,7 @@ public class ModelService {
         // 스냅샷 createdAt은 bulk UPDATE가 기록한 models.updated_at과 같은 시각(1.11 정합 규칙)
         modelVersionRepository.save(new ModelVersion(modelId, model.getVersion(),
                 content, changeSummary, null, userId, now));
+        modelVersionPruner.prune(modelId, model.getVersion(), userId);
         auditRecorder.record(userId, "MODEL_UPDATED", "MODEL",
                 Long.toString(modelId), Map.of(
                         "baseVersion", request.baseVersion(),

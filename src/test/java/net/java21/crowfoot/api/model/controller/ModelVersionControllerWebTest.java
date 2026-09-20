@@ -1,10 +1,13 @@
 package net.java21.crowfoot.api.model.controller;
 
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
+import net.java21.crowfoot.api.model.dto.DdlWarningResponse;
+import net.java21.crowfoot.api.model.dto.MigrationDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelVersionDetailResponse;
 import net.java21.crowfoot.api.model.dto.ModelVersionEntryResponse;
 import net.java21.crowfoot.api.model.dto.RestoreModelVersionRequest;
 import net.java21.crowfoot.api.model.dto.SaveContentResponse;
+import net.java21.crowfoot.api.model.service.MigrationDdlService;
 import net.java21.crowfoot.api.model.service.ModelVersionService;
 import net.java21.crowfoot.common.ListApiResponse;
 import net.java21.crowfoot.common.error.BusinessException;
@@ -40,10 +43,13 @@ class ModelVersionControllerWebTest {
     @MockitoBean
     private ModelVersionService modelVersionService;
 
+    @MockitoBean
+    private MigrationDdlService migrationDdlService;
+
     @Test
     @DisplayName("목록은 최신순 요약 행(content 없음)을 페이징 포맷으로 응답한다")
     void listReturnsPagedEntries() throws Exception {
-        given(modelVersionService.list(7L, 77L, 501L, 1, 20)).willReturn(ListApiResponse.paged(List.of(
+        given(modelVersionService.list(7L, 77L, 501L, null, 1, 20)).willReturn(ListApiResponse.paged(List.of(
                 new ModelVersionEntryResponse(3, "{\"items\":[]}", "member 테이블 추가",
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z")),
                 new ModelVersionEntryResponse(2, null, null,
@@ -60,6 +66,23 @@ class ModelVersionControllerWebTest {
                 .andExpect(jsonPath("$.responses[0].content").doesNotExist())
                 .andExpect(jsonPath("$.totalCount").value(2))
                 .andExpect(jsonPath("$.page").value(1));
+    }
+
+    @Test
+    @DisplayName("목록 keyword 파라미터는 메모 검색어로 서비스에 전달된다")
+    void listBindsKeywordParam() throws Exception {
+        // page·size 정규화(1·20)는 서비스 몫 — 컨트롤러는 null 그대로 넘긴다
+        given(modelVersionService.list(7L, 77L, 501L, "grade", null, null)).willReturn(ListApiResponse.paged(List.of(
+                new ModelVersionEntryResponse(1, null, "grade 컬럼 추가",
+                        new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z"))),
+                1, 20, 1));
+
+        mockMvc.perform(get("/core/workspaces/77/models/501/versions")
+                        .header("X-USER-ID", "7")
+                        .queryParam("keyword", "grade"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.responses[0].memo").value("grade 컬럼 추가"))
+                .andExpect(jsonPath("$.totalCount").value(1));
     }
 
     @Test
@@ -140,6 +163,34 @@ class ModelVersionControllerWebTest {
                         .header("X-USER-ID", "7")
                         .contentType(APPLICATION_JSON)
                         .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("버전 간 마이그레이션 DDL은 from 경로·to 쿼리를 받아 sql·레이블을 응답한다")
+    void versionMigrationReturnsSql() throws Exception {
+        given(migrationDdlService.generateVersionMigration(7L, 77L, 501L, 2L, 3L)).willReturn(
+                new MigrationDdlResponse("-- MySQL 마이그레이션 DDL (v2 → v3)\n\n"
+                                + "ALTER TABLE users ADD COLUMN grade VARCHAR(10);",
+                        List.of(new DdlWarningResponse("DESTRUCTIVE", "파괴적 연산이 있습니다")), 1, "v2", "v3"));
+
+        mockMvc.perform(get("/core/workspaces/77/models/501/versions/2/migration")
+                        .header("X-USER-ID", "7")
+                        .queryParam("to", "3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.sql").value(
+                        "-- MySQL 마이그레이션 DDL (v2 → v3)\n\nALTER TABLE users ADD COLUMN grade VARCHAR(10);"))
+                .andExpect(jsonPath("$.response.warnings[0].code").value("DESTRUCTIVE"))
+                .andExpect(jsonPath("$.response.statementCount").value(1))
+                .andExpect(jsonPath("$.response.fromLabel").value("v2"))
+                .andExpect(jsonPath("$.response.toLabel").value("v3"));
+    }
+
+    @Test
+    @DisplayName("버전 간 마이그레이션 DDL은 to 누락이면 400이다")
+    void versionMigrationRequiresToParam() throws Exception {
+        mockMvc.perform(get("/core/workspaces/77/models/501/versions/2/migration")
+                        .header("X-USER-ID", "7"))
                 .andExpect(status().isBadRequest());
     }
 }

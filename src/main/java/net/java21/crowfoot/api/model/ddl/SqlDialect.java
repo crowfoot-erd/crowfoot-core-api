@@ -12,6 +12,11 @@ import java.util.List;
  */
 public interface SqlDialect {
 
+    /** 제약 종류 코드 — {@link #dropConstraint}의 kind 값 (PK·UK·FK) */
+    String KIND_PRIMARY = "PRIMARY";
+    String KIND_UNIQUE = "UNIQUE";
+    String KIND_FOREIGN_KEY = "FOREIGN KEY";
+
     String id();
 
     /** 컬럼 물리 타입 표기 — 템플릿 매핑 + length/precision/scale 조립 */
@@ -35,4 +40,27 @@ public interface SqlDialect {
 
     /** 인덱스 생성문(세미콜론 없이) */
     String createIndex(DdlContent.Table table, DdlContent.Index index);
+
+    /* ---------- 마이그레이션 DDL(§3.3) — ALTER 계열 훅. 세미콜론 포함 ---------- */
+
+    /** 컬럼 추가 — CREATE 정의와 같은 속성 순서(NOT NULL → DEFAULT → AI) */
+    String addColumn(DdlContent.Table table, DdlContent.Column column);
+
+    /** 컬럼 변경(타입·NULL·기본값·AI) — MySQL은 전체 재정의, PG는 절 조합, 그 외는 ALTER COLUMN.
+     *  반영 못 하는 변경(예: SQL Server 기본값)은 문장에서 빠지고 생성기가 경고를 붙인다 */
+    String alterColumn(DdlContent.Table table, DdlContent.Column before, DdlContent.Column after);
+
+    /** 컬럼 삭제 */
+    String dropColumn(DdlContent.Table table, DdlContent.Column column);
+
+    /** 제약(PK·UK·FK) 삭제 — kind는 {@link #KIND_PRIMARY}·{@link #KIND_UNIQUE}·{@link #KIND_FOREIGN_KEY}.
+     *  MySQL은 UK를 인덱스로, PK를 이름 없는 상수 제약으로 실현한다 */
+    String dropConstraint(DdlContent.Table table, String name, String kind);
+
+    /** 인덱스 삭제 — MySQL·SQL Server는 ON 절이 필요하다 */
+    String dropIndex(DdlContent.Table table, DdlContent.Index index);
+
+    /** 코멘트 갱신 문장들(세미콜론 없이) — 논리명이 바뀐 테이블·컬럼 대상.
+     *  column이 null이면 테이블 코멘트. 줄 주석 방언(common·mssql)은 갱신 문장이 없다(빈 목록) */
+    List<String> commentRefresh(DdlContent.Table table, DdlContent.Column column);
 }

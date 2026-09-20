@@ -47,6 +47,9 @@ class ModelControllerWebTest {
     @MockitoBean
     private net.java21.crowfoot.api.model.service.DeployService deployService;
 
+    @MockitoBean
+    private net.java21.crowfoot.api.model.service.MigrationDdlService migrationDdlService;
+
     @Test
     @DisplayName("생성은 201 + Location(외부 URI) + databaseType·캔버스 크기를 응답한다")
     void createReturns201WithLocation() throws Exception {
@@ -247,5 +250,43 @@ class ModelControllerWebTest {
                         .contentType(APPLICATION_JSON)
                         .content("{\"connectionId\":\"abc\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("DB→문서 마이그레이션 DDL은 커넥션 경로로 생성 결과를 응답한다 (1.7.1)")
+    void connectionMigrationReturnsSql() throws Exception {
+        // given
+        given(migrationDdlService.generateConnectionMigration(7L, 77L, 501L, 9L)).willReturn(
+                new net.java21.crowfoot.api.model.dto.MigrationDdlResponse(
+                        "-- MySQL 마이그레이션 DDL (DB → 문서)\n\nALTER TABLE users ADD COLUMN grade VARCHAR(10);",
+                        List.of(), 1, "DB", "문서"));
+
+        // when & then
+        mockMvc.perform(get("/core/workspaces/77/models/501/connections/9/migration")
+                        .header("X-USER-ID", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.statementCount").value(1))
+                .andExpect(jsonPath("$.response.fromLabel").value("DB"))
+                .andExpect(jsonPath("$.response.toLabel").value("문서"))
+                .andExpect(jsonPath("$.response.sql").value(
+                        "-- MySQL 마이그레이션 DDL (DB → 문서)\n\nALTER TABLE users ADD COLUMN grade VARCHAR(10);"));
+    }
+
+    @Test
+    @DisplayName("DB→문서 마이그레이션 DDL — DBMS 불일치는 400 INVALID_REQUEST다")
+    void connectionMigrationRejectsDbmsMismatch() throws Exception {
+        // given
+        org.mockito.BDDMockito.willThrow(new net.java21.crowfoot.common.error.BusinessException(
+                        net.java21.crowfoot.common.error.ErrorCode.INVALID_REQUEST,
+                        "문서의 DBMS(postgresql)와 커넥션의 DBMS(mysql)가 다릅니다"))
+                .given(migrationDdlService).generateConnectionMigration(7L, 77L, 501L, 9L);
+
+        // when & then
+        mockMvc.perform(get("/core/workspaces/77/models/501/connections/9/migration")
+                        .header("X-USER-ID", "7"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.header.resultCode").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.header.resultMessage").value(
+                        "문서의 DBMS(postgresql)와 커넥션의 DBMS(mysql)가 다릅니다"));
     }
 }

@@ -79,6 +79,47 @@ public final class Dialects {
             return "CREATE INDEX " + index.name() + " ON " + table.physicalName()
                     + " (" + indexColumns(table, index) + ")";
         }
+
+        /* ---------- 마이그레이션 ALTER — ANSI 기본형. 방언이 문법 차이만 덮어쓴다 ---------- */
+
+        @Override
+        public String addColumn(DdlContent.Table table, DdlContent.Column column) {
+            return "ALTER TABLE " + table.physicalName() + " ADD COLUMN "
+                    + DdlGenerator.columnAttributes(column, this) + ";";
+        }
+
+        @Override
+        public String alterColumn(DdlContent.Table table, DdlContent.Column before, DdlContent.Column after) {
+            // 기본형은 타입+NULL 허용 여부만 — 기본값 변경은 방언마다 문법이 갈라져 각자 덮어쓴다
+            StringBuilder statement = new StringBuilder("ALTER TABLE ").append(table.physicalName())
+                    .append(" ALTER COLUMN ").append(after.physicalName())
+                    .append(' ').append(columnType(after));
+            if (!after.nullable()) {
+                statement.append(" NOT NULL");
+            }
+            return statement.append(";").toString();
+        }
+
+        @Override
+        public String dropColumn(DdlContent.Table table, DdlContent.Column column) {
+            return "ALTER TABLE " + table.physicalName() + " DROP COLUMN " + column.physicalName() + ";";
+        }
+
+        @Override
+        public String dropConstraint(DdlContent.Table table, String name, String kind) {
+            return "ALTER TABLE " + table.physicalName() + " DROP CONSTRAINT " + name + ";";
+        }
+
+        @Override
+        public String dropIndex(DdlContent.Table table, DdlContent.Index index) {
+            return "DROP INDEX " + index.name() + ";";
+        }
+
+        @Override
+        public List<String> commentRefresh(DdlContent.Table table, DdlContent.Column column) {
+            // 코멘트가 줄 주석으로만 존재하는 방언은 CREATE 본문 외에 갱신할 곳이 없다
+            return List.of();
+        }
     }
 
     /* ---------- 방언별 차이 지점 ---------- */
@@ -103,6 +144,51 @@ public final class Dialects {
         public String tableOption(DdlContent.Table table) {
             return table.logicalName() == null ? "" : " COMMENT=" + stringLiteral(table.logicalName());
         }
+
+        @Override
+        public String addColumn(DdlContent.Table table, DdlContent.Column column) {
+            // 코멘트는 컬럼 정의에 인라인 — 추가 시점에 함께 심는다
+            return "ALTER TABLE " + table.physicalName() + " ADD COLUMN "
+                    + withComment(DdlGenerator.columnAttributes(column, this), columnComment(column)) + ";";
+        }
+
+        @Override
+        public String alterColumn(DdlContent.Table table, DdlContent.Column before, DdlContent.Column after) {
+            // MODIFY는 전체 재정의다 — 생략한 속성·코멘트가 사라지므로 after 정의를 전부 다시 쓴다
+            return "ALTER TABLE " + table.physicalName() + " MODIFY COLUMN "
+                    + withComment(DdlGenerator.columnAttributes(after, this), columnComment(after)) + ";";
+        }
+
+        @Override
+        public String dropConstraint(DdlContent.Table table, String name, String kind) {
+            // UK는 인덱스로, PK는 이름 없는 상수 제약으로 실현된다 — 이름 문법이 각자 다르다
+            String target = switch (kind == null ? "" : kind) {
+                case KIND_PRIMARY -> "PRIMARY KEY";
+                case KIND_UNIQUE -> "INDEX " + name;
+                case KIND_FOREIGN_KEY -> "FOREIGN KEY " + name;
+                default -> "CONSTRAINT " + name;
+            };
+            return "ALTER TABLE " + table.physicalName() + " DROP " + target + ";";
+        }
+
+        @Override
+        public String dropIndex(DdlContent.Table table, DdlContent.Index index) {
+            return "DROP INDEX " + index.name() + " ON " + table.physicalName() + ";";
+        }
+
+        @Override
+        public List<String> commentRefresh(DdlContent.Table table, DdlContent.Column column) {
+            if (column == null) {
+                return table.logicalName() == null || tableOption(table).isEmpty() ? List.of()
+                        : List.of("ALTER TABLE " + table.physicalName() + tableOption(table));
+            }
+            // 코멘트 해제는 MODIFY로 표현할 수 없다 — 논리명이 있을 때만 갱신한다
+            if (column.logicalName() == null) {
+                return List.of();
+            }
+            return List.of("ALTER TABLE " + table.physicalName() + " MODIFY COLUMN "
+                    + DdlGenerator.columnAttributes(column, this) + " " + columnComment(column));
+        }
     }
 
     private static final class PostgresDialect extends BaseDialect {
@@ -121,6 +207,41 @@ public final class Dialects {
         public List<String> commentStatements(DdlContent.Table table) {
             return commentOnStatements(table);
         }
+
+        @Override
+        public String alterColumn(DdlContent.Table table, DdlContent.Column before, DdlContent.Column after) {
+            // 절 조합 — 한 문장에 쉼표로 묶는다(SET TYPE / SET·DROP NOT NULL / SET·DROP DEFAULT)
+            List<String> clauses = new ArrayList<>();
+            String name = after.physicalName();
+            if (!DdlGenerator.sameType(before, after)) {
+                clauses.add("ALTER COLUMN " + name + " TYPE " + columnType(after));
+            }
+            if (before.nullable() != after.nullable()) {
+                clauses.add("ALTER COLUMN " + name + (after.nullable() ? " DROP NOT NULL" : " SET NOT NULL"));
+            }
+            String beforeDefault = DdlGenerator.normalizedDefault(before);
+            String afterDefault = DdlGenerator.normalizedDefault(after);
+            if (!java.util.Objects.equals(beforeDefault, afterDefault)) {
+                clauses.add(afterDefault == null
+                        ? "ALTER COLUMN " + name + " DROP DEFAULT"
+                        : "ALTER COLUMN " + name + " SET DEFAULT " + afterDefault);
+            }
+            if (clauses.isEmpty()) {
+                // 반영 가능한 차이가 없다(예: AI만 변경) — 문장 없이 생성기 경고로 남긴다
+                return "";
+            }
+            return "ALTER TABLE " + table.physicalName() + " " + String.join(", ", clauses) + ";";
+        }
+
+        @Override
+        public List<String> commentRefresh(DdlContent.Table table, DdlContent.Column column) {
+            return column == null
+                    ? (table.logicalName() == null ? List.of() : List.of("COMMENT ON TABLE "
+                            + table.physicalName() + " IS " + stringLiteral(table.logicalName())))
+                    : (column.logicalName() == null ? List.of() : List.of("COMMENT ON COLUMN "
+                            + table.physicalName() + "." + column.physicalName()
+                            + " IS " + stringLiteral(column.logicalName())));
+        }
     }
 
     private static final class OracleDialect extends BaseDialect {
@@ -133,6 +254,20 @@ public final class Dialects {
         public String autoIncrementInline(DdlContent.Column column) {
             // 12c+ IDENTITY — 11g 시퀀스+트리거 방식은 후보
             return column.autoIncrement() ? "GENERATED BY DEFAULT AS IDENTITY" : null;
+        }
+
+        @Override
+        public String addColumn(DdlContent.Table table, DdlContent.Column column) {
+            // Oracle은 ADD 키워드 없이 괄호 묶음 — DEFAULT가 NOT NULL 앞에 온다(문법 다이어그램 순서)
+            return "ALTER TABLE " + table.physicalName() + " ADD ("
+                    + oracleColumnAttributes(column, this) + ");";
+        }
+
+        @Override
+        public String alterColumn(DdlContent.Table table, DdlContent.Column before, DdlContent.Column after) {
+            // MODIFY (전체 재정의) — DEFAULT → NOT NULL → IDENTITY 순서
+            return "ALTER TABLE " + table.physicalName() + " MODIFY ("
+                    + oracleColumnAttributes(after, this) + ");";
         }
 
         @Override
@@ -162,6 +297,18 @@ public final class Dialects {
         public String createTablePrefix(DdlContent.Table table) {
             return lineCommentPrefix(table);
         }
+
+        @Override
+        public String addColumn(DdlContent.Table table, DdlContent.Column column) {
+            // SQL Server는 COLUMN 키워드를 쓰지 않는다
+            return "ALTER TABLE " + table.physicalName() + " ADD "
+                    + DdlGenerator.columnAttributes(column, this) + ";";
+        }
+
+        @Override
+        public String dropIndex(DdlContent.Table table, DdlContent.Index index) {
+            return "DROP INDEX " + index.name() + " ON " + table.physicalName() + ";";
+        }
     }
 
     /** 공용(논리) 폴백 — 미등록 DBMS 코드. 타입은 논리 코드 그대로 */
@@ -183,6 +330,28 @@ public final class Dialects {
     }
 
     /* ---------- 방언 공용 헬퍼 ---------- */
+
+    /** 컬럼 속성 뒤에 코멘트 조각 붙이기 — 코멘트 없으면 속성 그대로 */
+    private static String withComment(String attributes, String comment) {
+        return comment.isEmpty() ? attributes : attributes + " " + comment;
+    }
+
+    /** Oracle 컬럼 속성 — DEFAULT가 NOT NULL 앞에 오는 Oracle 문법 순서 */
+    private static String oracleColumnAttributes(DdlContent.Column column, SqlDialect dialect) {
+        StringBuilder attributes = new StringBuilder(column.physicalName())
+                .append(' ').append(dialect.columnType(column));
+        if (column.defaultValue() != null) {
+            attributes.append(" DEFAULT ").append(column.defaultValue());
+        }
+        if (!column.nullable()) {
+            attributes.append(" NOT NULL");
+        }
+        String autoIncrement = dialect.autoIncrementInline(column);
+        if (autoIncrement != null) {
+            attributes.append(' ').append(autoIncrement);
+        }
+        return attributes.toString();
+    }
 
     /** COMMENT ON 방언(PG·Oracle) 공통 — 테이블·컬럼 코멘트(논리명)를 별도 문장으로 내보낸다 */
     private static List<String> commentOnStatements(DdlContent.Table table) {

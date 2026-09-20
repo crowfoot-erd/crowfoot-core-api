@@ -19,11 +19,14 @@ import java.util.Map;
  */
 public final class DdlGenerator {
 
-    /** 생성 경고 — Capability 선표시(§3.1): 스크립트 앞에 목록으로 보여준다 */
+    /** 생성 경고 — Capability 선표시(§3.1): 스크립트 앞에 목록으로 보여준다.
+     *  DESTRUCTIVE·NOT_INTROSPECTED는 마이그레이션 DDL(§3.3) 전용 코드다 */
     public record Warning(String code, String message) {
         public static final String COMMON_DIALECT = "COMMON_DIALECT";
         public static final String VALIDATION = "VALIDATION";
         public static final String EMPTY_TABLE = "EMPTY_TABLE";
+        public static final String DESTRUCTIVE = "DESTRUCTIVE";
+        public static final String NOT_INTROSPECTED = "NOT_INTROSPECTED";
     }
 
     public record Result(String sql, List<Warning> warnings, List<String> statements) {
@@ -93,7 +96,7 @@ public final class DdlGenerator {
 
     /* ---------- 검증 경고 — 에디터 validateModel error 규칙과 같은 기준 ---------- */
 
-    private static List<Warning> validationWarnings(DdlContent content) {
+    static List<Warning> validationWarnings(DdlContent content) {
         List<Warning> warnings = new ArrayList<>();
 
         // 키 이름 네임스페이스 — PK·UK·인덱스·FK 제약 이름을 모은다(공백 없음·대소문자 무시)
@@ -160,36 +163,53 @@ public final class DdlGenerator {
 
     /* ---------- CREATE TABLE ---------- */
 
-    /** 컬럼 정의 한 줄(들여쓰기 포함, 코멘트 제외) — NOT NULL → DEFAULT(원문) → AI 순서 */
-    private static String columnDefinition(DdlContent.Column column, SqlDialect dialect) {
-        StringBuilder parts = new StringBuilder("    ").append(column.physicalName())
+    /** 컬럼 속성 정의(들여쓰기 없음) — CREATE 정의와 마이그레이션 ADD/MODIFY가 공유.
+     *  NOT NULL → DEFAULT(원문) → AI 순서. 기본값은 리터럴/표현식 구분이 스키마에 없어 원문을 신뢰한다 */
+    static String columnAttributes(DdlContent.Column column, SqlDialect dialect) {
+        StringBuilder attributes = new StringBuilder(column.physicalName())
                 .append(' ').append(dialect.columnType(column));
         if (!column.nullable()) {
-            parts.append(" NOT NULL");
+            attributes.append(" NOT NULL");
         }
-        // 기본값은 원문 그대로 — 리터럴/표현식 구분이 스키마에 없어 사용자 표현식을 신뢰한다
         if (column.defaultValue() != null) {
-            parts.append(" DEFAULT ").append(column.defaultValue());
+            attributes.append(" DEFAULT ").append(column.defaultValue());
         }
         String autoIncrement = dialect.autoIncrementInline(column);
         if (autoIncrement != null) {
-            parts.append(' ').append(autoIncrement);
+            attributes.append(' ').append(autoIncrement);
         }
-        return parts.toString();
+        return attributes.toString();
     }
 
-    private static String createTableStatement(DdlContent.Table table, SqlDialect dialect) {
+    /** 컬럼 정의 한 줄(들여쓰기 포함, 코멘트 제외) */
+    private static String columnDefinition(DdlContent.Column column, SqlDialect dialect) {
+        return "    " + columnAttributes(column, dialect);
+    }
+
+    /** PK·UK 제약 정의 몸통({@code CONSTRAINT name KIND (cols)}) — CREATE 인라인과
+     *  마이그레이션 ADD CONSTRAINT가 공유. kind는 "PRIMARY KEY"·"UNIQUE". 컬럼이 없으면 null */
+    public static String constraintDefinition(String kind, DdlContent.Table table,
+                                              DdlContent.KeyConstraint constraint) {
+        String columns = columnNames(table, constraint.columnIds());
+        if (columns.isEmpty()) {
+            return null;
+        }
+        return "CONSTRAINT " + constraint.name() + " " + kind + " (" + columns + ")";
+    }
+
+    /** CREATE TABLE 문(마이그레이션의 테이블 추가가 재사용) */
+    public static String createTableStatement(DdlContent.Table table, SqlDialect dialect) {
         List<String> constraints = new ArrayList<>();
         if (table.primaryKey() != null) {
-            String columns = columnNames(table, table.primaryKey().columnIds());
-            if (!columns.isEmpty()) {
-                constraints.add("    CONSTRAINT " + table.primaryKey().name() + " PRIMARY KEY (" + columns + ")");
+            String definition = constraintDefinition("PRIMARY KEY", table, table.primaryKey());
+            if (definition != null) {
+                constraints.add("    " + definition);
             }
         }
         for (DdlContent.KeyConstraint unique : table.uniques()) {
-            String columns = columnNames(table, unique.columnIds());
-            if (!columns.isEmpty()) {
-                constraints.add("    CONSTRAINT " + unique.name() + " UNIQUE (" + columns + ")");
+            String definition = constraintDefinition("UNIQUE", table, unique);
+            if (definition != null) {
+                constraints.add("    " + definition);
             }
         }
 
@@ -246,41 +266,66 @@ public final class DdlGenerator {
             if (child == null || parent == null) {
                 continue;
             }
-            // 매핑 순서 = 부모 PK 정의 순서(에디터 relationship 빌더 규칙) — FK 컬럼 순서를 그대로 따른다
-            List<String> childCols = new ArrayList<>();
-            List<String> parentCols = new ArrayList<>();
-            for (DdlContent.ColumnMapping mapping : rel.columnMappings()) {
-                String childName = columnName(child, mapping.childColumnId());
-                String parentName = columnName(parent, mapping.parentColumnId());
-                if (childName != null && parentName != null) {
-                    childCols.add(childName);
-                    parentCols.add(parentName);
-                }
+            String statement = foreignKeyStatement(child, parent, rel);
+            if (statement != null) {
+                statements.add(statement);
             }
-            if (childCols.isEmpty()) {
-                continue;
-            }
-
-            StringBuilder statement = new StringBuilder("ALTER TABLE ").append(child.physicalName())
-                    .append(" ADD CONSTRAINT ").append(rel.fkName())
-                    .append(" FOREIGN KEY (").append(String.join(", ", childCols)).append(")")
-                    .append(" REFERENCES ").append(parent.physicalName())
-                    .append(" (").append(String.join(", ", parentCols)).append(")");
-            String onDelete = actionSql(rel.onDelete());
-            String onUpdate = actionSql(rel.onUpdate());
-            if (onDelete != null) {
-                statement.append(" ON DELETE ").append(onDelete);
-            }
-            if (onUpdate != null) {
-                statement.append(" ON UPDATE ").append(onUpdate);
-            }
-            statements.add(statement.append(";").toString());
         }
         return statements;
     }
 
+    /** FK ALTER 문(세미콜론 포함, 마이그레이션의 FK 추가가 재사용) — 매핑 컬럼이 하나도
+     *  안 남으면 null. 매핑 순서 = 부모 PK 정의 순서(에디터 relationship 빌더 규칙)를 그대로 따른다 */
+    public static String foreignKeyStatement(DdlContent.Table child, DdlContent.Table parent,
+                                             DdlContent.Relationship rel) {
+        List<String> childCols = new ArrayList<>();
+        List<String> parentCols = new ArrayList<>();
+        for (DdlContent.ColumnMapping mapping : rel.columnMappings()) {
+            String childName = columnName(child, mapping.childColumnId());
+            String parentName = columnName(parent, mapping.parentColumnId());
+            if (childName != null && parentName != null) {
+                childCols.add(childName);
+                parentCols.add(parentName);
+            }
+        }
+        if (childCols.isEmpty()) {
+            return null;
+        }
+
+        StringBuilder statement = new StringBuilder("ALTER TABLE ").append(child.physicalName())
+                .append(" ADD CONSTRAINT ").append(rel.fkName())
+                .append(" FOREIGN KEY (").append(String.join(", ", childCols)).append(")")
+                .append(" REFERENCES ").append(parent.physicalName())
+                .append(" (").append(String.join(", ", parentCols)).append(")");
+        String onDelete = actionSql(rel.onDelete());
+        String onUpdate = actionSql(rel.onUpdate());
+        if (onDelete != null) {
+            statement.append(" ON DELETE ").append(onDelete);
+        }
+        if (onUpdate != null) {
+            statement.append(" ON UPDATE ").append(onUpdate);
+        }
+        return statement.append(";").toString();
+    }
+
     private static String actionSql(String action) {
         return action == null ? null : ACTION_SQL.get(action);
+    }
+
+    /* ---------- 스키마 비교 헬퍼 — SchemaDiffer·PG 방언이 공유 ---------- */
+
+    /** 물리 타입 동등 — 논리 코드·길이·정밀도·스케일 조합(조립 결과를 좌우하는 전부) */
+    static boolean sameType(DdlContent.Column before, DdlContent.Column after) {
+        return java.util.Objects.equals(before.dataType(), after.dataType())
+                && java.util.Objects.equals(before.length(), after.length())
+                && java.util.Objects.equals(before.precision(), after.precision())
+                && java.util.Objects.equals(before.scale(), after.scale());
+    }
+
+    /** 기본값 정규화 — 빈 문자열과 null은 같은 것으로 본다(스키마 조회가 ''를 null로 돌리는 계열) */
+    static String normalizedDefault(DdlContent.Column column) {
+        String value = column.defaultValue();
+        return value == null || value.isEmpty() ? null : value;
     }
 
     /** 컬럼 물리명 목록 — 없는 id(삭제 cascade 잔여 등)는 건너뛴다 */

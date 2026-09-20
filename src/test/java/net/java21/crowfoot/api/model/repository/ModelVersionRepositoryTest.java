@@ -102,16 +102,67 @@ class ModelVersionRepositoryTest {
         modelVersionRepository.save(new ModelVersion(999L, 9L, "{}", null, null,
                 marcoId, Instant.now())); // 다른 문서 — 경계 밖
 
-        List<VersionRow> page1 = modelVersionQueryRepository.search(modelId, 1, 2);
+        List<VersionRow> page1 = modelVersionQueryRepository.search(modelId, null, 1, 2);
 
-        assertThat(modelVersionQueryRepository.count(modelId)).isEqualTo(3);
+        assertThat(modelVersionQueryRepository.count(modelId, null)).isEqualTo(3);
         assertThat(page1).hasSize(2);
         assertThat(page1).extracting(VersionRow::version).containsExactly(3L, 2L); // 최신순 + 페이징
         assertThat(page1.get(0).createdByName()).isEqualTo("marco");
         assertThat(page1.get(0).changeSummary()).isEqualTo("{\"layoutOnly\":true}");
         assertThat(page1.get(1).memo()).isEqualTo("초안 메모");
         // 투영에는 content가 없다 — 행 객체에 content 필드 자체가 없음(컴파일 타임 보장)
-        List<VersionRow> page2 = modelVersionQueryRepository.search(modelId, 2, 2);
+        List<VersionRow> page2 = modelVersionQueryRepository.search(modelId, null, 2, 2);
         assertThat(page2).extracting(VersionRow::version).containsExactly(1L);
+    }
+
+    @Test
+    @DisplayName("keyword는 memo 부분 일치(대소문자 무시)다 — memo 없는 행은 keyword 지정 시 제외")
+    void searchFiltersByMemoKeyword() {
+        snapshot(1L, null, null);
+        snapshot(2L, null, "등급 컬럼 추가");
+        snapshot(3L, null, "GRADE 정리");
+
+        List<VersionRow> hits = modelVersionQueryRepository.search(modelId, "등급", 1, 20);
+
+        assertThat(modelVersionQueryRepository.count(modelId, "등급")).isEqualTo(1);
+        assertThat(hits).extracting(VersionRow::version).containsExactly(2L);
+        // 대소문자 무시 — 소문자로도 잡힌다
+        assertThat(modelVersionQueryRepository.search(modelId, "grade", 1, 20))
+                .extracting(VersionRow::version).containsExactly(3L);
+        // 빈·공백 keyword는 전체(조건 없음)
+        assertThat(modelVersionQueryRepository.search(modelId, "  ", 1, 20)).hasSize(3);
+        // 다른 메모 키워드 — memo NULL(v1)은 어느 keyword에도 잡히지 않는다
+        assertThat(modelVersionQueryRepository.search(modelId, "정리", 1, 20))
+                .extracting(VersionRow::version).containsExactly(3L);
+    }
+
+    @Test
+    @DisplayName("deleteByModelIdAndVersionLessThanEqual — 경계 버전은 지우고 cutoff+1부터 남긴다(보존 정책)")
+    void deletePrunesBelowCutoffOnly() {
+        snapshot(1L, null, null);
+        snapshot(49L, null, null);
+        snapshot(50L, null, null);
+        snapshot(51L, null, null);
+        snapshot(52L, null, null);
+
+        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(modelId, 50L);
+
+        assertThat(deleted).isEqualTo(3); // v1·v49·v50
+        assertThat(modelVersionRepository.findByModelIdAndVersion(modelId, 50L)).isEmpty();
+        assertThat(modelVersionRepository.findByModelIdAndVersion(modelId, 51L)).isPresent();
+        assertThat(modelVersionRepository.findByModelIdAndVersion(modelId, 52L)).isPresent();
+    }
+
+    @Test
+    @DisplayName("보존 정책 삭제는 다른 문서의 스냅샷을 건드리지 않는다")
+    void deleteScopesToModel() {
+        snapshot(1L, null, null);
+        modelVersionRepository.save(new ModelVersion(999L, 1L, "{}", null, null,
+                marcoId, Instant.now()));
+
+        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(modelId, 1L);
+
+        assertThat(deleted).isEqualTo(1);
+        assertThat(modelVersionRepository.findByModelIdAndVersion(999L, 1L)).isPresent();
     }
 }

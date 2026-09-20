@@ -67,6 +67,8 @@ class ModelServiceTest {
     @Mock
     private ModelVersionRepository modelVersionRepository;
     @Mock
+    private ModelVersionPruner modelVersionPruner;
+    @Mock
     private UserRepository userRepository;
     @Mock
     private RoleChecker roleChecker;
@@ -79,8 +81,8 @@ class ModelServiceTest {
     void setUp() {
         // ObjectMapper는 실물 — JSON 파싱 검증 자체가 테스트 대상이다
         modelService = new ModelService(modelRepository, modelDiagramRepository, modelQueryRepository,
-                databaseTypeRepository, modelVersionRepository, userRepository, roleChecker,
-                auditRecorder, new ObjectMapper());
+                databaseTypeRepository, modelVersionRepository, modelVersionPruner, userRepository,
+                roleChecker, auditRecorder, new ObjectMapper());
     }
 
 

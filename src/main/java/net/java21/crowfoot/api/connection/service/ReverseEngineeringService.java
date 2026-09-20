@@ -22,6 +22,7 @@ import net.java21.crowfoot.api.model.dto.ModelResponse;
 import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
+import net.java21.crowfoot.api.model.service.ModelVersionPruner;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -55,6 +56,7 @@ public class ReverseEngineeringService {
     private final ModelRepository modelRepository;
     private final ModelDiagramRepository modelDiagramRepository;
     private final ModelVersionRepository modelVersionRepository;
+    private final ModelVersionPruner modelVersionPruner;
     private final UserRepository userRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
@@ -101,6 +103,7 @@ public class ReverseEngineeringService {
         // v0 스냅샷 — 리버스로 태어난 문서의 요약은 고정형 JSON(08-core/02-model.md 1.11)
         modelVersionRepository.save(new ModelVersion(model.getId(), model.getVersion(),
                 assembled.content(), reverseSummary(assembled), null, userId, model.getCreatedAt()));
+        modelVersionPruner.prune(model.getId(), model.getVersion(), userId);
         auditRecorder.record(userId, "CONNECTION_REVERSE_ENGINEERED", "CONNECTION",
                 Long.toString(connectionId), Map.of(
                         "modelId", Long.toString(model.getId()),

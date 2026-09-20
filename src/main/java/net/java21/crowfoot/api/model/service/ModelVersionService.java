@@ -40,25 +40,30 @@ public class ModelVersionService {
     private final ModelRepository modelRepository;
     private final ModelVersionRepository modelVersionRepository;
     private final ModelVersionQueryRepository modelVersionQueryRepository;
+    private final ModelVersionPruner modelVersionPruner;
     private final UserRepository userRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
 
-    /** 목록(Viewer 이상 — 1.11) — content 없는 요약 행, 최신순 페이징 */
+    /** 목록(Viewer 이상 — 1.11) — content 없는 요약 행, 최신순 페이징. keyword는 메모 부분 일치(대소문자 무시) */
     @Transactional(readOnly = true)
     public ListApiResponse<ModelVersionEntryResponse> list(long userId, long workspaceId, long modelId,
-                                                           Integer page, Integer size) {
+                                                           String keyword, Integer page, Integer size) {
         roleChecker.requireMember(userId, workspaceId);
         requireModelInWorkspace(modelId, workspaceId);
+        String trimmed = keyword == null ? null : keyword.trim();
+        if (trimmed != null && trimmed.isEmpty()) {
+            trimmed = null;
+        }
         int normalizedPage = page == null || page < 1 ? 1 : page;
         int normalizedSize = size == null || size < 1 ? 20 : Math.min(size, 100);
 
-        long totalCount = modelVersionQueryRepository.count(modelId);
+        long totalCount = modelVersionQueryRepository.count(modelId, trimmed);
         if (totalCount == 0) {
             return ListApiResponse.paged(List.of(), normalizedPage, normalizedSize, 0);
         }
         List<ModelVersionEntryResponse> responses = modelVersionQueryRepository
-                .search(modelId, normalizedPage, normalizedSize)
+                .search(modelId, trimmed, normalizedPage, normalizedSize)
                 .stream()
                 .map(row -> new ModelVersionEntryResponse((int) row.version(), row.changeSummary(),
                         row.memo(), userRef(row.createdById(), row.createdByName()), row.createdAt()))
@@ -127,6 +132,7 @@ public class ModelVersionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
         modelVersionRepository.save(new ModelVersion(modelId, model.getVersion(),
                 content, "{\"restoredFrom\":" + version + "}", null, userId, now));
+        modelVersionPruner.prune(modelId, model.getVersion(), userId);
         auditRecorder.record(userId, "MODEL_RESTORED", "MODEL",
                 Long.toString(modelId), Map.of(
                         "restoredFrom", version,

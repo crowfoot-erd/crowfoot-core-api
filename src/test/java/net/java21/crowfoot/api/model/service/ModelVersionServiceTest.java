@@ -59,6 +59,8 @@ class ModelVersionServiceTest {
     @Mock
     private ModelVersionQueryRepository modelVersionQueryRepository;
     @Mock
+    private ModelVersionPruner modelVersionPruner;
+    @Mock
     private UserRepository userRepository;
     @Mock
     private RoleChecker roleChecker;
@@ -70,7 +72,7 @@ class ModelVersionServiceTest {
     @BeforeEach
     void setUp() {
         service = new ModelVersionService(modelRepository, modelVersionRepository,
-                modelVersionQueryRepository, userRepository, roleChecker, auditRecorder);
+                modelVersionQueryRepository, modelVersionPruner, userRepository, roleChecker, auditRecorder);
     }
 
     private static JsonNode jsonNode(String json) {
@@ -98,14 +100,14 @@ class ModelVersionServiceTest {
     @DisplayName("목록은 content 없는 요약 행을 최신순 페이징 포맷으로 내린다 — 기록자 이름은 조인 결과")
     void listReturnsPagedEntriesWithoutContent() {
         stubModelInWorkspace();
-        given(modelVersionQueryRepository.count(501L)).willReturn(3L);
-        given(modelVersionQueryRepository.search(501L, 1, 2)).willReturn(List.of(
+        given(modelVersionQueryRepository.count(501L, null)).willReturn(3L);
+        given(modelVersionQueryRepository.search(501L, null, 1, 2)).willReturn(List.of(
                 new VersionRow(3L, "{\"layoutOnly\":true}", null, 7L, "marco",
                         Instant.parse("2026-09-20T05:00:00Z")),
                 new VersionRow(2L, null, "초안 메모", 7L, "marco",
                         Instant.parse("2026-09-19T05:00:00Z"))));
 
-        ListApiResponse<ModelVersionEntryResponse> response = service.list(7L, 77L, 501L, 1, 2);
+        ListApiResponse<ModelVersionEntryResponse> response = service.list(7L, 77L, 501L, null, 1, 2);
 
         verify(roleChecker).requireMember(7L, 77L);
         assertThat(response.totalCount()).isEqualTo(3);
@@ -114,8 +116,26 @@ class ModelVersionServiceTest {
         assertThat(response.responses().get(0).createdBy().name()).isEqualTo("marco");
         assertThat(response.responses().get(1).memo()).isEqualTo("초안 메모");
         // 페이지 정규화 — 미지정은 1·20, 상한 100
-        service.list(7L, 77L, 501L, null, null);
-        verify(modelVersionQueryRepository).search(501L, 1, 20);
+        service.list(7L, 77L, 501L, null, null, null);
+        verify(modelVersionQueryRepository).search(501L, null, 1, 20);
+    }
+
+    @Test
+    @DisplayName("목록 keyword는 trim·빈값을 null로 정규화해 리포지토리에 위임한다 — 메모 검색")
+    void listNormalizesKeyword() {
+        stubModelInWorkspace();
+        given(modelVersionQueryRepository.count(501L, "등급")).willReturn(1L);
+        given(modelVersionQueryRepository.search(501L, "등급", 1, 20)).willReturn(List.of(
+                new VersionRow(1L, null, "등급 컬럼 추가", 7L, "marco",
+                        Instant.parse("2026-09-20T05:00:00Z"))));
+
+        service.list(7L, 77L, 501L, "  등급  ", 1, 20);
+        verify(modelVersionQueryRepository).search(501L, "등급", 1, 20);
+
+        // 빈·공백 keyword는 전체 목록(null 위임)
+        given(modelVersionQueryRepository.count(501L, null)).willReturn(3L);
+        service.list(7L, 77L, 501L, "   ", null, null);
+        verify(modelVersionQueryRepository).search(501L, null, 1, 20);
     }
 
     @Test
@@ -123,11 +143,11 @@ class ModelVersionServiceTest {
     void listRejectsUnknownModel() {
         given(modelRepository.findVersionRowByIdAndWorkspaceId(501L, 77L)).willReturn(List.of());
 
-        assertThatThrownBy(() -> service.list(7L, 77L, 501L, null, null))
+        assertThatThrownBy(() -> service.list(7L, 77L, 501L, null, null, null))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
 
-        verify(modelVersionQueryRepository, never()).count(anyLong());
+        verify(modelVersionQueryRepository, never()).count(anyLong(), anyString());
     }
 
     @Test
@@ -232,6 +252,8 @@ class ModelVersionServiceTest {
         assertThat(snapshotCaptor.getValue().getContent()).isEqualTo(pastContent);
         assertThat(snapshotCaptor.getValue().getChangeSummary()).isEqualTo("{\"restoredFrom\":2}");
         assertThat(snapshotCaptor.getValue().getMemo()).isNull();
+        // 복원도 보존 정책(1.11.6) 정리를 같은 트랜잭션에서 수행한다
+        verify(modelVersionPruner).prune(501L, 4L, 7L);
         verify(auditRecorder).record(eq(7L), eq("MODEL_RESTORED"), eq("MODEL"), eq("501"), any());
     }
 
