@@ -34,6 +34,9 @@ public enum ErrorCode {
     // Workspace
     WORKSPACE_NOT_FOUND(HttpStatus.NOT_FOUND, "WORKSPACE_NOT_FOUND", "워크스페이스를 찾을 수 없습니다"),
 
+    // WorkspaceTerm (08-core/01-workspace.md Section 4)
+    TERM_NOT_FOUND(HttpStatus.NOT_FOUND, "TERM_NOT_FOUND", "용어 사전 항목을 찾을 수 없습니다"),
+
     // Membership (08-core/03-membership.md Section 2)
     MEMBERSHIP_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBERSHIP_NOT_FOUND", "멤버십 정보를 찾을 수 없습니다"),
     MEMBERSHIP_DUPLICATED(HttpStatus.CONFLICT, "MEMBERSHIP_DUPLICATED", "이미 부여된 대상입니다"),
