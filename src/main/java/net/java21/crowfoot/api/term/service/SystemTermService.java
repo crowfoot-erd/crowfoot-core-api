@@ -37,8 +37,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SystemTermService {
 
-    /** 시스템 사전 전체 상한 — 관리자가 등록하는 자원이지만 방치 상한을 둔다 */
-    static final int MAX_SYSTEM_TERMS = 5_000;
+    /** 전체 건수 상한은 두지 않는다(v1.15 — 대량 표준 사전 3.4만 토큰 시드).
+     *  등록은 관리자(AdminGuard) 전용이라 무분별한 증가 경로가 없고, 목록은 항상 페이징된다. */
 
     /** 언어→라벨 맵 엔트리 상한 — 관리 폼 로케일 후보(ko/en/ja/zh)보다 여유를 둔다 */
     private static final int MAX_LABEL_ENTRIES = 8;
@@ -112,10 +112,6 @@ public class SystemTermService {
 
         SystemTerm entity = termRepository.findByTerm(term).orElse(null);
         if (entity == null) {
-            if (termRepository.count() >= MAX_SYSTEM_TERMS) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                        "시스템 사전은 " + MAX_SYSTEM_TERMS + "개까지 등록할 수 있습니다");
-            }
             entity = new SystemTerm(term, labelsJson, typesJson, adminId);
         } else {
             entity.setLabels(labelsJson);

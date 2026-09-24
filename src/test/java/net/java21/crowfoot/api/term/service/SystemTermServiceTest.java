@@ -118,19 +118,24 @@ class SystemTermServiceTest {
     }
 
     @Test
-    @DisplayName("사용자 목록 — 파라미터를 정규화해 넘긴다(page 1 클램프·size 100 상한·letter 소문자·keyword trim)")
+    @DisplayName("사용자 목록 — 파라미터를 정규화해 넘긴다(page 1 클램프·size 100,000 상한·letter 소문자·keyword trim)")
     void listNormalizesPagingAndFilters() {
         given(queryRepository.count("이메일", "e")).willReturn(1L);
-        given(queryRepository.search("이메일", "e", 0L, 100)).willReturn(java.util.List.of(
+        given(queryRepository.search("이메일", "e", 0L, 100_000)).willReturn(java.util.List.of(
                 saved(21L, "email", "{\"ko\":\"이메일\"}", null)));
 
+        // size 500은 통과(추론의 전체 로딩), 500,000은 상한 100,000으로 조정된다
         ListApiResponse<SystemTermResponse> response =
-                systemTermService.list(0, 500, " E ", " 이메일 ");
+                systemTermService.list(0, 500_000, " E ", " 이메일 ");
 
         assertThat(response.page()).isEqualTo(1);
-        assertThat(response.size()).isEqualTo(100);
+        assertThat(response.size()).isEqualTo(100_000);
         assertThat(response.totalCount()).isEqualTo(1);
         assertThat(response.responses()).extracting(SystemTermResponse::term).containsExactly("email");
+
+        given(queryRepository.search("이메일", "e", 0L, 500)).willReturn(java.util.List.of(
+                saved(21L, "email", "{\"ko\":\"이메일\"}", null)));
+        assertThat(systemTermService.list(0, 500, "E", "이메일").size()).isEqualTo(500);
     }
 
     @Test
@@ -159,7 +164,6 @@ class SystemTermServiceTest {
     void upsertInsertsNormalizedTerm() {
         registeredCodes();
         given(termRepository.findByTerm("email")).willReturn(Optional.empty());
-        given(termRepository.count()).willReturn(0L);
         savingReturnsId();
 
         SystemTermResponse response = systemTermService.upsert(2L, new UpsertSystemTermRequest(
@@ -292,17 +296,16 @@ class SystemTermServiceTest {
     }
 
     @Test
-    @DisplayName("upsert — 전체 5,000개 상한(신규 등록 시에만)")
-    void upsertEnforcesCap() {
+    @DisplayName("upsert — 전체 건수 상한이 없다(v1.15 — 대량 표준 사전): 기존 5,000건을 넘어도 신규 등록된다")
+    void upsertHasNoTotalCap() {
         given(termRepository.findByTerm("order")).willReturn(Optional.empty());
-        given(termRepository.count()).willReturn(5_000L);
+        savingReturnsId();
 
-        assertThatThrownBy(() -> systemTermService.upsert(2L,
-                new UpsertSystemTermRequest("order", Map.of("ko", "주문"), null)))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.INVALID_REQUEST);
-        verify(termRepository, never()).save(any());
+        SystemTermResponse response = systemTermService.upsert(2L,
+                new UpsertSystemTermRequest("order", Map.of("ko", "주문"), null));
+
+        assertThat(response.term()).isEqualTo("order");
+        verify(termRepository).save(any());
     }
 
     @Test
