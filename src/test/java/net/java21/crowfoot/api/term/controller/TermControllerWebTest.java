@@ -33,11 +33,11 @@ class TermControllerWebTest {
     private TermService termService;
 
     @Test
-    @DisplayName("목록은 200 — 페이징 메타 없는 목록 형식을 응답한다")
+    @DisplayName("목록은 200 — 페이징 메타 없는 목록 형식을 응답한다(type 포함)")
     void listReturnsTerms() throws Exception {
         given(termService.list(eq(7L), eq(77L))).willReturn(List.of(
-                new TermResponse("11", "77", "order", "주문", Instant.parse("2026-09-23T00:00:00Z")),
-                new TermResponse("12", "77", "user", "사용자", Instant.parse("2026-09-23T00:00:00Z"))));
+                new TermResponse("11", "77", "order", "주문", "DECIMAL(15,2)", Instant.parse("2026-09-23T00:00:00Z")),
+                new TermResponse("12", "77", "user", "사용자", null, Instant.parse("2026-09-23T00:00:00Z"))));
 
         mockMvc.perform(get("/core/workspaces/77/terms")
                         .header("X-USER-ID", "7"))
@@ -45,25 +45,28 @@ class TermControllerWebTest {
                 .andExpect(jsonPath("$.responses[0].termId").value("11"))
                 .andExpect(jsonPath("$.responses[0].term").value("order"))
                 .andExpect(jsonPath("$.responses[0].label").value("주문"))
+                .andExpect(jsonPath("$.responses[0].type").value("DECIMAL(15,2)"))
                 .andExpect(jsonPath("$.responses[1].term").value("user"))
                 .andExpect(jsonPath("$.responses[1].label").value("사용자"))
+                .andExpect(jsonPath("$.responses[1].type").isEmpty())
                 .andExpect(jsonPath("$.totalCount").value(2));
     }
 
     @Test
-    @DisplayName("upsert는 항상 200 — 신규·수정 구분이 없다(자연키)")
+    @DisplayName("upsert는 항상 200 — 신규·수정 구분이 없다(자연키), type도 함께 받는다")
     void upsertReturns200() throws Exception {
-        given(termService.upsert(eq(7L), eq(77L), eq(new UpsertTermRequest("user", "사용자"))))
-                .willReturn(new TermResponse("11", "77", "user", "사용자", Instant.parse("2026-09-23T00:00:00Z")));
+        given(termService.upsert(eq(7L), eq(77L), eq(new UpsertTermRequest("user", "사용자", "VARCHAR(100)"))))
+                .willReturn(new TermResponse("11", "77", "user", "사용자", "VARCHAR(100)", Instant.parse("2026-09-23T00:00:00Z")));
 
         mockMvc.perform(post("/core/workspaces/77/terms")
                         .header("X-USER-ID", "7")
                         .contentType(APPLICATION_JSON)
-                        .content("{\"term\":\"user\",\"label\":\"사용자\"}"))
+                        .content("{\"term\":\"user\",\"label\":\"사용자\",\"type\":\"VARCHAR(100)\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.response.termId").value("11"))
                 .andExpect(jsonPath("$.response.term").value("user"))
-                .andExpect(jsonPath("$.response.label").value("사용자"));
+                .andExpect(jsonPath("$.response.label").value("사용자"))
+                .andExpect(jsonPath("$.response.type").value("VARCHAR(100)"));
     }
 
     @Test
@@ -75,7 +78,7 @@ class TermControllerWebTest {
     }
 
     @Test
-    @DisplayName("term·label 누락은 400 INVALID_REQUEST이다")
+    @DisplayName("term·label 누락은 400 INVALID_REQUEST이다(type은 선택)")
     void rejectsMissingFields() throws Exception {
         mockMvc.perform(post("/core/workspaces/77/terms")
                         .header("X-USER-ID", "7")

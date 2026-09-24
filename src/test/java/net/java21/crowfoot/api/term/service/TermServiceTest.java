@@ -32,7 +32,7 @@ import static org.mockito.Mockito.verify;
 
 /**
  * 용어 사전 API 단위 테스트 (08-core/01-workspace.md Section 4) —
- * upsert(정규화·기존 갱신·상한)·삭제(소속 검증)·감사·권한 게이트.
+ * upsert(정규화·기존 갱신·상한·type)·삭제(소속 검증)·감사·권한 게이트.
  */
 @ExtendWith(MockitoExtension.class)
 class TermServiceTest {
@@ -53,8 +53,8 @@ class TermServiceTest {
 
     /** 저장된 것과 같은 형태 — id·타임스탬프는 DB가 채우는 값이라 리플렉션으로
      *  채운다(생성자는 저장 전 값만 받는다) */
-    private WorkspaceTerm saved(long id, long workspaceId, String term, String label) {
-        WorkspaceTerm entity = new WorkspaceTerm(workspaceId, term, label, 2L);
+    private WorkspaceTerm saved(long id, long workspaceId, String term, String label, String termType) {
+        WorkspaceTerm entity = new WorkspaceTerm(workspaceId, term, label, termType, 2L);
         ReflectionTestUtils.setField(entity, "id", id);
         ReflectionTestUtils.setField(entity, "createdAt", Instant.parse("2026-09-23T00:00:00Z"));
         ReflectionTestUtils.setField(entity, "updatedAt", Instant.parse("2026-09-23T00:00:00Z"));
@@ -62,7 +62,7 @@ class TermServiceTest {
     }
 
     @Test
-    @DisplayName("upsert 신규 — term을 trim+소문자로 정규화해 저장하고 감사를 남긴다")
+    @DisplayName("upsert 신규 — term·type을 정규화해 저장하고 감사를 남긴다")
     void upsertInsertsNormalizedTerm() {
         given(termRepository.findByWorkspaceIdAndTerm(7L, "user")).willReturn(Optional.empty());
         given(termRepository.countByWorkspaceId(7L)).willReturn(0L);
@@ -72,39 +72,63 @@ class TermServiceTest {
             return entity;
         });
 
-        TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("  User ", "사용자"));
+        TermResponse response = termService.upsert(2L, 7L,
+                new UpsertTermRequest("  User ", "사용자", " VARCHAR(100) "));
 
         assertThat(response.termId()).isEqualTo("11");
         assertThat(response.term()).isEqualTo("user");
         assertThat(response.label()).isEqualTo("사용자");
+        assertThat(response.type()).isEqualTo("VARCHAR(100)");
 
         ArgumentCaptor<WorkspaceTerm> captor = ArgumentCaptor.forClass(WorkspaceTerm.class);
         verify(termRepository).save(captor.capture());
         assertThat(captor.getValue().getWorkspaceId()).isEqualTo(7L);
+        assertThat(captor.getValue().getTermType()).isEqualTo("VARCHAR(100)");
         assertThat(captor.getValue().getCreatedBy()).isEqualTo(2L);
 
         then(auditRecorder).should().record(2L, "WORKSPACE_TERM_UPSERTED", "WORKSPACE", "7",
+                Map.of("term", "user", "label", "사용자", "type", "VARCHAR(100)"));
+    }
+
+    @Test
+    @DisplayName("upsert 기존 — 라벨·type을 갱신한다(상한 검사도 건너뛴다), type 빈 문자열은 null")
+    void upsertUpdatesExistingLabel() {
+        WorkspaceTerm existing = saved(11L, 7L, "user", "유저", "VARCHAR(50)");
+        given(termRepository.findByWorkspaceIdAndTerm(7L, "user")).willReturn(Optional.of(existing));
+        given(termRepository.save(existing)).willReturn(existing);
+
+        TermResponse response = termService.upsert(5L, 7L, new UpsertTermRequest("USER", "사용자", "  "));
+
+        assertThat(existing.getLabel()).isEqualTo("사용자");
+        assertThat(existing.getTermType()).isNull();
+        assertThat(response.termId()).isEqualTo("11");
+        assertThat(response.type()).isNull();
+        verify(termRepository, never()).countByWorkspaceId(anyLong());
+        // 감사 detail에는 null type을 싣지 않는다
+        then(auditRecorder).should().record(5L, "WORKSPACE_TERM_UPSERTED", "WORKSPACE", "7",
                 Map.of("term", "user", "label", "사용자"));
     }
 
     @Test
-    @DisplayName("upsert 기존 — 라벨만 갱신한다(상한 검사도 건너뛴다)")
-    void upsertUpdatesExistingLabel() {
-        WorkspaceTerm existing = saved(11L, 7L, "user", "유저");
-        given(termRepository.findByWorkspaceIdAndTerm(7L, "user")).willReturn(Optional.of(existing));
-        given(termRepository.save(existing)).willReturn(existing);
+    @DisplayName("upsert — type 생략(null)도 그대로 저장된다(선택 값)")
+    void upsertAllowsMissingType() {
+        given(termRepository.findByWorkspaceIdAndTerm(7L, "user")).willReturn(Optional.empty());
+        given(termRepository.countByWorkspaceId(7L)).willReturn(0L);
+        given(termRepository.save(any())).willAnswer((invocation) -> {
+            WorkspaceTerm entity = invocation.getArgument(0);
+            ReflectionTestUtils.setField(entity, "id", 11L);
+            return entity;
+        });
 
-        TermResponse response = termService.upsert(5L, 7L, new UpsertTermRequest("USER", "사용자"));
+        TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null));
 
-        assertThat(existing.getLabel()).isEqualTo("사용자");
-        assertThat(response.termId()).isEqualTo("11");
-        verify(termRepository, never()).countByWorkspaceId(anyLong());
+        assertThat(response.type()).isNull();
     }
 
     @Test
     @DisplayName("upsert — term에 공백이 있으면 400 INVALID_REQUEST다")
     void upsertRejectsWhitespaceInTerm() {
-        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("us er", "사용자")))
+        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("us er", "사용자", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -117,7 +141,7 @@ class TermServiceTest {
         given(termRepository.findByWorkspaceIdAndTerm(7L, "order")).willReturn(Optional.empty());
         given(termRepository.countByWorkspaceId(7L)).willReturn(1_000L);
 
-        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("order", "주문")))
+        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("order", "주문", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -139,14 +163,14 @@ class TermServiceTest {
             ReflectionTestUtils.setField(entity, "id", 11L);
             return entity;
         });
-        termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자"));
+        termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null));
         verify(roleChecker).requireEditor(2L, 7L);
     }
 
     @Test
     @DisplayName("삭제 — 소속 워크스페이스가 아니면 404 TERM_NOT_FOUND")
     void deleteValidatesOwnership() {
-        given(termRepository.findById(11L)).willReturn(Optional.of(saved(11L, 8L, "user", "사용자")));
+        given(termRepository.findById(11L)).willReturn(Optional.of(saved(11L, 8L, "user", "사용자", null)));
 
         assertThatThrownBy(() -> termService.delete(2L, 7L, 11L))
                 .isInstanceOf(BusinessException.class)
@@ -158,7 +182,7 @@ class TermServiceTest {
     @Test
     @DisplayName("삭제 — 삭제 후 감사(WORKSPACE_TERM_DELETED)를 남긴다")
     void deleteRecordsAudit() {
-        WorkspaceTerm existing = saved(11L, 7L, "user", "사용자");
+        WorkspaceTerm existing = saved(11L, 7L, "user", "사용자", null);
         given(termRepository.findById(11L)).willReturn(Optional.of(existing));
 
         termService.delete(2L, 7L, 11L);

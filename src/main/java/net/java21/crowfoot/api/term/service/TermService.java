@@ -12,6 +12,7 @@ import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -50,6 +51,7 @@ public class TermService {
         roleChecker.requireEditor(userId, workspaceId);
         String term = normalizeTerm(request.term());
         String label = request.label().trim();
+        String type = normalizeType(request.type());
 
         WorkspaceTerm entity = termRepository.findByWorkspaceIdAndTerm(workspaceId, term).orElse(null);
         if (entity == null) {
@@ -57,13 +59,20 @@ public class TermService {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST,
                         "워크스페이스당 용어는 " + MAX_TERMS_PER_WORKSPACE + "개까지 등록할 수 있습니다");
             }
-            entity = new WorkspaceTerm(workspaceId, term, label, userId);
+            entity = new WorkspaceTerm(workspaceId, term, label, type, userId);
         } else {
             entity.setLabel(label);
+            entity.setTermType(type);
         }
         WorkspaceTerm saved = termRepository.save(entity);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("term", term);
+        detail.put("label", label);
+        if (type != null) {
+            detail.put("type", type);
+        }
         auditRecorder.record(userId, "WORKSPACE_TERM_UPSERTED", "WORKSPACE",
-                Long.toString(workspaceId), Map.of("term", term, "label", label));
+                Long.toString(workspaceId), detail);
         return toResponse(saved);
     }
 
@@ -88,12 +97,19 @@ public class TermService {
         return term;
     }
 
+    /** 데이터 타입 정규화 — 선택 값이라 빈 문자열은 null로 정착시킨다 */
+    private String normalizeType(String raw) {
+        String type = raw == null ? "" : raw.trim();
+        return type.isEmpty() ? null : type;
+    }
+
     private TermResponse toResponse(WorkspaceTerm term) {
         return new TermResponse(
                 Long.toString(term.getId()),
                 Long.toString(term.getWorkspaceId()),
                 term.getTerm(),
                 term.getLabel(),
+                term.getTermType(),
                 term.getUpdatedAt());
     }
 }
