@@ -7,10 +7,13 @@ import net.java21.crowfoot.api.model.domain.DatabaseType;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.SystemTerm;
 import net.java21.crowfoot.api.term.dto.SystemTermResponse;
+import net.java21.crowfoot.api.term.dto.TermPageParams;
 import net.java21.crowfoot.api.term.dto.UpsertSystemTermRequest;
+import net.java21.crowfoot.api.term.repository.SystemTermQueryRepository;
 import net.java21.crowfoot.api.term.repository.SystemTermRepository;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
+import net.java21.crowfoot.common.ListApiResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.type.TypeReference;
@@ -41,30 +44,60 @@ public class SystemTermService {
     private static final int MAX_LABEL_ENTRIES = 8;
 
     private final SystemTermRepository termRepository;
+    private final SystemTermQueryRepository queryRepository;
     private final DatabaseTypeRepository databaseTypeRepository;
     private final AdminGuard adminGuard;
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
 
-    /** 사용자 목록(인증 전체) — term 오름차순. 시스템 사전은 읽기만 가능한 전역 사전이다 */
+    /** 사용자 목록(인증 전체) — 페이징·keyword(토큰·labels 값 부분 일치)·letter(알파벳 이니셜) 필터 */
     @Transactional(readOnly = true)
-    public List<SystemTermResponse> list() {
-        return termRepository.findAllByOrderByTermAsc()
-                .stream()
-                .map(this::toResponse)
-                .toList();
+    public ListApiResponse<SystemTermResponse> list(Integer page, Integer size, String letter, String keyword) {
+        return paged(page, size, letter, keyword);
     }
 
-    /** 관리 목록(관리자) — 목록 자체가 관리 액션이라 감사를 남긴다 */
+    /** 관리 목록(관리자) — 같은 조회에 권한 검사와 감사만 얹는다 */
     @Transactional(readOnly = true)
-    public List<SystemTermResponse> adminList(long adminId) {
+    public ListApiResponse<SystemTermResponse> adminList(long adminId, Integer page, Integer size,
+                                                         String letter, String keyword) {
         adminGuard.requireAdmin(adminId);
-        List<SystemTermResponse> responses = termRepository.findAllByOrderByTermAsc()
+        ListApiResponse<SystemTermResponse> response = paged(page, size, letter, keyword);
+        auditRecorder.record(adminId, "ADMIN_SYSTEM_TERMS_LISTED", "SYSTEM_TERM", "ALL", null);
+        return response;
+    }
+
+    private ListApiResponse<SystemTermResponse> paged(Integer page, Integer size, String letter, String keyword) {
+        TermPageParams params = TermPageParams.of(page, size);
+        String normalizedKeyword = normalizeKeyword(keyword);
+        String normalizedLetter = normalizeLetter(letter);
+        long totalCount = queryRepository.count(normalizedKeyword, normalizedLetter);
+        if (totalCount == 0) {
+            return ListApiResponse.paged(List.of(), params.page(), params.size(), 0);
+        }
+        List<SystemTermResponse> responses = queryRepository
+                .search(normalizedKeyword, normalizedLetter, params.offset(), params.size())
                 .stream()
                 .map(this::toResponse)
                 .toList();
-        auditRecorder.record(adminId, "ADMIN_SYSTEM_TERMS_LISTED", "SYSTEM_TERM", "ALL", null);
-        return responses;
+        return ListApiResponse.paged(responses, params.page(), params.size(), totalCount);
+    }
+
+    /** 검색어 정규화 — trim 후 빈 값은 전체 조회(null)로 본다 */
+    private static String normalizeKeyword(String raw) {
+        String keyword = raw == null ? "" : raw.trim();
+        return keyword.isEmpty() ? null : keyword;
+    }
+
+    /** 이니셜 정규화 — 소문자 단일 알파벳 또는 '#'(알파벳 외 이니셜). 그 외 값은 무시하고 전체로 본다 */
+    private static String normalizeLetter(String raw) {
+        String letter = raw == null ? "" : raw.trim().toLowerCase();
+        if (letter.length() == 1) {
+            char c = letter.charAt(0);
+            if (c >= 'a' && c <= 'z') {
+                return letter;
+            }
+        }
+        return "#".equals(letter) ? letter : null;
     }
 
     /** 등록·수정 upsert(관리자) — term 자연키로 한 행에 정착, 신규일 때만 상한 검사 */

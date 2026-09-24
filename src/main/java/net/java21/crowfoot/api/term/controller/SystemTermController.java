@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -27,17 +29,26 @@ public class SystemTermController {
 
     private final SystemTermService systemTermService;
 
-    /** 시스템 사전 목록 — 인증된 사용자 전체(역할 검사 없음), 페이징 메타 없는 목록 */
+    /** 시스템 사전 목록 — 인증된 사용자 전체(역할 검사 없음). 페이징(page 1부터·size ≤100)과
+     *  letter(알파벳 이니셜, '#'는 알파벳 외)·keyword(토큰·labels 값 부분 일치) 필터를 받는다 */
     @GetMapping("/core/system-terms")
-    public ListApiResponse<SystemTermResponse> list() {
-        return ListApiResponse.of(systemTermService.list());
+    public ListApiResponse<SystemTermResponse> list(
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "size", required = false) Integer size,
+            @RequestParam(name = "letter", required = false) String letter,
+            @RequestParam(name = "keyword", required = false) String keyword) {
+        return systemTermService.list(page, size, letter, keyword);
     }
 
-    /** 관리 목록 — 관리자만(AdminGuard). 감사(ADMIN_SYSTEM_TERMS_LISTED)는 서비스가 남긴다 */
+    /** 관리 목록 — 관리자만(AdminGuard). 같은 페이징·필터 파라미터를 쓰고
+     *  감사(ADMIN_SYSTEM_TERMS_LISTED)는 서비스가 남긴다 */
     @GetMapping("/core/admin/system-terms")
-    public ListApiResponse<SystemTermResponse> adminList() {
-        return ListApiResponse.of(
-                systemTermService.adminList(CurrentUserHolder.get().userId()));
+    public ListApiResponse<SystemTermResponse> adminList(
+            @RequestParam(name = "page", required = false) Integer page,
+            @RequestParam(name = "size", required = false) Integer size,
+            @RequestParam(name = "letter", required = false) String letter,
+            @RequestParam(name = "keyword", required = false) String keyword) {
+        return systemTermService.adminList(CurrentUserHolder.get().userId(), page, size, letter, keyword);
     }
 
     /** 등록·수정(upsert) — 관리자만. 자연키라 신규·수정 구분 없이 항상 200 */

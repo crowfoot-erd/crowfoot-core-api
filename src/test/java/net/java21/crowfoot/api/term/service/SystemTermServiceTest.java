@@ -7,7 +7,9 @@ import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.SystemTerm;
 import net.java21.crowfoot.api.term.dto.SystemTermResponse;
 import net.java21.crowfoot.api.term.dto.UpsertSystemTermRequest;
+import net.java21.crowfoot.api.term.repository.SystemTermQueryRepository;
 import net.java21.crowfoot.api.term.repository.SystemTermRepository;
+import net.java21.crowfoot.common.ListApiResponse;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,8 @@ class SystemTermServiceTest {
     @Mock
     private SystemTermRepository termRepository;
     @Mock
+    private SystemTermQueryRepository queryRepository;
+    @Mock
     private DatabaseTypeRepository databaseTypeRepository;
     @Mock
     private AdminGuard adminGuard;
@@ -53,7 +57,7 @@ class SystemTermServiceTest {
 
     @BeforeEach
     void setUp() {
-        systemTermService = new SystemTermService(termRepository, databaseTypeRepository,
+        systemTermService = new SystemTermService(termRepository, queryRepository, databaseTypeRepository,
                 adminGuard, auditRecorder, new ObjectMapper());
     }
 
@@ -91,29 +95,60 @@ class SystemTermServiceTest {
     }
 
     @Test
-    @DisplayName("사용자 목록 — 역할 검사 없이 전역 사전을 그대로 내린다(labels 맵 왕복)")
+    @DisplayName("사용자 목록 — 역할 검사 없이 페이징 응답으로 내린다(labels·types 맵 왕복)")
     void listReturnsLabelsWithoutRoleCheck() {
-        given(termRepository.findAllByOrderByTermAsc()).willReturn(java.util.List.of(
+        given(queryRepository.count(null, null)).willReturn(2L);
+        given(queryRepository.search(null, null, 0L, 20)).willReturn(java.util.List.of(
                 saved(21L, "email", "{\"ko\":\"이메일\",\"en\":\"Email\"}", "{\"mysql\":\"VARCHAR(100)\"}"),
                 saved(22L, "user", "{\"ko\":\"사용자\"}", null)));
 
-        java.util.List<SystemTermResponse> responses = systemTermService.list();
+        ListApiResponse<SystemTermResponse> response = systemTermService.list(null, null, null, null);
 
-        assertThat(responses).hasSize(2);
-        assertThat(responses.get(0).term()).isEqualTo("email");
-        assertThat(responses.get(0).labels()).containsEntry("ko", "이메일").containsEntry("en", "Email");
-        assertThat(responses.get(0).types()).containsEntry("mysql", "VARCHAR(100)");
-        assertThat(responses.get(1).labels()).containsExactlyEntriesOf(Map.of("ko", "사용자"));
-        assertThat(responses.get(1).types()).isNull();
+        assertThat(response.responses()).hasSize(2);
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(20);
+        assertThat(response.totalPages()).isEqualTo(1);
+        assertThat(response.totalCount()).isEqualTo(2);
+        assertThat(response.responses().get(0).term()).isEqualTo("email");
+        assertThat(response.responses().get(0).labels()).containsEntry("ko", "이메일").containsEntry("en", "Email");
+        assertThat(response.responses().get(0).types()).containsEntry("mysql", "VARCHAR(100)");
+        assertThat(response.responses().get(1).labels()).containsExactlyEntriesOf(Map.of("ko", "사용자"));
+        assertThat(response.responses().get(1).types()).isNull();
         then(adminGuard).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("사용자 목록 — 파라미터를 정규화해 넘긴다(page 1 클램프·size 100 상한·letter 소문자·keyword trim)")
+    void listNormalizesPagingAndFilters() {
+        given(queryRepository.count("이메일", "e")).willReturn(1L);
+        given(queryRepository.search("이메일", "e", 0L, 100)).willReturn(java.util.List.of(
+                saved(21L, "email", "{\"ko\":\"이메일\"}", null)));
+
+        ListApiResponse<SystemTermResponse> response =
+                systemTermService.list(0, 500, " E ", " 이메일 ");
+
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(100);
+        assertThat(response.totalCount()).isEqualTo(1);
+        assertThat(response.responses()).extracting(SystemTermResponse::term).containsExactly("email");
+    }
+
+    @Test
+    @DisplayName("사용자 목록 — 빈 keyword·무효 letter는 전체 조회로 본다('#'은 그대로 전달)")
+    void listTreatsBlankKeywordAndInvalidLetterAsAll() {
+        given(queryRepository.count(null, null)).willReturn(0L);
+        assertThat(systemTermService.list(1, 20, "ee", "  ").totalCount()).isZero();
+
+        given(queryRepository.count(null, "#")).willReturn(0L);
+        assertThat(systemTermService.list(1, 20, "#", null).totalCount()).isZero();
     }
 
     @Test
     @DisplayName("관리 목록 — AdminGuard를 지나고 감사(ADMIN_SYSTEM_TERMS_LISTED)를 남긴다")
     void adminListRecordsAudit() {
-        given(termRepository.findAllByOrderByTermAsc()).willReturn(java.util.List.of());
+        given(queryRepository.count(null, null)).willReturn(0L);
 
-        systemTermService.adminList(2L);
+        systemTermService.adminList(2L, null, null, null, null);
 
         verify(adminGuard).requireAdmin(2L);
         then(auditRecorder).should().record(2L, "ADMIN_SYSTEM_TERMS_LISTED", "SYSTEM_TERM", "ALL", null);
