@@ -2,6 +2,8 @@ package net.java21.crowfoot.api.term.service;
 
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.model.domain.DatabaseType;
+import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.SystemTerm;
 import net.java21.crowfoot.api.term.dto.SystemTermResponse;
 import net.java21.crowfoot.api.term.dto.UpsertSystemTermRequest;
@@ -41,6 +43,8 @@ class SystemTermServiceTest {
     @Mock
     private SystemTermRepository termRepository;
     @Mock
+    private DatabaseTypeRepository databaseTypeRepository;
+    @Mock
     private AdminGuard adminGuard;
     @Mock
     private AuditRecorder auditRecorder;
@@ -49,13 +53,13 @@ class SystemTermServiceTest {
 
     @BeforeEach
     void setUp() {
-        systemTermService = new SystemTermService(termRepository, adminGuard, auditRecorder,
-                new ObjectMapper());
+        systemTermService = new SystemTermService(termRepository, databaseTypeRepository,
+                adminGuard, auditRecorder, new ObjectMapper());
     }
 
     /** 저장된 것과 같은 형태 — id·타임스탬프는 DB가 채우는 값이라 리플렉션으로 채운다 */
-    private SystemTerm saved(long id, String term, String labelsJson, String termType) {
-        SystemTerm entity = new SystemTerm(term, labelsJson, termType, 2L);
+    private SystemTerm saved(long id, String term, String labelsJson, String termTypes) {
+        SystemTerm entity = new SystemTerm(term, labelsJson, termTypes, 2L);
         ReflectionTestUtils.setField(entity, "id", id);
         ReflectionTestUtils.setField(entity, "createdAt", Instant.parse("2026-09-24T00:00:00Z"));
         ReflectionTestUtils.setField(entity, "updatedAt", Instant.parse("2026-09-24T00:00:00Z"));
@@ -71,6 +75,13 @@ class SystemTermServiceTest {
         return labels;
     }
 
+    /** database_types 등록 코드 — types 맵 검증의 원천(활성·비활성 불문 전체 조회) */
+    private void registeredCodes() {
+        given(databaseTypeRepository.findAllByOrderByCodeAsc()).willReturn(java.util.List.of(
+                new DatabaseType("mysql", "MySQL", true),
+                new DatabaseType("postgresql", "PostgreSQL", true)));
+    }
+
     private void savingReturnsId() {
         given(termRepository.save(any())).willAnswer((invocation) -> {
             SystemTerm entity = invocation.getArgument(0);
@@ -83,7 +94,7 @@ class SystemTermServiceTest {
     @DisplayName("사용자 목록 — 역할 검사 없이 전역 사전을 그대로 내린다(labels 맵 왕복)")
     void listReturnsLabelsWithoutRoleCheck() {
         given(termRepository.findAllByOrderByTermAsc()).willReturn(java.util.List.of(
-                saved(21L, "email", "{\"ko\":\"이메일\",\"en\":\"Email\"}", "VARCHAR(100)"),
+                saved(21L, "email", "{\"ko\":\"이메일\",\"en\":\"Email\"}", "{\"mysql\":\"VARCHAR(100)\"}"),
                 saved(22L, "user", "{\"ko\":\"사용자\"}", null)));
 
         java.util.List<SystemTermResponse> responses = systemTermService.list();
@@ -91,9 +102,9 @@ class SystemTermServiceTest {
         assertThat(responses).hasSize(2);
         assertThat(responses.get(0).term()).isEqualTo("email");
         assertThat(responses.get(0).labels()).containsEntry("ko", "이메일").containsEntry("en", "Email");
-        assertThat(responses.get(0).type()).isEqualTo("VARCHAR(100)");
+        assertThat(responses.get(0).types()).containsEntry("mysql", "VARCHAR(100)");
         assertThat(responses.get(1).labels()).containsExactlyEntriesOf(Map.of("ko", "사용자"));
-        assertThat(responses.get(1).type()).isNull();
+        assertThat(responses.get(1).types()).isNull();
         then(adminGuard).shouldHaveNoInteractions();
     }
 
@@ -109,48 +120,82 @@ class SystemTermServiceTest {
     }
 
     @Test
-    @DisplayName("upsert 신규 — term·labels·type을 정규화해 저장하고 labels JSON 맵으로 감사를 남긴다")
+    @DisplayName("upsert 신규 — term·labels·types(DBMS별)을 정규화해 저장하고 맵으로 감사를 남긴다")
     void upsertInsertsNormalizedTerm() {
+        registeredCodes();
         given(termRepository.findByTerm("email")).willReturn(Optional.empty());
         given(termRepository.count()).willReturn(0L);
         savingReturnsId();
 
         SystemTermResponse response = systemTermService.upsert(2L, new UpsertSystemTermRequest(
-                "  Email ", linkedLabels("ko", " 이메일 ", "en", "Email"), " VARCHAR(100) "));
+                "  Email ", linkedLabels("ko", " 이메일 ", "en", "Email"),
+                linkedLabels("mysql", " VARCHAR(100) ", "postgresql", "VARCHAR(100)")));
 
         assertThat(response.termId()).isEqualTo("21");
         assertThat(response.term()).isEqualTo("email");
         assertThat(response.labels()).containsEntry("ko", "이메일");
-        assertThat(response.type()).isEqualTo("VARCHAR(100)");
+        assertThat(response.types()).containsEntry("mysql", "VARCHAR(100)")
+                .containsEntry("postgresql", "VARCHAR(100)");
 
         ArgumentCaptor<SystemTerm> captor = ArgumentCaptor.forClass(SystemTerm.class);
         verify(termRepository).save(captor.capture());
         assertThat(captor.getValue().getLabels()).isEqualTo("{\"ko\":\"이메일\",\"en\":\"Email\"}");
-        assertThat(captor.getValue().getTermType()).isEqualTo("VARCHAR(100)");
+        assertThat(captor.getValue().getTermTypes())
+                .isEqualTo("{\"mysql\":\"VARCHAR(100)\",\"postgresql\":\"VARCHAR(100)\"}");
         assertThat(captor.getValue().getCreatedBy()).isEqualTo(2L);
 
         then(auditRecorder).should().record(2L, "SYSTEM_TERM_UPSERTED", "SYSTEM_TERM", "21",
                 Map.of("term", "email", "labels", Map.of("ko", "이메일", "en", "Email"),
-                        "type", "VARCHAR(100)"));
+                        "types", Map.of("mysql", "VARCHAR(100)", "postgresql", "VARCHAR(100)")));
     }
 
     @Test
-    @DisplayName("upsert 기존 — labels·type만 갱신한다(상한 검사도 건너뛴다), type 빈 문자열은 null")
+    @DisplayName("upsert 기존 — labels·types만 갱신한다(상한 검사도 건너뛴다), 값이 전부 빈 types는 null")
     void upsertUpdatesExistingLabels() {
-        SystemTerm existing = saved(21L, "email", "{\"ko\":\"전자우편\"}", "VARCHAR(50)");
+        registeredCodes();
+        SystemTerm existing = saved(21L, "email", "{\"ko\":\"전자우편\"}", "{\"mysql\":\"VARCHAR(50)\"}");
         given(termRepository.findByTerm("email")).willReturn(Optional.of(existing));
         given(termRepository.save(existing)).willReturn(existing);
 
         SystemTermResponse response = systemTermService.upsert(5L, new UpsertSystemTermRequest(
-                "EMAIL", Map.of("ko", "이메일"), ""));
+                "EMAIL", Map.of("ko", "이메일"), Map.of("mysql", "  ")));
 
         assertThat(existing.getLabels()).isEqualTo("{\"ko\":\"이메일\"}");
-        assertThat(existing.getTermType()).isNull();
+        assertThat(existing.getTermTypes()).isNull();
         assertThat(response.termId()).isEqualTo("21");
+        assertThat(response.types()).isNull();
         verify(termRepository, never()).count();
-        // 감사 detail에는 null type을 싣지 않는다
+        // 감사 detail에는 null types를 싣지 않는다
         then(auditRecorder).should().record(5L, "SYSTEM_TERM_UPSERTED", "SYSTEM_TERM", "21",
                 Map.of("term", "email", "labels", Map.of("ko", "이메일")));
+    }
+
+    @Test
+    @DisplayName("upsert — types 키가 database_types에 없으면 400 INVALID_REQUEST다")
+    void upsertRejectsUnknownDatabaseCode() {
+        registeredCodes();
+
+        assertThatThrownBy(() -> systemTermService.upsert(2L,
+                new UpsertSystemTermRequest("email", Map.of("ko", "이메일"),
+                        Map.of("oracle", "NUMBER(19)"))))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_REQUEST);
+        verify(termRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("upsert — types 값이 100자를 넘으면 400 INVALID_REQUEST다")
+    void upsertRejectsTooLongTypeValue() {
+        registeredCodes();
+
+        assertThatThrownBy(() -> systemTermService.upsert(2L,
+                new UpsertSystemTermRequest("email", Map.of("ko", "이메일"),
+                        Map.of("mysql", "V".repeat(101)))))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_REQUEST);
+        verify(termRepository, never()).save(any());
     }
 
     @Test

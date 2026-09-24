@@ -3,6 +3,8 @@ package net.java21.crowfoot.api.term.service;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.model.domain.DatabaseType;
+import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.SystemTerm;
 import net.java21.crowfoot.api.term.dto.SystemTermResponse;
 import net.java21.crowfoot.api.term.dto.UpsertSystemTermRequest;
@@ -17,6 +19,8 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 시스템 사전 API (08-core/01-workspace.md Section 4.5) — 전역 용어 사전의 조회·관리.
@@ -37,6 +41,7 @@ public class SystemTermService {
     private static final int MAX_LABEL_ENTRIES = 8;
 
     private final SystemTermRepository termRepository;
+    private final DatabaseTypeRepository databaseTypeRepository;
     private final AdminGuard adminGuard;
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
@@ -68,8 +73,9 @@ public class SystemTermService {
         adminGuard.requireAdmin(adminId);
         String term = normalizeTerm(request.term());
         Map<String, String> labels = normalizeLabels(request.labels());
-        String type = normalizeType(request.type());
-        String labelsJson = writeLabels(labels);
+        Map<String, String> types = normalizeTypes(request.types());
+        String labelsJson = writeMap(labels);
+        String typesJson = types == null ? null : writeMap(types);
 
         SystemTerm entity = termRepository.findByTerm(term).orElse(null);
         if (entity == null) {
@@ -77,14 +83,14 @@ public class SystemTermService {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST,
                         "시스템 사전은 " + MAX_SYSTEM_TERMS + "개까지 등록할 수 있습니다");
             }
-            entity = new SystemTerm(term, labelsJson, type, adminId);
+            entity = new SystemTerm(term, labelsJson, typesJson, adminId);
         } else {
             entity.setLabels(labelsJson);
-            entity.setTermType(type);
+            entity.setTermTypes(typesJson);
         }
         SystemTerm saved = termRepository.save(entity);
         auditRecorder.record(adminId, "SYSTEM_TERM_UPSERTED", "SYSTEM_TERM",
-                Long.toString(saved.getId()), auditDetail(term, labels, type));
+                Long.toString(saved.getId()), auditDetail(term, labels, types));
         return toResponse(saved);
     }
 
@@ -127,37 +133,59 @@ public class SystemTermService {
         return labels;
     }
 
-    /** 데이터 타입 정규화 — 선택 값이라 빈 문자열은 null로 정착시킨다 */
-    private String normalizeType(String raw) {
-        String type = raw == null ? "" : raw.trim();
-        return type.isEmpty() ? null : type;
+    /** DBMS 종류별 타입 맵 검증·정규화 — 키는 database_types 등록 코드(활성 여부 불문 — 비활성 전환돼도
+     *  기존 값을 보존한다), 값은 trim 후 빈 값은 그 종류 칸을 비운 것으로 버린다. 전부 비면 null */
+    private Map<String, String> normalizeTypes(Map<String, String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        Set<String> codes = databaseTypeRepository.findAllByOrderByCodeAsc().stream()
+                .map(DatabaseType::getCode)
+                .collect(Collectors.toSet());
+        Map<String, String> types = new LinkedHashMap<>();
+        raw.forEach((code, value) -> {
+            String key = code == null ? "" : code.trim();
+            String type = value == null ? "" : value.trim();
+            if (type.isEmpty()) {
+                return;
+            }
+            if (key.isEmpty() || !codes.contains(key)) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                        "지원하지 않는 데이터베이스 종류입니다: " + key);
+            }
+            if (type.length() > 100) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST, "데이터 타입은 100자 이하여야 합니다");
+            }
+            types.put(key, type);
+        });
+        return types.isEmpty() ? null : types;
     }
 
-    private String writeLabels(Map<String, String> labels) {
+    private String writeMap(Map<String, String> map) {
         try {
-            return objectMapper.writeValueAsString(labels);
+            return objectMapper.writeValueAsString(map);
         } catch (Exception ex) {
             // 맵을 직접 직렬화하는 것이라 실패 경로가 없다 — 저장 직전 변환 실패는 요청 오류로 돌린다
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "라벨을 저장할 수 없습니다");
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "사전 값을 저장할 수 없습니다");
         }
     }
 
-    private Map<String, String> readLabels(String labelsJson) {
+    private Map<String, String> readMap(String json) {
         try {
-            return objectMapper.readValue(labelsJson, new TypeReference<Map<String, String>>() {
+            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
             });
         } catch (Exception ex) {
             // 우리가 쓴 JSON만 저장되므로 깨진 행은 없어야 한다 — 있다면 데이터 문제로 알리고 예외 처리한다
-            throw new IllegalStateException("시스템 사전 라벨 파싱 실패: " + labelsJson, ex);
+            throw new IllegalStateException("시스템 사전 맵 파싱 실패: " + json, ex);
         }
     }
 
-    private Map<String, Object> auditDetail(String term, Map<String, String> labels, String type) {
+    private Map<String, Object> auditDetail(String term, Map<String, String> labels, Map<String, String> types) {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("term", term);
         detail.put("labels", labels);
-        if (type != null) {
-            detail.put("type", type);
+        if (types != null) {
+            detail.put("types", types);
         }
         return detail;
     }
@@ -166,8 +194,8 @@ public class SystemTermService {
         return new SystemTermResponse(
                 Long.toString(term.getId()),
                 term.getTerm(),
-                readLabels(term.getLabels()),
-                term.getTermType(),
+                readMap(term.getLabels()),
+                term.getTermTypes() == null ? null : readMap(term.getTermTypes()),
                 term.getUpdatedAt());
     }
 }

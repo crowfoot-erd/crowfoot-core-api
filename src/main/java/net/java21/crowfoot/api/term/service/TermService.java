@@ -2,6 +2,8 @@ package net.java21.crowfoot.api.term.service;
 
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.model.domain.DatabaseType;
+import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.WorkspaceTerm;
 import net.java21.crowfoot.api.term.dto.TermResponse;
 import net.java21.crowfoot.api.term.dto.UpsertTermRequest;
@@ -11,11 +13,15 @@ import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 워크스페이스 용어 사전 API (08-core/01-workspace.md Section 4) — 목록·upsert·삭제.
@@ -32,8 +38,10 @@ public class TermService {
     static final int MAX_TERMS_PER_WORKSPACE = 1_000;
 
     private final WorkspaceTermRepository termRepository;
+    private final DatabaseTypeRepository databaseTypeRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
+    private final ObjectMapper objectMapper;
 
     /** 목록(멤버 전체 — 4.1) — term 오름차순 */
     @Transactional(readOnly = true)
@@ -51,7 +59,8 @@ public class TermService {
         roleChecker.requireEditor(userId, workspaceId);
         String term = normalizeTerm(request.term());
         String label = request.label().trim();
-        String type = normalizeType(request.type());
+        Map<String, String> types = normalizeTypes(request.types());
+        String typesJson = types == null ? null : writeMap(types);
 
         WorkspaceTerm entity = termRepository.findByWorkspaceIdAndTerm(workspaceId, term).orElse(null);
         if (entity == null) {
@@ -59,17 +68,17 @@ public class TermService {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST,
                         "워크스페이스당 용어는 " + MAX_TERMS_PER_WORKSPACE + "개까지 등록할 수 있습니다");
             }
-            entity = new WorkspaceTerm(workspaceId, term, label, type, userId);
+            entity = new WorkspaceTerm(workspaceId, term, label, typesJson, userId);
         } else {
             entity.setLabel(label);
-            entity.setTermType(type);
+            entity.setTermTypes(typesJson);
         }
         WorkspaceTerm saved = termRepository.save(entity);
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("term", term);
         detail.put("label", label);
-        if (type != null) {
-            detail.put("type", type);
+        if (types != null) {
+            detail.put("types", types);
         }
         auditRecorder.record(userId, "WORKSPACE_TERM_UPSERTED", "WORKSPACE",
                 Long.toString(workspaceId), detail);
@@ -97,10 +106,49 @@ public class TermService {
         return term;
     }
 
-    /** 데이터 타입 정규화 — 선택 값이라 빈 문자열은 null로 정착시킨다 */
-    private String normalizeType(String raw) {
-        String type = raw == null ? "" : raw.trim();
-        return type.isEmpty() ? null : type;
+    /** DBMS 종류별 타입 맵 검증·정규화 — SystemTermService와 같은 규칙(키는 database_types 등록 코드,
+     *  값 trim 후 빈 값은 버린다, 전부 비면 null) */
+    private Map<String, String> normalizeTypes(Map<String, String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
+        }
+        Set<String> codes = databaseTypeRepository.findAllByOrderByCodeAsc().stream()
+                .map(DatabaseType::getCode)
+                .collect(Collectors.toSet());
+        Map<String, String> types = new LinkedHashMap<>();
+        raw.forEach((code, value) -> {
+            String key = code == null ? "" : code.trim();
+            String type = value == null ? "" : value.trim();
+            if (type.isEmpty()) {
+                return;
+            }
+            if (key.isEmpty() || !codes.contains(key)) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                        "지원하지 않는 데이터베이스 종류입니다: " + key);
+            }
+            if (type.length() > 100) {
+                throw new BusinessException(ErrorCode.INVALID_REQUEST, "데이터 타입은 100자 이하여야 합니다");
+            }
+            types.put(key, type);
+        });
+        return types.isEmpty() ? null : types;
+    }
+
+    private String writeMap(Map<String, String> map) {
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "사전 값을 저장할 수 없습니다");
+        }
+    }
+
+    private Map<String, String> readMap(String json) {
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
+            });
+        } catch (Exception ex) {
+            throw new IllegalStateException("용어 사전 맵 파싱 실패: " + json, ex);
+        }
     }
 
     private TermResponse toResponse(WorkspaceTerm term) {
@@ -109,7 +157,7 @@ public class TermService {
                 Long.toString(term.getWorkspaceId()),
                 term.getTerm(),
                 term.getLabel(),
-                term.getTermType(),
+                term.getTermTypes() == null ? null : readMap(term.getTermTypes()),
                 term.getUpdatedAt());
     }
 }

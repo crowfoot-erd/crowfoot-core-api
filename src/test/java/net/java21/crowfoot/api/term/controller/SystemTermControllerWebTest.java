@@ -40,7 +40,7 @@ class SystemTermControllerWebTest {
     void listReturnsLabelsMap() throws Exception {
         given(systemTermService.list()).willReturn(List.of(
                 new SystemTermResponse("21", "email", Map.of("ko", "이메일", "en", "Email"),
-                        "VARCHAR(100)", Instant.parse("2026-09-24T00:00:00Z")),
+                        Map.of("mysql", "VARCHAR(100)"), Instant.parse("2026-09-24T00:00:00Z")),
                 new SystemTermResponse("22", "user", Map.of("ko", "사용자"),
                         null, Instant.parse("2026-09-24T00:00:00Z"))));
 
@@ -51,9 +51,9 @@ class SystemTermControllerWebTest {
                 .andExpect(jsonPath("$.responses[0].term").value("email"))
                 .andExpect(jsonPath("$.responses[0].labels.ko").value("이메일"))
                 .andExpect(jsonPath("$.responses[0].labels.en").value("Email"))
-                .andExpect(jsonPath("$.responses[0].type").value("VARCHAR(100)"))
+                .andExpect(jsonPath("$.responses[0].types.mysql").value("VARCHAR(100)"))
                 .andExpect(jsonPath("$.responses[1].labels.ko").value("사용자"))
-                .andExpect(jsonPath("$.responses[1].type").isEmpty())
+                .andExpect(jsonPath("$.responses[1].types").isEmpty())
                 .andExpect(jsonPath("$.totalCount").value(2));
     }
 
@@ -69,22 +69,22 @@ class SystemTermControllerWebTest {
     }
 
     @Test
-    @DisplayName("등록(upsert)은 항상 200 — labels 맵과 선택 type을 받는다")
+    @DisplayName("등록(upsert)은 항상 200 — labels 맵과 DBMS별 types 맵을 받는다")
     void upsertReturns200() throws Exception {
         given(systemTermService.upsert(eq(2L), eq(new UpsertSystemTermRequest(
-                        "email", Map.of("ko", "이메일"), "VARCHAR(100)"))))
+                        "email", Map.of("ko", "이메일"), Map.of("mysql", "VARCHAR(100)")))))
                 .willReturn(new SystemTermResponse("21", "email", Map.of("ko", "이메일"),
-                        "VARCHAR(100)", Instant.parse("2026-09-24T00:00:00Z")));
+                        Map.of("mysql", "VARCHAR(100)"), Instant.parse("2026-09-24T00:00:00Z")));
 
         mockMvc.perform(post("/core/admin/system-terms")
                         .header("X-USER-ID", "2")
                         .contentType(APPLICATION_JSON)
-                        .content("{\"term\":\"email\",\"labels\":{\"ko\":\"이메일\"},\"type\":\"VARCHAR(100)\"}"))
+                        .content("{\"term\":\"email\",\"labels\":{\"ko\":\"이메일\"},\"types\":{\"mysql\":\"VARCHAR(100)\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.response.termId").value("21"))
                 .andExpect(jsonPath("$.response.term").value("email"))
                 .andExpect(jsonPath("$.response.labels.ko").value("이메일"))
-                .andExpect(jsonPath("$.response.type").value("VARCHAR(100)"));
+                .andExpect(jsonPath("$.response.types.mysql").value("VARCHAR(100)"));
     }
 
     @Test

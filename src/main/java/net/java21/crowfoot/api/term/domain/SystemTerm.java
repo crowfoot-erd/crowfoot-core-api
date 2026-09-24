@@ -19,8 +19,9 @@ import java.time.Instant;
 /**
  * 시스템 사전 항목 (08-core/01-workspace.md Section 4.5) — 관리자가 등록하는 전역 물리명 토큰 사전.
  * 전 워크스페이스가 공유하며 일반 사용자는 읽기만 한다(논리명 추론의 바닥 사전).
- * labels는 언어→라벨 맵({"ko":"이메일","en":"Email"})을 JSON 문자열로 담은 JSONB 컬럼이다 —
- * 서버는 맵 전체를 주고받고 라벨 해석(로케일 선택)은 클라이언트가 한다.
+ * labels는 언어→라벨 맵({"ko":"이메일","en":"Email"})을, termTypes는 DBMS 종류별 데이터 타입 맵
+ * ({"mysql":"VARCHAR(100)"})을 JSON 문자열로 담은 JSONB 컬럼이다 — 서버는 맵 전체를 주고받고
+ * 해석(로케일·DBMS 선택)은 클라이언트가 한다. termTypes의 키는 database_types 코드다.
  * term은 전역 자연키 — 등록은 upsert로 항상 한 행에 정착한다.
  */
 @Entity
@@ -42,9 +43,10 @@ public class SystemTerm {
     @JdbcTypeCode(SqlTypes.JSON)
     private String labels;
 
-    /** 데이터 타입 예: VARCHAR(100) — 선택, 컬럼 생성 제안 등에 쓰인다 */
-    @Column(name = "term_type")
-    private String termType;
+    /** DBMS 종류별 데이터 타입 맵의 JSON 문자열 — JSONB 컬럼. 키는 database_types 코드, 선택 */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "term_types")
+    private String termTypes;
 
     private Long createdBy;
 
@@ -54,10 +56,10 @@ public class SystemTerm {
     @UpdateTimestamp
     private Instant updatedAt;
 
-    public SystemTerm(String term, String labels, String termType, Long createdBy) {
+    public SystemTerm(String term, String labels, String termTypes, Long createdBy) {
         this.term = term;
         this.labels = labels;
-        this.termType = termType;
+        this.termTypes = termTypes;
         this.createdBy = createdBy;
     }
 }

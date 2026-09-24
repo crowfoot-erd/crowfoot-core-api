@@ -1,6 +1,8 @@
 package net.java21.crowfoot.api.term.service;
 
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.model.domain.DatabaseType;
+import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.WorkspaceTerm;
 import net.java21.crowfoot.api.term.dto.TermResponse;
 import net.java21.crowfoot.api.term.dto.UpsertTermRequest;
@@ -16,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.Map;
@@ -40,6 +43,8 @@ class TermServiceTest {
     @Mock
     private WorkspaceTermRepository termRepository;
     @Mock
+    private DatabaseTypeRepository databaseTypeRepository;
+    @Mock
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
@@ -48,22 +53,31 @@ class TermServiceTest {
 
     @BeforeEach
     void setUp() {
-        termService = new TermService(termRepository, roleChecker, auditRecorder);
+        termService = new TermService(termRepository, databaseTypeRepository, roleChecker,
+                auditRecorder, new ObjectMapper());
     }
 
     /** 저장된 것과 같은 형태 — id·타임스탬프는 DB가 채우는 값이라 리플렉션으로
      *  채운다(생성자는 저장 전 값만 받는다) */
-    private WorkspaceTerm saved(long id, long workspaceId, String term, String label, String termType) {
-        WorkspaceTerm entity = new WorkspaceTerm(workspaceId, term, label, termType, 2L);
+    private WorkspaceTerm saved(long id, long workspaceId, String term, String label, String termTypes) {
+        WorkspaceTerm entity = new WorkspaceTerm(workspaceId, term, label, termTypes, 2L);
         ReflectionTestUtils.setField(entity, "id", id);
         ReflectionTestUtils.setField(entity, "createdAt", Instant.parse("2026-09-23T00:00:00Z"));
         ReflectionTestUtils.setField(entity, "updatedAt", Instant.parse("2026-09-23T00:00:00Z"));
         return entity;
     }
 
+    /** database_types 등록 코드 — types 맵 검증의 원천(활성·비활성 불문 전체 조회) */
+    private void registeredCodes() {
+        given(databaseTypeRepository.findAllByOrderByCodeAsc()).willReturn(java.util.List.of(
+                new DatabaseType("mysql", "MySQL", true),
+                new DatabaseType("postgresql", "PostgreSQL", true)));
+    }
+
     @Test
-    @DisplayName("upsert 신규 — term·type을 정규화해 저장하고 감사를 남긴다")
+    @DisplayName("upsert 신규 — term·types(DBMS별)을 정규화해 저장하고 감사를 남긴다")
     void upsertInsertsNormalizedTerm() {
+        registeredCodes();
         given(termRepository.findByWorkspaceIdAndTerm(7L, "user")).willReturn(Optional.empty());
         given(termRepository.countByWorkspaceId(7L)).willReturn(0L);
         given(termRepository.save(any())).willAnswer((invocation) -> {
@@ -73,40 +87,55 @@ class TermServiceTest {
         });
 
         TermResponse response = termService.upsert(2L, 7L,
-                new UpsertTermRequest("  User ", "사용자", " VARCHAR(100) "));
+                new UpsertTermRequest("  User ", "사용자", Map.of("mysql", " VARCHAR(100) ")));
 
         assertThat(response.termId()).isEqualTo("11");
         assertThat(response.term()).isEqualTo("user");
         assertThat(response.label()).isEqualTo("사용자");
-        assertThat(response.type()).isEqualTo("VARCHAR(100)");
+        assertThat(response.types()).containsEntry("mysql", "VARCHAR(100)");
 
         ArgumentCaptor<WorkspaceTerm> captor = ArgumentCaptor.forClass(WorkspaceTerm.class);
         verify(termRepository).save(captor.capture());
         assertThat(captor.getValue().getWorkspaceId()).isEqualTo(7L);
-        assertThat(captor.getValue().getTermType()).isEqualTo("VARCHAR(100)");
+        assertThat(captor.getValue().getTermTypes()).isEqualTo("{\"mysql\":\"VARCHAR(100)\"}");
         assertThat(captor.getValue().getCreatedBy()).isEqualTo(2L);
 
         then(auditRecorder).should().record(2L, "WORKSPACE_TERM_UPSERTED", "WORKSPACE", "7",
-                Map.of("term", "user", "label", "사용자", "type", "VARCHAR(100)"));
+                Map.of("term", "user", "label", "사용자", "types", Map.of("mysql", "VARCHAR(100)")));
     }
 
     @Test
-    @DisplayName("upsert 기존 — 라벨·type을 갱신한다(상한 검사도 건너뛴다), type 빈 문자열은 null")
+    @DisplayName("upsert 기존 — 라벨·types을 갱신한다(상한 검사도 건너뛴다), 값이 전부 빈 types는 null")
     void upsertUpdatesExistingLabel() {
-        WorkspaceTerm existing = saved(11L, 7L, "user", "유저", "VARCHAR(50)");
+        registeredCodes();
+        WorkspaceTerm existing = saved(11L, 7L, "user", "유저", "{\"mysql\":\"VARCHAR(50)\"}");
         given(termRepository.findByWorkspaceIdAndTerm(7L, "user")).willReturn(Optional.of(existing));
         given(termRepository.save(existing)).willReturn(existing);
 
-        TermResponse response = termService.upsert(5L, 7L, new UpsertTermRequest("USER", "사용자", "  "));
+        TermResponse response = termService.upsert(5L, 7L,
+                new UpsertTermRequest("USER", "사용자", Map.of("mysql", "  ")));
 
         assertThat(existing.getLabel()).isEqualTo("사용자");
-        assertThat(existing.getTermType()).isNull();
+        assertThat(existing.getTermTypes()).isNull();
         assertThat(response.termId()).isEqualTo("11");
-        assertThat(response.type()).isNull();
+        assertThat(response.types()).isNull();
         verify(termRepository, never()).countByWorkspaceId(anyLong());
-        // 감사 detail에는 null type을 싣지 않는다
+        // 감사 detail에는 null types를 싣지 않는다
         then(auditRecorder).should().record(5L, "WORKSPACE_TERM_UPSERTED", "WORKSPACE", "7",
                 Map.of("term", "user", "label", "사용자"));
+    }
+
+    @Test
+    @DisplayName("upsert — types 키가 database_types에 없으면 400 INVALID_REQUEST다")
+    void upsertRejectsUnknownDatabaseCode() {
+        registeredCodes();
+
+        assertThatThrownBy(() -> termService.upsert(2L, 7L,
+                new UpsertTermRequest("user", "사용자", Map.of("oracle", "NUMBER(19)"))))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_REQUEST);
+        verify(termRepository, never()).save(any());
     }
 
     @Test
@@ -122,7 +151,7 @@ class TermServiceTest {
 
         TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null));
 
-        assertThat(response.type()).isNull();
+        assertThat(response.types()).isNull();
     }
 
     @Test
