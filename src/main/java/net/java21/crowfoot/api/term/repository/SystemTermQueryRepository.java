@@ -1,6 +1,8 @@
 package net.java21.crowfoot.api.term.repository;
 
 import com.querydsl.core.types.dsl.BooleanExpression;
+import com.querydsl.core.types.dsl.StringExpression;
+import com.querydsl.core.types.dsl.Expressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.term.domain.QSystemTerm;
@@ -39,10 +41,15 @@ public class SystemTermQueryRepository {
         return count == null ? 0 : count;
     }
 
-    /** 검색 키워드 — blank면 조건 없음(전체). labels는 JSON 문자열 컬럼이라 값 부분 일치가 그대로 성립한다 */
+    /** 검색 키워드 — blank면 조건 없음(전체). labels는 JSON 문자열 컬럼이라 값 부분 일치가 그대로 성립한다.
+     *  단 labels는 JSONB(SqlTypes.JSON) 매핑이라 lower() 등 문자열 함수를 바로 못 쓴다 —
+     *  HQL cast(... as string)으로 텍스트로 바꿔 검색한다(실측: 미적용 시 SQM FunctionArgumentException) */
     private static BooleanExpression keywordOf(QSystemTerm term, String keyword) {
-        return (keyword == null || keyword.isBlank()) ? null
-                : term.term.containsIgnoreCase(keyword).or(term.labels.containsIgnoreCase(keyword));
+        if (keyword == null || keyword.isBlank()) {
+            return null;
+        }
+        StringExpression labelsText = Expressions.stringTemplate("cast({0} as string)", term.labels);
+        return term.term.containsIgnoreCase(keyword).or(labelsText.containsIgnoreCase(keyword));
     }
 
     /** 이니셜 필터 — 소문자 단일 알파벳은 그 글자로 시작(토큰은 정규화돼 항상 소문자),
