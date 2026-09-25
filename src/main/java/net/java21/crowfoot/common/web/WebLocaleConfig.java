@@ -30,8 +30,12 @@ public class WebLocaleConfig implements WebMvcConfigurer, InitializingBean {
     @Bean
     public LocaleResolver localeResolver() {
         AcceptHeaderLocaleResolver resolver = new AcceptHeaderLocaleResolver();
+        // zh는 언어 전용으로 등록한다 — Locale.SIMPLIFIED_CHINESE("zh","CN")는 지원 로케일이
+        // 지역을 갖고 있어 헤더 "zh"·"zh-Hans"가 매칭 실패해 ko로 떨어진다(반대 방향인
+        // 지역 붙은 헤더 "zh-CN"→언어 전용 지원 로케일은 매칭됨 — ja-JP→ja와 동일).
+        // 간체만 제공하므로 zh-TW·zh-Hant도 전부 zh로 해석된다(웹 감지 정책과 동일).
         resolver.setSupportedLocales(List.of(Locale.KOREAN, Locale.ENGLISH, Locale.JAPANESE,
-                Locale.SIMPLIFIED_CHINESE));
+                Locale.forLanguageTag("zh")));
         resolver.setDefaultLocale(Locale.KOREAN);
         return resolver;
     }
