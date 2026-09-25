@@ -14,6 +14,7 @@ public record MeResponse(
         String githubLogin,
         List<String> providers,
         boolean admin,
+        String locale,
         Instant createdAt
 ) {
 }

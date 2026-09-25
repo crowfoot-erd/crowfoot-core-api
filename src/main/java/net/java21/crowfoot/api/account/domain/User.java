@@ -33,6 +33,9 @@ public class User {
 
     private boolean isAdmin;
 
+    /** 계정 단위 UI 언어(ko/en/ja/zh) — NULL이면 미설정(브라우저 감지 따름). 08-core/05-account.md Section 1.4 */
+    private String locale;
+
     private Instant withdrawnAt;
 
     @CreationTimestamp

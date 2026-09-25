@@ -1,8 +1,10 @@
 package net.java21.crowfoot.api.account.controller;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.dto.MeResponse;
 import net.java21.crowfoot.api.account.dto.ProviderResponse;
+import net.java21.crowfoot.api.account.dto.UpdateMyLocaleRequest;
 import net.java21.crowfoot.api.account.service.AccountService;
 import net.java21.crowfoot.api.account.service.ProviderService;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
@@ -11,6 +13,8 @@ import net.java21.crowfoot.common.ListApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,6 +34,13 @@ public class AccountController {
     @GetMapping("/core/accounts/me")
     public ApiResponse<MeResponse> me() {
         return ApiResponse.success(accountService.me(CurrentUserHolder.get().userId()));
+    }
+
+    /** UI 언어 설정(v1.16) — 계정 단위 저장, 갱신된 프로필 반환 */
+    @PatchMapping("/core/accounts/me")
+    public ApiResponse<MeResponse> updateLocale(@Valid @RequestBody UpdateMyLocaleRequest request) {
+        return ApiResponse.success(
+                accountService.updateLocale(CurrentUserHolder.get().userId(), request.locale()));
     }
 
     /** 회원 탈퇴(soft) — 본문 없음 */

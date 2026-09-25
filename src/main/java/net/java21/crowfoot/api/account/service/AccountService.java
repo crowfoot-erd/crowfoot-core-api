@@ -48,7 +48,18 @@ public class AccountService {
                 .map(identity -> identity.getProvider())
                 .toList();
         return new MeResponse(Long.toString(user.getId()), user.getEmail(), user.getName(),
-                githubAvatarUrl(identities), githubLogin(identities), providers, user.isAdmin(), user.getCreatedAt());
+                githubAvatarUrl(identities), githubLogin(identities), providers, user.isAdmin(),
+                user.getLocale(), user.getCreatedAt());
+    }
+
+    /** UI 언어 설정 (08-core/05-account.md Section 1.4) — 멱등(값이 같아도 200), 갱신된 프로필을 돌려준다 */
+    @Transactional
+    public MeResponse updateLocale(long userId, String locale) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
+        user.setLocale(locale);
+        auditRecorder.record(userId, "USER_LOCALE_UPDATED", "USER", Long.toString(userId), Map.of("locale", locale));
+        return me(userId);
     }
 
     /** GitHub 프로필 사진 URL — 저장 없이 identity의 제공자 사용자 ID(숫자)에서 도출한다.

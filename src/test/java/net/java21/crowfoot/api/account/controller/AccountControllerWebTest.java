@@ -6,6 +6,7 @@ import net.java21.crowfoot.api.account.service.ProviderService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
@@ -15,6 +16,7 @@ import java.util.List;
 
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -36,7 +38,7 @@ class AccountControllerWebTest {
         // given
         given(accountService.me(7L)).willReturn(new MeResponse(
                 "7", "alice@x.com", "앨리스", "https://avatars.githubusercontent.com/u/77?v=4", "octocat",
-                List.of("github"), false, Instant.parse("2026-09-01T00:00:00Z")));
+                List.of("github"), false, "ko", Instant.parse("2026-09-01T00:00:00Z")));
 
         // when & then
         mockMvc.perform(get("/core/accounts/me").header("X-USER-ID", "7"))
@@ -46,7 +48,36 @@ class AccountControllerWebTest {
                 .andExpect(jsonPath("$.response.userId").value("7"))
                 .andExpect(jsonPath("$.response.avatarUrl").value("https://avatars.githubusercontent.com/u/77?v=4"))
                 .andExpect(jsonPath("$.response.githubLogin").value("octocat"))
+                .andExpect(jsonPath("$.response.locale").value("ko"))
                 .andExpect(jsonPath("$.response.providers[0]").value("github"));
+    }
+
+    @Test
+    @DisplayName("PATCH /core/accounts/me — locale을 저장하고 갱신된 프로필을 돌려준다")
+    void updateLocaleUpdatesProfile() throws Exception {
+        // given
+        given(accountService.updateLocale(7L, "ja")).willReturn(new MeResponse(
+                "7", "alice@x.com", "앨리스", null, null, List.of("github"), false,
+                "ja", Instant.parse("2026-09-01T00:00:00Z")));
+
+        // when & then
+        mockMvc.perform(patch("/core/accounts/me").header("X-USER-ID", "7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"locale\":\"ja\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.header.isSuccessful").value(true))
+                .andExpect(jsonPath("$.response.locale").value("ja"));
+    }
+
+    @Test
+    @DisplayName("PATCH /core/accounts/me — 지원하지 않는 locale은 400 INVALID_REQUEST")
+    void updateLocaleRejectsUnsupportedLocale() throws Exception {
+        // when & then
+        mockMvc.perform(patch("/core/accounts/me").header("X-USER-ID", "7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"locale\":\"fr\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.header.resultCode").value("INVALID_REQUEST"));
     }
 
     @Test
