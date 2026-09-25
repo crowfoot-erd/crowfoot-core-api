@@ -46,9 +46,9 @@ class CommunityCommentQueryRepositoryTest {
         long poloId = userRepository.save(new User("polo@x.com", "polo", false)).getId();
 
         feedbackPostId = communityPostRepository
-                .save(new CommunityPost(CommunityBoard.FEEDBACK, "제안", "본문", marcoId)).getId();
+                .save(new CommunityPost(CommunityBoard.FEEDBACK, Map.of("ko", "제안"), Map.of("ko", "본문"), marcoId)).getId();
         otherPostId = communityPostRepository
-                .save(new CommunityPost(CommunityBoard.FEEDBACK, "다른 제안", "본문", poloId)).getId();
+                .save(new CommunityPost(CommunityBoard.FEEDBACK, Map.of("ko", "다른 제안"), Map.of("ko", "본문"), poloId)).getId();
 
         communityCommentRepository.save(new CommunityComment(feedbackPostId, "첫 댓글", marcoId));
         communityCommentRepository.save(new CommunityComment(feedbackPostId, "둘째 댓글", poloId));

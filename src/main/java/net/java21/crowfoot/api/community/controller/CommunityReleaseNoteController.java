@@ -25,16 +25,19 @@ public class CommunityReleaseNoteController {
 
     private final CommunityPostService communityPostService;
 
-    /** 공개 최근 릴리스 노트 — RELEASE_NOTE만 최신순, 기본 5건(랜딩 위젯) */
+    /** 공개 최근 릴리스 노트 — RELEASE_NOTE만 최신순, 기본 5건(랜딩 위젯), lang은 제목 해석 언어 */
     @GetMapping("/core/community/release-notes/recent")
     public ListApiResponse<CommunityRecentPostResponse> recent(
-            @RequestParam(name = "limit", required = false) Integer limit) {
-        return communityPostService.recentReleaseNotes(limit);
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @RequestParam(name = "lang", required = false) String lang) {
+        return communityPostService.recentReleaseNotes(limit, lang);
     }
 
-    /** 공개 릴리스 노트 상세 — 마크다운 원문 포함, RELEASE_NOTE가 아니면 404(존재 은닉) */
+    /** 공개 릴리스 노트 상세 — 마크다운 원문 포함(lang 해석), RELEASE_NOTE가 아니면 404(존재 은닉) */
     @GetMapping("/core/community/release-notes/{post-id}")
-    public ApiResponse<CommunityPostDetailResponse> detail(@PathVariable("post-id") long postId) {
-        return ApiResponse.success(communityPostService.releaseNoteDetail(postId));
+    public ApiResponse<CommunityPostDetailResponse> detail(
+            @PathVariable("post-id") long postId,
+            @RequestParam(name = "lang", required = false) String lang) {
+        return ApiResponse.success(communityPostService.releaseNoteDetail(postId, lang));
     }
 }

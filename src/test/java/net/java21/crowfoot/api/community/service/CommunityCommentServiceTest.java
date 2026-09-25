@@ -58,7 +58,7 @@ class CommunityCommentServiceTest {
     @DisplayName("릴리스 노트 게시글에는 코멘트를 달 수 없다 — 400 COMMUNITY_COMMENT_NOT_ALLOWED")
     void createCommentOnReleaseNoteThrowsNotAllowed() {
         // given
-        CommunityPost post = new CommunityPost(CommunityBoard.RELEASE_NOTE, "v1.4.0", "# v1.4.0", 2L);
+        CommunityPost post = new CommunityPost(CommunityBoard.RELEASE_NOTE, Map.of("ko", "v1.4.0"), Map.of("ko", "# v1.4.0"), 2L);
         post.setId(51L);
         given(communityPostRepository.findById(51L)).willReturn(Optional.of(post));
 
@@ -73,7 +73,7 @@ class CommunityCommentServiceTest {
     @DisplayName("FEEDBACK 게시글에 코멘트를 달면 저장되고 감사가 남는다")
     void createCommentOnFeedbackSavesAndAudits() {
         // given
-        CommunityPost post = new CommunityPost(CommunityBoard.FEEDBACK, "제안", "본문", 2L);
+        CommunityPost post = new CommunityPost(CommunityBoard.FEEDBACK, Map.of("ko", "제안"), Map.of("ko", "본문"), 2L);
         post.setId(41L);
         given(communityPostRepository.findById(41L)).willReturn(Optional.of(post));
         given(communityCommentRepository.save(any(CommunityComment.class))).willAnswer(invocation -> {
@@ -97,7 +97,7 @@ class CommunityCommentServiceTest {
     @DisplayName("릴리스 노트 게시글의 코멘트 목록도 400으로 차단한다 — 읽기 전용 계약")
     void listCommentsOnReleaseNoteThrowsNotAllowed() {
         // given
-        CommunityPost post = new CommunityPost(CommunityBoard.RELEASE_NOTE, "v1.4.0", "# v1.4.0", 2L);
+        CommunityPost post = new CommunityPost(CommunityBoard.RELEASE_NOTE, Map.of("ko", "v1.4.0"), Map.of("ko", "# v1.4.0"), 2L);
         post.setId(51L);
         given(communityPostRepository.findById(51L)).willReturn(Optional.of(post));
 

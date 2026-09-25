@@ -5,6 +5,7 @@ import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.community.domain.CommunityBoard;
 import net.java21.crowfoot.api.community.domain.CommunityPost;
 import net.java21.crowfoot.api.community.repository.CommunityPostQueryRepository.PostRow;
+import net.java21.crowfoot.common.i18n.LocalizedTexts;
 import net.java21.crowfoot.testsupport.QuerydslTestConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,10 +17,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** 커뮤니티 게시글 조회 (08-core/08-community.md Section 3) — 게시판 필터·keyword·페이징·최근글 (H2 PostgreSQL 모드) */
+/** 커뮤니티 게시글 조회 (08-core/08-community.md Section 3) — 게시판 필터·keyword(4개 언어)·페이징·최근글 (H2 PostgreSQL 모드) */
 @DataJpaTest
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -35,14 +38,25 @@ class CommunityPostQueryRepositoryTest {
 
     private long marcoId;
 
+    /** 프로젝션은 언어 맵 JSON(title_i18n) — 단언은 ko 해석값으로 */
+    private static final Function<PostRow, String> TITLE = row -> LocalizedTexts.resolve(row.titleI18n(), "ko");
+
     @BeforeEach
     void seed() {
         marcoId = userRepository.save(new User("marco@x.com", "marco", false)).getId();
 
-        communityPostRepository.save(new CommunityPost(CommunityBoard.RELEASE_NOTE, "v1.3.0 릴리스 노트", "# v1.3.0", marcoId));
-        communityPostRepository.save(new CommunityPost(CommunityBoard.RELEASE_NOTE, "v1.4.0 릴리스 노트", "# v1.4.0", marcoId));
-        communityPostRepository.save(new CommunityPost(CommunityBoard.FEEDBACK, "Bug report: save fails", "본문", marcoId));
-        communityPostRepository.save(new CommunityPost(CommunityBoard.FEEDBACK, "검색 필터 개선 제안", "본문", marcoId)); // 가장 나중 삽입 → 최신
+        communityPostRepository.save(new CommunityPost(CommunityBoard.RELEASE_NOTE,
+                Map.of("ko", "v1.3.0 릴리스 노트"), Map.of("ko", "# v1.3.0"), marcoId));
+        communityPostRepository.save(new CommunityPost(CommunityBoard.RELEASE_NOTE,
+                Map.of("ko", "v1.4.0 릴리스 노트"), Map.of("ko", "# v1.4.0"), marcoId));
+        communityPostRepository.save(new CommunityPost(CommunityBoard.FEEDBACK,
+                Map.of("ko", "Bug report: save fails"), Map.of("ko", "본문"), marcoId));
+        communityPostRepository.save(new CommunityPost(CommunityBoard.FEEDBACK,
+                Map.of("ko", "검색 필터 개선 제안"), Map.of("ko", "본문"), marcoId));
+        // 4개 언어 제목(릴리스 노트 형태) — 가장 나중 삽입 → 최신
+        communityPostRepository.save(new CommunityPost(CommunityBoard.FEEDBACK,
+                Map.of("ko", "다국어 제안", "en", "Multilingual suggestion",
+                        "ja", "多言語の提案", "zh", "多语言建议"), Map.of("ko", "본문"), marcoId));
     }
 
     @Test
@@ -50,9 +64,9 @@ class CommunityPostQueryRepositoryTest {
     void searchWithinBoardNewestFirst() {
         List<PostRow> rows = communityPostQueryRepository.search(CommunityBoard.FEEDBACK, null, 0, 20);
 
-        assertThat(rows).hasSize(2);
-        assertThat(rows.get(0).title()).isEqualTo("검색 필터 개선 제안"); // 나중에 삽입 → 최신
-        assertThat(rows.get(1).title()).isEqualTo("Bug report: save fails");
+        assertThat(rows).hasSize(3);
+        assertThat(rows).extracting(TITLE)
+                .containsExactly("다국어 제안", "검색 필터 개선 제안", "Bug report: save fails"); // 나중에 삽입 → 최신
         assertThat(rows.get(0).authorName()).isEqualTo("marco");
         assertThat(rows.get(0).board()).isEqualTo(CommunityBoard.FEEDBACK);
     }
@@ -61,11 +75,22 @@ class CommunityPostQueryRepositoryTest {
     @DisplayName("keyword는 제목 부분 일치(대소문자 무시)로 필터한다")
     void searchFiltersByKeywordIgnoreCase() {
         assertThat(communityPostQueryRepository.search(CommunityBoard.FEEDBACK, "bug", 0, 20))
-                .extracting(PostRow::title).containsExactly("Bug report: save fails");
+                .extracting(TITLE).containsExactly("Bug report: save fails");
         assertThat(communityPostQueryRepository.search(CommunityBoard.FEEDBACK, "제안", 0, 20))
-                .extracting(PostRow::title).containsExactly("검색 필터 개선 제안");
+                .extracting(TITLE).containsExactly("다국어 제안", "검색 필터 개선 제안");
         assertThat(communityPostQueryRepository.count(CommunityBoard.FEEDBACK, "BUG")).isEqualTo(1);
         assertThat(communityPostQueryRepository.count(CommunityBoard.FEEDBACK, "없는단어")).isZero();
+    }
+
+    @Test
+    @DisplayName("keyword는 4개 언어 값 어느 것이든命中한다 — title_i18n JSON 전체 부분 일치(§2.1)")
+    void searchMatchesAnyLanguageValue() {
+        assertThat(communityPostQueryRepository.search(CommunityBoard.FEEDBACK, "suggestion", 0, 20))
+                .extracting(TITLE).containsExactly("다국어 제안"); // en 값
+        assertThat(communityPostQueryRepository.search(CommunityBoard.FEEDBACK, "多言語", 0, 20))
+                .extracting(TITLE).containsExactly("다국어 제안"); // ja 값
+        assertThat(communityPostQueryRepository.search(CommunityBoard.FEEDBACK, "多语言", 0, 20))
+                .extracting(TITLE).containsExactly("다국어 제안"); // zh 값
     }
 
     @Test
@@ -74,7 +99,7 @@ class CommunityPostQueryRepositoryTest {
         List<PostRow> page2 = communityPostQueryRepository.search(CommunityBoard.RELEASE_NOTE, null, 1, 1);
 
         assertThat(page2).hasSize(1);
-        assertThat(page2.get(0).title()).isEqualTo("v1.3.0 릴리스 노트");
+        assertThat(page2.get(0).titleI18n()).contains("v1.3.0");
         assertThat(communityPostQueryRepository.count(CommunityBoard.RELEASE_NOTE, null)).isEqualTo(2);
     }
 
@@ -84,9 +109,8 @@ class CommunityPostQueryRepositoryTest {
         List<PostRow> rows = communityPostQueryRepository.recent(3);
 
         assertThat(rows).hasSize(3);
-        assertThat(rows.get(0).title()).isEqualTo("검색 필터 개선 제안");
-        assertThat(rows.get(1).title()).isEqualTo("Bug report: save fails");
-        assertThat(rows.get(2).title()).isEqualTo("v1.4.0 릴리스 노트");
+        assertThat(rows).extracting(TITLE)
+                .containsExactly("다국어 제안", "검색 필터 개선 제안", "Bug report: save fails");
         assertThat(rows).allSatisfy(row -> assertThat(row.authorName()).isEqualTo("marco"));
     }
 
@@ -95,7 +119,7 @@ class CommunityPostQueryRepositoryTest {
     void recentByBoardFiltersReleaseNotesOnly() {
         List<PostRow> rows = communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, 20);
 
-        assertThat(rows).extracting(PostRow::title)
+        assertThat(rows).extracting(TITLE)
                 .containsExactly("v1.4.0 릴리스 노트", "v1.3.0 릴리스 노트");
         assertThat(rows).allSatisfy(row -> assertThat(row.board()).isEqualTo(CommunityBoard.RELEASE_NOTE));
         assertThat(rows.get(0).authorName()).isEqualTo("marco");
@@ -113,7 +137,7 @@ class CommunityPostQueryRepositoryTest {
     @DisplayName("게시판별 최근글 — limit이 행 수보다 작으면 최신 limit건만")
     void recentByBoardAppliesLimit() {
         assertThat(communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, 1))
-                .extracting(PostRow::title)
+                .extracting(TITLE)
                 .containsExactly("v1.4.0 릴리스 노트");
     }
 }

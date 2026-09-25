@@ -22,7 +22,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** 릴리스 노트 공개 조회 웹 계층 테스트 (08-core/08-community.md Section 3.11) — 무헤더 공개·존재 은닉 */
+/** 릴리스 노트 공개 조회 웹 계층 테스트 (08-core/08-community.md Section 3.11) — 무헤더 공개·존재 은닉·?lang= 해석 */
 @WebMvcTest(CommunityReleaseNoteController.class)
 class CommunityReleaseNoteControllerWebTest {
 
@@ -36,8 +36,8 @@ class CommunityReleaseNoteControllerWebTest {
     @DisplayName("최근 릴리스 노트는 X-USER-ID 없이도 200으로 목록을 내려준다 — 공개 경로")
     void recentIsPublicWithoutUserId() throws Exception {
         // given
-        given(communityPostService.recentReleaseNotes(3)).willReturn(ListApiResponse.of(List.of(
-                new CommunityRecentPostResponse("9", "RELEASE_NOTE", "v1.08 — 커뮤니티 게시판",
+        given(communityPostService.recentReleaseNotes(3, null)).willReturn(ListApiResponse.of(List.of(
+                new CommunityRecentPostResponse("9", "RELEASE_NOTE", "v1.08 — 커뮤니티 게시판", List.of("ko"),
                         new UserRefResponse("1", "관리자"), 0, Instant.parse("2026-09-18T00:00:00Z")))));
 
         // when & then
@@ -46,6 +46,7 @@ class CommunityReleaseNoteControllerWebTest {
                 .andExpect(jsonPath("$.totalCount").value(1))
                 .andExpect(jsonPath("$.responses[0].postId").value("9"))
                 .andExpect(jsonPath("$.responses[0].board").value("RELEASE_NOTE"))
+                .andExpect(jsonPath("$.responses[0].availableLangs[0]").value("ko"))
                 .andExpect(jsonPath("$.page").doesNotExist());
     }
 
@@ -53,7 +54,7 @@ class CommunityReleaseNoteControllerWebTest {
     @DisplayName("limit을 생략하면 서비스에 null이 전달되어 기본값으로 조회된다")
     void recentDefaultsLimitToNull() throws Exception {
         // given
-        given(communityPostService.recentReleaseNotes(null))
+        given(communityPostService.recentReleaseNotes(null, null))
                 .willReturn(ListApiResponse.of(List.of()));
 
         // when & then
@@ -63,10 +64,26 @@ class CommunityReleaseNoteControllerWebTest {
     }
 
     @Test
+    @DisplayName("최근 릴리스 노트의 ?lang=은 제목 해석 언어로 서비스에 전달된다")
+    void recentBindsLangParam() throws Exception {
+        // given
+        given(communityPostService.recentReleaseNotes(3, "ja")).willReturn(ListApiResponse.of(List.of(
+                new CommunityRecentPostResponse("9", "RELEASE_NOTE", "v1.08 — コミュニティ掲示板",
+                        List.of("ko", "ja"), new UserRefResponse("1", "관리자"), 0,
+                        Instant.parse("2026-09-18T00:00:00Z")))));
+
+        // when & then
+        mockMvc.perform(get("/core/community/release-notes/recent").param("limit", "3").param("lang", "ja"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.responses[0].title").value("v1.08 — コミュニティ掲示板"))
+                .andExpect(jsonPath("$.responses[0].availableLangs[1]").value("ja"));
+    }
+
+    @Test
     @DisplayName("상세는 X-USER-ID 없이도 200으로 마크다운 원문을 내려준다 — 공개 경로")
     void detailIsPublicWithoutUserId() throws Exception {
         // given
-        given(communityPostService.releaseNoteDetail(9L)).willReturn(detail());
+        given(communityPostService.releaseNoteDetail(9L, null)).willReturn(detail());
 
         // when & then
         mockMvc.perform(get("/core/community/release-notes/9"))
@@ -77,10 +94,23 @@ class CommunityReleaseNoteControllerWebTest {
     }
 
     @Test
+    @DisplayName("상세의 ?lang=은 본문 해석 언어로 서비스에 전달된다 — 폴백은 서비스가 판정")
+    void detailBindsLangParam() throws Exception {
+        // given
+        given(communityPostService.releaseNoteDetail(9L, "zh")).willReturn(detail());
+
+        // when & then
+        mockMvc.perform(get("/core/community/release-notes/9").param("lang", "zh"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.postId").value("9"))
+                .andExpect(jsonPath("$.response.availableLangs[0]").value("ko"));
+    }
+
+    @Test
     @DisplayName("RELEASE_NOTE가 아니면(다른 게시판의 post-id) 404 공통 실패 포맷이다 — 존재 은닉")
     void detailHidesNonReleaseNotePost() throws Exception {
         // given
-        given(communityPostService.releaseNoteDetail(802L))
+        given(communityPostService.releaseNoteDetail(802L, null))
                 .willThrow(new BusinessException(ErrorCode.COMMUNITY_POST_NOT_FOUND));
 
         // when & then
@@ -92,7 +122,7 @@ class CommunityReleaseNoteControllerWebTest {
 
     private CommunityPostDetailResponse detail() {
         return new CommunityPostDetailResponse("9", "RELEASE_NOTE", "v1.08 — 커뮤니티 게시판",
-                "## 주요 기능", new UserRefResponse("1", "관리자"),
+                List.of("ko"), "## 주요 기능", new UserRefResponse("1", "관리자"),
                 Instant.parse("2026-09-18T00:00:00Z"), Instant.parse("2026-09-18T00:00:00Z"));
     }
 }

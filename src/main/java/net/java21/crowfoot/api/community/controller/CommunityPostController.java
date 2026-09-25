@@ -35,27 +35,31 @@ public class CommunityPostController {
 
     private final CommunityPostService communityPostService;
 
-    /** 게시판별 목록 — board 필수, keyword는 제목 검색, page 1부터 */
+    /** 게시판별 목록 — board 필수, keyword는 제목 검색(4개 언어), page 1부터, lang은 제목 해석 언어 */
     @GetMapping("/core/community/posts")
     public ListApiResponse<CommunityPostSummaryResponse> list(
             @RequestParam(name = "board") String board,
             @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "lang", required = false) String lang,
             @RequestParam(name = "page", required = false) Integer page,
             @RequestParam(name = "size", required = false) Integer size) {
-        return communityPostService.list(board, keyword, page, size);
+        return communityPostService.list(board, keyword, page, size, lang);
     }
 
     /** 최근글(대시보드 통합 위젯) — 게시판 무관 최신순, 기본 5건 */
     @GetMapping("/core/community/posts/recent")
     public ListApiResponse<CommunityRecentPostResponse> recent(
-            @RequestParam(name = "limit", required = false) Integer limit) {
-        return communityPostService.recent(limit);
+            @RequestParam(name = "limit", required = false) Integer limit,
+            @RequestParam(name = "lang", required = false) String lang) {
+        return communityPostService.recent(limit, lang);
     }
 
-    /** 상세 — 마크다운 원문 포함 */
+    /** 상세 — 마크다운 원문 포함(lang 해석) */
     @GetMapping("/core/community/posts/{post-id}")
-    public ApiResponse<CommunityPostDetailResponse> detail(@PathVariable("post-id") long postId) {
-        return ApiResponse.success(communityPostService.detail(postId));
+    public ApiResponse<CommunityPostDetailResponse> detail(
+            @PathVariable("post-id") long postId,
+            @RequestParam(name = "lang", required = false) String lang) {
+        return ApiResponse.success(communityPostService.detail(postId, lang));
     }
 
     /** 생성 — RELEASE_NOTE는 관리자만(서비스 판정), FEEDBACK은 로그인 사용자 전체 */
