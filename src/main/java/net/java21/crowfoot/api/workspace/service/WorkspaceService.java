@@ -68,7 +68,7 @@ public class WorkspaceService {
         if (body.has("name")) {
             String name = body.get("name").asText();
             if (name == null || name.isBlank() || name.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "이름은 1~100자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.name.length100");
             }
             workspace.setName(name);
         }

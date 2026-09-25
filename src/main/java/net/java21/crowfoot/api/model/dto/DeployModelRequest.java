@@ -8,6 +8,6 @@ import jakarta.validation.constraints.Pattern;
  */
 public record DeployModelRequest(
         @NotBlank
-        @Pattern(regexp = "\\d+", message = "커넥션 식별자는 숫자여야 합니다")
+        @Pattern(regexp = "\\d+", message = "{validation.connection.id.digit}")
         String connectionId) {
 }

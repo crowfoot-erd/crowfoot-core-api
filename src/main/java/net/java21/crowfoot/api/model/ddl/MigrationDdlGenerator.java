@@ -1,5 +1,7 @@
 package net.java21.crowfoot.api.model.ddl;
 
+import net.java21.crowfoot.common.i18n.ServerMessages;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -34,7 +36,7 @@ public final class MigrationDdlGenerator {
         List<DdlGenerator.Warning> warnings = new ArrayList<>();
         if ("common".equals(dialect.id())) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.COMMON_DIALECT,
-                    "이 문서의 DBMS는 SQL 방언이 등록되지 않아 공용(논리) 표기로 생성했습니다"));
+                    ddl("ddl.common-dialect", null, "이 문서의 DBMS는 SQL 방언이 등록되지 않아 공용(논리) 표기로 생성했습니다")));
         }
         warnings.addAll(DdlGenerator.validationWarnings(to));
 
@@ -101,12 +103,14 @@ public final class MigrationDdlGenerator {
 
         if (!destructive.isEmpty()) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.DESTRUCTIVE,
-                    "파괴적 연산 " + destructive.size() + "건이 스크립트 마지막 블록에 모여 있습니다 — 실행 전 반드시 검토하세요"));
+                    ddl("ddl.destructive", new Object[]{destructive.size()},
+                            "파괴적 연산 " + destructive.size() + "건이 스크립트 마지막 블록에 모여 있습니다 — 실행 전 반드시 검토하세요")));
         }
         if (skipIndexes && diff.skippedIndexChanges() > 0) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.NOT_INTROSPECTED,
-                    "스키마 조회가 인덱스 정의를 읽지 못해 인덱스 변경 " + diff.skippedIndexChanges()
-                            + "건을 생성에서 제외했습니다"));
+                    ddl("ddl.index-skipped", new Object[]{diff.skippedIndexChanges()},
+                            "스키마 조회가 인덱스 정의를 읽지 못해 인덱스 변경 " + diff.skippedIndexChanges()
+                                    + "건을 생성에서 제외했습니다")));
         }
 
         String title = modelName == null || modelName.isBlank() ? "" : modelName + " — ";
@@ -158,7 +162,7 @@ public final class MigrationDdlGenerator {
         // MySQL MODIFY만 자동 증가 변경을 문장에 담을 수 있다 — 나머지 방언은 경고로만 알린다
         if (autoIncrementOnly && !mysql) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.VALIDATION,
-                    "자동 증가 변경은 이 DBMS의 ALTER 문으로 반영하지 않습니다: " + target));
+                    autoIncrementUnsupported(target)));
             return;
         }
         String statement = dialect.alterColumn(change.table(), change.before(), change.after());
@@ -167,13 +171,24 @@ public final class MigrationDdlGenerator {
         }
         if (fields.contains(SchemaDiffer.FIELD_DEFAULT) && "mssql".equals(dialect.id())) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.VALIDATION,
-                    "SQL Server는 ALTER COLUMN으로 기본값을 바꿀 수 없습니다 — DEFAULT 제약을 별도로 관리하세요: "
-                            + target));
+                    ddl("ddl.default-mssql", new Object[]{target},
+                            "SQL Server는 ALTER COLUMN으로 기본값을 바꿀 수 없습니다 — DEFAULT 제약을 별도로 관리하세요: "
+                                    + target)));
         }
         if (fields.contains(SchemaDiffer.FIELD_AUTO_INCREMENT) && !mysql) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.VALIDATION,
-                    "자동 증가 변경은 이 DBMS의 ALTER 문으로 반영하지 않습니다: " + target));
+                    autoIncrementUnsupported(target)));
         }
+    }
+
+    private static String autoIncrementUnsupported(String target) {
+        return ddl("ddl.autoincrement-unsupported", new Object[]{target},
+                "자동 증가 변경은 이 DBMS의 ALTER 문으로 반영하지 않습니다: " + target);
+    }
+
+    /** 경고 문구 — ddl.* 키 로케일 해석. 번들 미주입(단위 테스트)은 한국어 기본 문구(fallback) */
+    private static String ddl(String messageKey, Object[] args, String fallback) {
+        return ServerMessages.resolve(messageKey, args, fallback);
     }
 
     /* ---------- 공용 헬퍼 ---------- */

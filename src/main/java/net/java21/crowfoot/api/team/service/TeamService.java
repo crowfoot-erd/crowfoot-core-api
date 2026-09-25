@@ -103,7 +103,7 @@ public class TeamService {
         if (body.has("name")) {
             String name = body.get("name").asText();
             if (name == null || name.isBlank() || name.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "이름은 1~100자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.name.length100");
             }
             team.setName(name);
         }
@@ -133,9 +133,9 @@ public class TeamService {
 
         long targetUserId = parseUserId(request.userId());
         User user = userRepository.findById(targetUserId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "사용자를 찾을 수 없습니다"));
+                .orElseThrow(() -> BusinessException.of(ErrorCode.RESOURCE_NOT_FOUND, "detail.user.not-found"));
         if (user.isWithdrawn()) {
-            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "사용자를 찾을 수 없습니다");
+            throw BusinessException.of(ErrorCode.RESOURCE_NOT_FOUND, "detail.user.not-found");
         }
         if (teamMemberRepository.existsByTeamIdAndUserId(teamId, targetUserId)) {
             throw new BusinessException(ErrorCode.TEAM_MEMBER_DUPLICATED);
@@ -152,7 +152,7 @@ public class TeamService {
         requireOwner(userId, teamId, null);
         Team team = requireTeam(teamId);
         if (team.getOwnerUserId().equals(targetUserId)) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "팀 Owner은 해체 외에 제외할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.team.owner.protected");
         }
         long deleted = teamMemberQueryRepository.deleteByTeamIdAndUserId(teamId, targetUserId);
         if (deleted == 0) {
@@ -171,7 +171,7 @@ public class TeamService {
 
         String term = keyword == null ? null : keyword.trim();
         if (term == null || term.length() < 2) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "검색어는 2자 이상이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.keyword.min");
         }
         int size = limit == null
                 ? CANDIDATE_DEFAULT_LIMIT
@@ -222,7 +222,7 @@ public class TeamService {
         try {
             return Long.parseLong(userId);
         } catch (NumberFormatException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "userId는 숫자여야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.user-id.numeric");
         }
     }
 

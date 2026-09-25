@@ -101,7 +101,7 @@ public class TermService {
     private String normalizeTerm(String raw) {
         String term = raw == null ? "" : raw.trim().toLowerCase();
         if (term.isEmpty() || term.chars().anyMatch(Character::isWhitespace)) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "용어는 공백 없이 하나의 토큰이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.token");
         }
         return term;
     }
@@ -127,7 +127,7 @@ public class TermService {
                         "지원하지 않는 데이터베이스 종류입니다: " + key);
             }
             if (type.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "데이터 타입은 100자 이하여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.datatype.length");
             }
             types.put(key, type);
         });
@@ -138,7 +138,7 @@ public class TermService {
         try {
             return objectMapper.writeValueAsString(map);
         } catch (Exception ex) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "사전 값을 저장할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.value.unsavable");
         }
     }
 

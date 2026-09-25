@@ -20,12 +20,12 @@ public enum CommunityBoard {
     /** 요청 파라미터 파싱 — 허용 외 값은 400(도메인 무효 값 원천 차단) */
     public static CommunityBoard fromValue(String value) {
         if (value == null || value.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "게시판(board)은 필수입니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.board.required");
         }
         try {
             return valueOf(value.trim());
         } catch (IllegalArgumentException ex) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "알 수 없는 게시판입니다: " + value);
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.board.unknown", value);
         }
     }
 }

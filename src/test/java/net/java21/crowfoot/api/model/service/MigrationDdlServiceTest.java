@@ -208,7 +208,8 @@ class MigrationDdlServiceTest {
         assertThatThrownBy(() -> service.generateConnectionMigration(7L, 77L, 501L, 11L))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST);
-                    assertThat(e.getMessage()).contains("다릅니다");
+                    assertThat(e.getMessageKey()).isEqualTo("detail.migration.dbms-mismatch");
+                    assertThat(e.getArgs()).containsExactly("postgresql", "mysql");
                 });
     }
 

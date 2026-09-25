@@ -32,8 +32,7 @@ public class RestClientAuthBlacklistClient implements AuthBlacklistClient {
                     .toBodilessEntity();
         } catch (Exception ex) {
             log.error("블랙리스트 등록 실패(sid={}) — fail-closed로 폐기 트랜잭션을 중단한다", sid, ex);
-            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE,
-                    "인증 서버 블랙리스트 등록에 실패했습니다 — 잠시 후 다시 시도하세요");
+            throw BusinessException.of(ErrorCode.SERVICE_UNAVAILABLE, "detail.auth-blacklist.unavailable");
         }
     }
 }

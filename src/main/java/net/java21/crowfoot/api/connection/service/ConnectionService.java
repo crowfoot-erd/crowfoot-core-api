@@ -95,7 +95,7 @@ public class ConnectionService {
         if (body.has("name") && !body.get("name").isNull()) {
             String name = body.get("name").asText().trim();
             if (name.isEmpty() || name.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "이름은 1~100자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.name.length100");
             }
             connection.setName(name);
         }
@@ -111,21 +111,21 @@ public class ConnectionService {
         if (body.has("host") && !body.get("host").isNull()) {
             String host = body.get("host").asText().trim();
             if (host.isEmpty() || host.length() > 255) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "호스트는 1~255자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.host.length");
             }
             connection.setHost(host);
         }
         if (body.has("port") && !body.get("port").isNull() && body.get("port").isNumber()) {
             int port = body.get("port").asInt();
             if (port < 1 || port > 65535) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "포트는 1~65535여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.port.range");
             }
             connection.setPort(port);
         }
         if (body.has("databaseName") && !body.get("databaseName").isNull()) {
             String databaseName = body.get("databaseName").asText().trim();
             if (databaseName.isEmpty() || databaseName.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "데이터베이스 이름은 1~100자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.database.length");
             }
             connection.setDatabaseName(databaseName);
         }
@@ -138,14 +138,14 @@ public class ConnectionService {
         if (body.has("username") && !body.get("username").isNull()) {
             String username = body.get("username").asText().trim();
             if (username.isEmpty() || username.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "사용자 이름은 1~100자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.username.length");
             }
             connection.setUsername(username);
         }
         if (body.has("password") && !body.get("password").isNull()) {
             String password = body.get("password").asText();
             if (password.isEmpty() || password.length() > 255) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "비밀번호는 1~255자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.password.length");
             }
             connection.setPassword(crypto.encrypt(password));
         }

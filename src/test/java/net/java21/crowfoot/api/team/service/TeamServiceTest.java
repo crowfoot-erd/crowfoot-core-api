@@ -159,7 +159,7 @@ class TeamServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> {
                             assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST);
-                            assertThat(ex.getMessage()).isEqualTo("팀 Owner은 해체 외에 제외할 수 없습니다");
+                            assertThat(ex.getMessageKey()).isEqualTo("detail.team.owner.protected");
                         });
     }
 

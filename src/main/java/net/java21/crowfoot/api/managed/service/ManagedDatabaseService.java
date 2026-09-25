@@ -80,7 +80,7 @@ public class ManagedDatabaseService {
     public ManagedIssueLimitResponse updateIssueLimit(long adminId, SetManagedIssueLimitRequest request) {
         adminGuard.requireAdmin(adminId);
         if (request == null || request.limit() == null || request.limit() < 1 || request.limit() > 100) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "발급 한도는 1 이상 100 이하로 지정하세요");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.managed.limit-range");
         }
         int limit = request.limit();
         ManagedSetting setting = settingRepository.findById(ManagedSetting.KEY_ISSUE_LIMIT)
@@ -134,7 +134,7 @@ public class ManagedDatabaseService {
         roleChecker.requireEditor(userId, workspaceId);
         ManagedInstance instance = resolveInstance(request);
         if (!instance.isActive()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "비활성 인스턴스에는 발급받을 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.managed.inactive");
         }
         ManagedProvisioner provisioner = provisioners.forDbmsType(instance.getDbmsType());
         if (provisioner == null) {

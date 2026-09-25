@@ -138,7 +138,7 @@ public class SystemTermService {
     private String normalizeTerm(String raw) {
         String term = raw == null ? "" : raw.trim().toLowerCase();
         if (term.isEmpty() || term.chars().anyMatch(Character::isWhitespace)) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "용어는 공백 없이 하나의 토큰이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.token");
         }
         return term;
     }
@@ -183,7 +183,7 @@ public class SystemTermService {
                         "지원하지 않는 데이터베이스 종류입니다: " + key);
             }
             if (type.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "데이터 타입은 100자 이하여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.datatype.length");
             }
             types.put(key, type);
         });
@@ -195,7 +195,7 @@ public class SystemTermService {
             return objectMapper.writeValueAsString(map);
         } catch (Exception ex) {
             // 맵을 직접 직렬화하는 것이라 실패 경로가 없다 — 저장 직전 변환 실패는 요청 오류로 돌린다
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "사전 값을 저장할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.value.unsavable");
         }
     }
 

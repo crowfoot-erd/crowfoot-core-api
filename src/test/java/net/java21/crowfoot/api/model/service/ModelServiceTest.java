@@ -158,7 +158,7 @@ class ModelServiceTest {
         assertThatThrownBy(() -> modelService.create(7L, 77L,
                 new CreateModelRequest("주문 ERD", null, "oracle")))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
-                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_DBMS_TYPE));
 
         verify(modelRepository, never()).save(any());
         verify(modelDiagramRepository, never()).save(any());

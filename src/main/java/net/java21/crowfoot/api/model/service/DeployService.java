@@ -112,7 +112,7 @@ public class DeployService {
         try {
             content = ErdContentParser.parse(objectMapper.readTree(model.getContent()));
         } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 본체를 해석할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.parse");
         }
         return DdlGenerator.generate(content, dialect, DbmsTemplates.byId(templateId).label(), model.getName());
     }

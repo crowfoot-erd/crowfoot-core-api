@@ -24,7 +24,7 @@ public class AdminGuard {
     public void requireAdmin(long userId) {
         User user = userRepository.findById(userId).orElse(null);
         if (user == null || !user.isAdmin() || user.isWithdrawn()) {
-            throw new BusinessException(ErrorCode.PERMISSION_DENIED, "관리자 권한이 없습니다");
+            throw BusinessException.of(ErrorCode.PERMISSION_DENIED, "detail.admin.denied");
         }
     }
 }

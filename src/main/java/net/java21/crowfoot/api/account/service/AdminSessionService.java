@@ -68,7 +68,7 @@ public class AdminSessionService {
         adminGuard.requireAdmin(adminId);
         UUID sessionId = parseSid(sid);
         if (!refreshTokenQueryRepository.existsActiveSession(sessionId)) {
-            throw new BusinessException(ErrorCode.SESSION_NOT_FOUND, "이미 종료되었거나 없는 세션입니다");
+            throw BusinessException.of(ErrorCode.SESSION_NOT_FOUND, "detail.session.already-ended");
         }
         // 등록 성공 후 커밋(fail-closed) — 실패 시 SERVICE_UNAVAILABLE으로 롤백
         authBlacklistClient.registerSessionBlacklist(sid);
@@ -101,12 +101,12 @@ public class AdminSessionService {
 
     private static long requireNumericUserId(String userId) {
         if (userId == null || userId.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "userId는 필수입니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.user-id.required");
         }
         try {
             return Long.parseLong(userId.trim());
         } catch (NumberFormatException ex) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "userId가 숫자가 아닙니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.user-id.not-numeric");
         }
     }
 
@@ -114,7 +114,7 @@ public class AdminSessionService {
         try {
             return UUID.fromString(sid);
         } catch (IllegalArgumentException ex) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "sid 형식이 올바르지 않습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.sid.format");
         }
     }
 }

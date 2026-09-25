@@ -98,7 +98,7 @@ public class ModelVersionService {
         if (body.has("memo")) {
             String memo = body.get("memo").isNull() ? null : body.get("memo").asText();
             if (memo != null && (memo.isBlank() || memo.length() > MAX_MEMO_LENGTH)) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "메모는 1~500자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.memo.length");
             }
             snapshot.setMemo(memo);
         }

@@ -1,5 +1,7 @@
 package net.java21.crowfoot.api.model.ddl;
 
+import net.java21.crowfoot.common.i18n.ServerMessages;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +51,7 @@ public final class DdlGenerator {
         // 물리 타입이 아닌 논리 표기로 생성되므로 항상 알린다
         if ("common".equals(dialect.id())) {
             warnings.add(new Warning(Warning.COMMON_DIALECT,
-                    "이 문서의 DBMS는 SQL 방언이 등록되지 않아 공용(논리) 표기로 생성했습니다"));
+                    ddl("ddl.common-dialect", null, "이 문서의 DBMS는 SQL 방언이 등록되지 않아 공용(논리) 표기로 생성했습니다")));
         }
         warnings.addAll(validationWarnings(content));
 
@@ -57,7 +59,8 @@ public final class DdlGenerator {
         for (DdlContent.Table table : content.tables()) {
             if (table.columns().isEmpty()) {
                 warnings.add(new Warning(Warning.EMPTY_TABLE,
-                        "컬럼이 없어 생성에서 제외한 테이블: " + table.physicalName()));
+                        ddl("ddl.empty-table", new Object[]{table.physicalName()},
+                                "컬럼이 없어 생성에서 제외한 테이블: " + table.physicalName())));
                 continue;
             }
             creates.add(createTableStatement(table, dialect));
@@ -125,7 +128,8 @@ public final class DdlGenerator {
         for (DdlContent.Table table : content.tables()) {
             if (tableNames.getOrDefault(key(table.physicalName()), 0) > 1) {
                 warnings.add(new Warning(Warning.VALIDATION,
-                        "테이블 물리명이 중복입니다: " + table.physicalName()));
+                        ddl("ddl.table-duplicated", new Object[]{table.physicalName()},
+                                "테이블 물리명이 중복입니다: " + table.physicalName())));
             }
             Map<String, Integer> columnNames = new java.util.HashMap<>();
             for (DdlContent.Column column : table.columns()) {
@@ -134,23 +138,32 @@ public final class DdlGenerator {
             for (DdlContent.Column column : table.columns()) {
                 if (columnNames.getOrDefault(key(column.physicalName()), 0) > 1) {
                     warnings.add(new Warning(Warning.VALIDATION,
-                            "컬럼 물리명이 중복입니다: " + table.physicalName() + "." + column.physicalName()));
+                            ddl("ddl.column-duplicated",
+                                    new Object[]{table.physicalName(), column.physicalName()},
+                                    "컬럼 물리명이 중복입니다: " + table.physicalName() + "." + column.physicalName())));
                 }
             }
             for (DdlContent.KeyConstraint unique : table.uniques()) {
                 if (keyCounts.getOrDefault(key(unique.name()), 0) > 1) {
                     warnings.add(new Warning(Warning.VALIDATION,
-                            "키 이름이 문서 내에서 중복입니다: " + unique.name()));
+                            ddl("ddl.key-duplicated", new Object[]{unique.name()},
+                                    "키 이름이 문서 내에서 중복입니다: " + unique.name())));
                 }
             }
             for (DdlContent.Index index : table.indexes()) {
                 if (keyCounts.getOrDefault(key(index.name()), 0) > 1) {
                     warnings.add(new Warning(Warning.VALIDATION,
-                            "키 이름이 문서 내에서 중복입니다: " + index.name()));
+                            ddl("ddl.key-duplicated", new Object[]{index.name()},
+                                    "키 이름이 문서 내에서 중복입니다: " + index.name())));
                 }
             }
         }
         return warnings;
+    }
+
+    /** 경고 문구 — ddl.* 키 로케일 해석. 번들 미주입(단위 테스트)은 한국어 기본 문구(fallback) */
+    private static String ddl(String messageKey, Object[] args, String fallback) {
+        return ServerMessages.resolve(messageKey, args, fallback);
     }
 
     private static void bump(Map<String, Integer> counts, String name) {

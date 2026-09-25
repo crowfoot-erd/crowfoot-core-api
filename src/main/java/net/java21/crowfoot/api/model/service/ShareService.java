@@ -45,7 +45,7 @@ public class ShareService {
         Instant startsAt = request == null ? null : request.startsAt();
         Instant endsAt = request == null ? null : request.endsAt();
         if (startsAt != null && endsAt != null && endsAt.isBefore(startsAt)) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "종료 일시는 시작 일시 이후여야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.share.period");
         }
         Model model = modelRepository.findByIdAndWorkspaceId(modelId, workspaceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));

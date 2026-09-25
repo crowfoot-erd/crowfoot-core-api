@@ -73,7 +73,7 @@ public class ReverseEngineeringService {
 
         String modelName = modelName(connection, request);
         if (modelRepository.existsByWorkspaceIdAndName(workspaceId, modelName)) {
-            throw new BusinessException(ErrorCode.DUPLICATED_NAME, "이미 존재하는 문서 이름입니다");
+            throw BusinessException.of(ErrorCode.DUPLICATED_NAME, "detail.doc-name.duplicated");
         }
         SchemaIntrospector introspector = introspectors.forDbmsType(connection.getDbmsType());
         if (introspector == null) {
@@ -128,7 +128,7 @@ public class ReverseEngineeringService {
             name = connection.getName() + " ERD";
         }
         if (name.length() > 100) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 이름은 1~100자여야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.doc-name.length");
         }
         return name;
     }

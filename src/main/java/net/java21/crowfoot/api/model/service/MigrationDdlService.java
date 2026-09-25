@@ -53,7 +53,7 @@ public class MigrationDdlService {
                                                          long from, long to) {
         roleChecker.requireMember(userId, workspaceId);
         if (from == to) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "서로 다른 두 버전을 지정하세요");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.migration.two-versions");
         }
         Model model = requireModel(modelId, workspaceId);
         String fromContent = modelVersionRepository.findByModelIdAndVersion(modelId, from)
@@ -74,9 +74,8 @@ public class MigrationDdlService {
 
         // 문서 방언과 커넥션 DBMS가 다르면 DDL이 그 데이터베이스에 맞지 않는다 (1.8 배포와 같은 검사)
         if (!model.getDatabaseType().trim().equalsIgnoreCase(connection.getDbmsType().trim())) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "문서의 DBMS(" + model.getDatabaseType() + ")와 커넥션의 DBMS("
-                            + connection.getDbmsType() + ")가 다릅니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.migration.dbms-mismatch",
+                    model.getDatabaseType(), connection.getDbmsType());
         }
 
         String dbContent = schemaIntrospectionService.introspectContent(connection);
@@ -110,7 +109,7 @@ public class MigrationDdlService {
         try {
             return ErdContentParser.parse(objectMapper.readTree(content));
         } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 본체를 해석할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.parse");
         }
     }
 }

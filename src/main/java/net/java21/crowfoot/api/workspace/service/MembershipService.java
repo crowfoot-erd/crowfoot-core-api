@@ -107,9 +107,9 @@ public class MembershipService {
                             "granteeType=USER에서는 teamId를 지정할 수 없습니다");
                 }
                 User user = userRepository.findById(targetUserId)
-                        .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "사용자를 찾을 수 없습니다"));
+                        .orElseThrow(() -> BusinessException.of(ErrorCode.RESOURCE_NOT_FOUND, "detail.user.not-found"));
                 if (user.isWithdrawn()) {
-                    throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "사용자를 찾을 수 없습니다");
+                    throw BusinessException.of(ErrorCode.RESOURCE_NOT_FOUND, "detail.user.not-found");
                 }
             }
             case TEAM -> {
@@ -176,7 +176,7 @@ public class MembershipService {
 
         String term = keyword == null ? null : keyword.trim();
         if (term == null || term.length() < 2) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "검색어는 2자 이상이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.keyword.min");
         }
         int size = limit == null
                 ? CANDIDATE_DEFAULT_LIMIT
@@ -207,7 +207,7 @@ public class MembershipService {
         try {
             return GranteeType.valueOf(granteeType);
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "granteeType은 USER 또는 TEAM이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.grantee-type");
         }
     }
 

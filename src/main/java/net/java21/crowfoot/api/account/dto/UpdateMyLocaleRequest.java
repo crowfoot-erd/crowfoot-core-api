@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Pattern;
  */
 public record UpdateMyLocaleRequest(
         @NotBlank
-        @Pattern(regexp = "ko|en|ja|zh")
+        @Pattern(regexp = "ko|en|ja|zh", message = "{validation.account.locale.range}")
         String locale
 ) {
 }

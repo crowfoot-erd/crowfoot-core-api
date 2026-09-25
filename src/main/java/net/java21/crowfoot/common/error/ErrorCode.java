@@ -87,4 +87,9 @@ public enum ErrorCode {
         this.code = code;
         this.defaultMessage = defaultMessage;
     }
+
+    /** 다국어 번들 키 — messages_{ko,en,ja,zh}.properties의 error.* (api-design.md §5.7) */
+    public String messageKey() {
+        return "error." + code.toLowerCase();
+    }
 }

@@ -5,8 +5,14 @@ spring:
   # 기본 프로필 — 지정 없이 기동하면 local. 운영은 SPRING_PROFILES_ACTIVE=prod (k8s)
   profiles:
     default: local
-  # 시크릿 파일 import는 프로필별로 나뉜다 — local은 .env-local, prod는 .env-prod (각 application-{profile}.yml). 모든 서버 리포 공통 규칙 (tech-stack.md Section 1.7)
+  # 시크릿 파일 import는 프로필별으로 나뉜다 — local은 .env-local, prod는 .env-prod (각 application-{profile}.yml). 모든 서버 리포 공통 규칙 (tech-stack.md Section 1.7)
   # Instant는 Jackson 3 기본값 그대로 ISO-8601 UTC(2026-09-10T08:30:00Z)로 직렬화한다
+  # 다국어 메시지 번들 — resultMessage·검증 문구를 Accept-Language(ko/en/ja/zh)로 해석 (api-design.md §5.7).
+  # fallback-to-system-locale=false: 시스템 로케일을 따르지 않고 미지원 언어는 번들 기본(ko)으로
+  messages:
+    basename: i18n/messages,i18n/validation/ValidationMessages
+    encoding: UTF-8
+    fallback-to-system-locale: false
   jpa:
     open-in-view: false
     hibernate:

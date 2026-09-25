@@ -10,7 +10,7 @@ import net.java21.crowfoot.common.i18n.LocalizedText;
  * title·content는 다국어 텍스트(문자열 또는 언어 객체 — §2.1 쓰기 다형)로, 언어별 값 길이는 서비스가 검증한다.
  */
 public record CreateCommunityPostRequest(
-        @NotBlank @Pattern(regexp = "RELEASE_NOTE|FEEDBACK", message = "알 수 없는 게시판입니다") String board,
+        @NotBlank @Pattern(regexp = "RELEASE_NOTE|FEEDBACK", message = "{validation.community.board.pattern}") String board,
         LocalizedText title,
         LocalizedText content) {
 }

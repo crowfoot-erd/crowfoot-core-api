@@ -116,7 +116,7 @@ public class ModelService {
     public ModelResponse create(long userId, long workspaceId, CreateModelRequest request) {
         roleChecker.requireEditor(userId, workspaceId);
         if (databaseTypeRepository.findByCodeAndIsActiveTrue(request.databaseType()).isEmpty()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "지원하지 않는 데이터베이스 종류입니다");
+            throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
         }
         if (modelRepository.existsByWorkspaceIdAndName(workspaceId, request.name())) {
             throw new BusinessException(ErrorCode.DUPLICATED_NAME);
@@ -162,7 +162,7 @@ public class ModelService {
         if (body.has("name") && !body.get("name").isNull()) {
             String name = body.get("name").asText();
             if (name.isBlank() || name.length() > 100) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST, "이름은 1~100자여야 합니다");
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.name.length100");
             }
             if (!name.equals(model.getName())
                     && modelRepository.existsByWorkspaceIdAndNameAndIdNot(workspaceId, name, modelId)) {
@@ -194,12 +194,12 @@ public class ModelService {
         }
         String content = request.content();
         if (content.getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 크기가 상한(5MB)을 초과했습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.size-exceeded");
         }
         try {
             objectMapper.readTree(content);
         } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "content는 유효한 JSON이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.content-json");
         }
         String changeSummary = requireValidChangeSummary(request.changeSummary());
 
@@ -228,12 +228,12 @@ public class ModelService {
             return null;
         }
         if (changeSummary.getBytes(StandardCharsets.UTF_8).length > MAX_CHANGE_SUMMARY_BYTES) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "변경 요약이 상한(64KB)을 초과했습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.summary-exceeded");
         }
         try {
             objectMapper.readTree(changeSummary);
         } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "changeSummary는 유효한 JSON이어야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.summary-json");
         }
         return changeSummary;
     }

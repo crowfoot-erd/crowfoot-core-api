@@ -62,7 +62,7 @@ public class DdlService {
             JsonNode root = objectMapper.readTree(content);
             return ErdContentParser.parse(root);
         } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 본체를 해석할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.parse");
         }
     }
 }

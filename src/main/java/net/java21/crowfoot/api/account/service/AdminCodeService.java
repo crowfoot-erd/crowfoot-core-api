@@ -110,7 +110,7 @@ public class AdminCodeService {
     public AdminRoleResponse updateRole(long adminId, UpdateAdminRoleRequest request) {
         adminGuard.requireAdmin(adminId);
         if (request.level() != null) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "level은 변경할 수 없습니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.level.immutable");
         }
         Role role = roleRepository.findById(request.code())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));

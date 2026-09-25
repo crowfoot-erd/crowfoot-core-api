@@ -174,13 +174,13 @@ class SqlImportServiceTest {
     }
 
     @Test
-    @DisplayName("비활성 databaseType은 400 INVALID_REQUEST — 생성 관례와 같다")
+    @DisplayName("비활성 databaseType은 400 INVALID_DBMS_TYPE — 생성 관례와 같다")
     void importDocumentRejectsInactiveDatabaseType() {
         given(databaseTypeRepository.findByCodeAndIsActiveTrue("oracle")).willReturn(Optional.empty());
         assertThatThrownBy(() -> service.importDocument(2L, 7L,
                 new SqlImportRequest(null, null, "oracle", DDL)))
                 .isInstanceOfSatisfying(BusinessException.class,
-                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_DBMS_TYPE));
     }
 
     @Test

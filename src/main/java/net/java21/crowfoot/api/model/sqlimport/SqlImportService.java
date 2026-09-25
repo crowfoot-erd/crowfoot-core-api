@@ -72,7 +72,7 @@ public class SqlImportService {
         String databaseType = requireActiveDatabaseType(request.databaseType());
         String modelName = modelName(request);
         if (modelRepository.existsByWorkspaceIdAndName(workspaceId, modelName)) {
-            throw new BusinessException(ErrorCode.DUPLICATED_NAME, "이미 존재하는 문서 이름입니다");
+            throw BusinessException.of(ErrorCode.DUPLICATED_NAME, "detail.doc-name.duplicated");
         }
         ReverseContentAssembler.AssembledContent assembled = assemble(request.ddl(), databaseType);
 
@@ -167,7 +167,7 @@ public class SqlImportService {
             name = DEFAULT_MODEL_NAME;
         }
         if (name.length() > 100) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "문서 이름은 1~100자여야 합니다");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.doc-name.length");
         }
         return name;
     }
@@ -175,7 +175,7 @@ public class SqlImportService {
     /** 활성 databaseType 검증 — 문서의 DB 종류이자 파싱 타입 정규화 기준 (ModelService.create 관례) */
     private String requireActiveDatabaseType(String databaseType) {
         if (databaseTypeRepository.findByCodeAndIsActiveTrue(databaseType).isEmpty()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "지원하지 않는 데이터베이스 종류입니다");
+            throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
         }
         return databaseType;
     }
