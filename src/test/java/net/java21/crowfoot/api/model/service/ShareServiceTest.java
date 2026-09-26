@@ -37,7 +37,7 @@ import static org.mockito.Mockito.never;
 
 /**
  * 문서 공유 링크 API 단위 테스트 (08-core/02-model.md Section 1.10) —
- * 발급(기간 검증·토큰 생성)·목록·철회·공개 조회(기간 밖 410·토큰 없음 404·조회 수 증가)·
+ * 발급(기간 검증·토큰 생성)·목록·철회·공개 조회(기간 밖 410·토큰 없음 404·조회 수 증가·창 안 재조회 미증가)·
  * 공개 갤러리(활성만·문서당 최근 링크 1개·인기 3 우선+최근 공유·전 워크스페이스 템플릿 포함)를 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
@@ -154,7 +154,7 @@ class ShareServiceTest {
         Model model = new Model(77L, "주문 ERD", "설명", "postgresql", "{\"tables\":[]}", 7L);
         given(modelRepository.findById(501L)).willReturn(Optional.of(model));
 
-        PublicShareResponse response = shareService.resolve("tok123");
+        PublicShareResponse response = shareService.resolve("tok123", true);
 
         assertThat(response.modelName()).isEqualTo("주문 ERD");
         assertThat(response.databaseType()).isEqualTo("postgresql");
@@ -162,6 +162,20 @@ class ShareServiceTest {
         assertThat(response.startsAt()).isEqualTo(PAST);
         assertThat(response.endsAt()).isEqualTo(FUTURE);
         then(shareRepository).should().incrementViewCount("tok123"); // 공개 조회 성공 = 조회 수 원자 증가
+    }
+
+    @Test
+    @DisplayName("countView=false 공개 조회는 문서는 내리되 조회 수를 올리지 않는다 — 30분 창 안 재조회(쿠키 판정)")
+    void resolveSkipsViewCountWhenNotCounted() {
+        ModelShare share = new ModelShare(501L, "tok123", PAST, FUTURE, 7L);
+        given(shareRepository.findByShareToken("tok123")).willReturn(Optional.of(share));
+        given(modelRepository.findById(501L))
+                .willReturn(Optional.of(new Model(77L, "주문 ERD", null, "postgresql", "{}", 7L)));
+
+        PublicShareResponse response = shareService.resolve("tok123", false);
+
+        assertThat(response.modelName()).isEqualTo("주문 ERD"); // 응답은 동일
+        then(shareRepository).should(never()).incrementViewCount(anyString());
     }
 
     @Test
@@ -173,7 +187,7 @@ class ShareServiceTest {
         given(shareRepository.findByShareToken("tok2")).willReturn(Optional.of(afterEnd));
 
         for (String token : List.of("tok1", "tok2")) {
-            assertThatThrownBy(() -> shareService.resolve(token))
+            assertThatThrownBy(() -> shareService.resolve(token, true))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getErrorCode())
                     .isEqualTo(ErrorCode.SHARE_INACTIVE);
@@ -186,7 +200,7 @@ class ShareServiceTest {
     void resolveRejectsUnknownToken() {
         given(shareRepository.findByShareToken("nope")).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> shareService.resolve("nope"))
+        assertThatThrownBy(() -> shareService.resolve("nope", true))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.SHARE_NOT_FOUND);
@@ -222,9 +236,9 @@ class ShareServiceTest {
     }
 
     @Test
-    @DisplayName("갤러리는 조회수 상위 3건을 인기 구간으로 먼저, 나머지는 최근 공유순으로 최대 21건까지 채운다")
-    void galleryPopularThreeThenRecentUpToTwentyOne() {
-        // given — 오래된 고조회 8건(인기 후보는 상위 3) + 최근 무조회 15건 = 23건, 상한 21
+    @DisplayName("갤러리는 조회수 상위 3건을 인기 구간으로 먼저, 나머지는 최근 공유순으로 인기 3+최근 15=18건까지 채운다")
+    void galleryPopularThreeThenRecentUpToEighteen() {
+        // given — 오래된 고조회 8건(인기 후보는 상위 3) + 최근 무조회 13건 = 21건, 상한 18(3+15)
         List<ModelShare> shares = new java.util.ArrayList<>();
         List<Model> models = new java.util.ArrayList<>();
         for (int i = 0; i < 8; i++) { // 9월 1일~8일 발급, 조회수 100-i
@@ -232,7 +246,7 @@ class ShareServiceTest {
             shares.add(share(600L + i, "old" + i, null, null, day, 100L + i, 100L - i));
             models.add(model(600L + i, "오래된 ERD " + i, "2026-09-25T09:00:00Z"));
         }
-        for (int i = 0; i < 15; i++) { // 9월 11일~25일 발급, 무조회
+        for (int i = 0; i < 13; i++) { // 9월 11일~23일 발급, 무조회
             shares.add(share(700L + i, "new" + i, null, null,
                     String.format("2026-09-%dT10:00:00Z", 11 + i), 200L + i, 0L));
             models.add(model(700L + i, "최근 ERD " + i, "2026-09-26T09:00:00Z"));
@@ -243,16 +257,17 @@ class ShareServiceTest {
 
         List<GalleryShareResponse> gallery = shareService.gallery();
 
-        // then — 상한 21, 인기 3(old0..old2 조회수순), 이후 최근 공유순(new14..new0 + old7..old5),
-        // 탈락 = 인기 밀린 고조회 old3·old4 — 최근 무조회 문서가 먼저 채운다
-        assertThat(gallery).hasSize(21);
+        // then — 상한 18, 인기 3(old0..old2 조회수순), 이후 최근 공유순(new12..new0 + old7..old6),
+        // 탈락 = 인기 밀린 고조회 old3..old5 — 최근 무조회 문서가 먼저 채운다
+        assertThat(gallery).hasSize(18);
         assertThat(gallery.subList(0, 3)).extracting(GalleryShareResponse::shareToken)
                 .containsExactly("old0", "old1", "old2");
-        assertThat(gallery.subList(3, 21)).extracting(GalleryShareResponse::shareToken)
-                .containsExactly("new14", "new13", "new12", "new11", "new10", "new9", "new8",
+        assertThat(gallery.subList(3, 18)).extracting(GalleryShareResponse::shareToken)
+                .containsExactly("new12", "new11", "new10", "new9", "new8",
                         "new7", "new6", "new5", "new4", "new3", "new2", "new1", "new0",
-                        "old7", "old6", "old5");
-        assertThat(gallery).extracting(GalleryShareResponse::shareToken).doesNotContain("old3", "old4");
+                        "old7", "old6");
+        assertThat(gallery).extracting(GalleryShareResponse::shareToken)
+                .doesNotContain("old3", "old4", "old5");
     }
 
     @Test

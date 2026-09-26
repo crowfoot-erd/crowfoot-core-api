@@ -18,8 +18,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.List;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -83,23 +85,43 @@ class ModelShareControllerWebTest {
     }
 
     @Test
-    @DisplayName("공개 조회는 X-USER-ID 없이도 200으로 문서를 내려준다 — 토큰이 자격")
+    @DisplayName("공개 조회는 X-USER-ID 없이도 200으로 문서를 내려준다 — 토큰이 자격, 조회 수를 세고 쿠키에 흔적을 남긴다")
     void resolveIsPublicWithoutUserId() throws Exception {
-        given(shareService.resolve("tok123")).willReturn(new PublicShareResponse(
+        given(shareService.resolve("tok123", true)).willReturn(new PublicShareResponse(
                 "주문 ERD", "설명", "postgresql", 3, "{\"tables\":[]}", null, null));
 
         mockMvc.perform(get("/core/shares/tok123"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.response.modelName").value("주문 ERD"))
                 .andExpect(jsonPath("$.response.databaseType").value("postgresql"))
-                .andExpect(jsonPath("$.response.content").exists());
+                .andExpect(jsonPath("$.response.content").exists())
+                // 첫 조회(쿠키 없음) = 세되고, 30분 창 쿠키가 Path=/api/v1/core/shares로 돌아온다
+                .andExpect(header().string("Set-Cookie", containsString("crowfoot_share_views=tok123:")))
+                .andExpect(header().string("Set-Cookie", containsString("Path=/api/v1/core/shares")))
+                .andExpect(header().string("Set-Cookie", containsString("Max-Age=1800")));
+    }
+
+    @Test
+    @DisplayName("30분 창 안의 재조회는 조회 수를 세지 않는다 — 쿠키에 토큰이 있으면 countView=false")
+    void resolveSkipsViewCountWithinCookieWindow() throws Exception {
+        given(shareService.resolve("tok123", false)).willReturn(new PublicShareResponse(
+                "주문 ERD", "설명", "postgresql", 3, "{\"tables\":[]}", null, null));
+
+        // 쿠키 = 방금 조회한 흔적(창 안) — 재조회는 카운트에서 빠지되 창은 다시 돌아간다.
+        // MockMvc는 raw Cookie 헤더를 getCookies()로 안 풀어준다 — cookie() 빌더로 심는다
+        jakarta.servlet.http.Cookie viewed = new jakarta.servlet.http.Cookie(
+                ModelShareController.VIEWED_COOKIE, "tok123:" + Instant.now().getEpochSecond());
+        mockMvc.perform(get("/core/shares/tok123").cookie(viewed))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Set-Cookie", containsString("crowfoot_share_views=tok123:")));
+        then(shareService).should().resolve("tok123", false);
     }
 
     @Test
     @DisplayName("공개 조회는 기간 밖 토큰이면 410 SHARE_INACTIVE다")
     void resolveReturns410ForInactiveShare() throws Exception {
         willThrow(new BusinessException(ErrorCode.SHARE_INACTIVE))
-                .given(shareService).resolve("expired");
+                .given(shareService).resolve("expired", true);
 
         mockMvc.perform(get("/core/shares/expired"))
                 .andExpect(status().isGone())
@@ -110,7 +132,7 @@ class ModelShareControllerWebTest {
     @DisplayName("공개 조회는 알 수 없는 토큰이면 404 SHARE_NOT_FOUND다")
     void resolveReturns404ForUnknownToken() throws Exception {
         willThrow(new BusinessException(ErrorCode.SHARE_NOT_FOUND))
-                .given(shareService).resolve("nope");
+                .given(shareService).resolve("nope", true);
 
         mockMvc.perform(get("/core/shares/nope"))
                 .andExpect(status().isNotFound())

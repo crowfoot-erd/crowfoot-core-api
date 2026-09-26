@@ -35,8 +35,10 @@ public class ShareService {
 
     /** 갤러리 인기 구간 — 조회수 상위 N건을 최근 공유보다 먼저 띄운다(1.10.5) */
     private static final int POPULAR_LIMIT = 3;
+    /** 갤러리 최근 구간 상한 — 인기 3을 제외한 나머지 최근 공유 건수(랜딩 "최근 공유" 카드 수) */
+    private static final int RECENT_LIMIT = 15;
     /** 갤러리 총량 상한 — 인기 + 최근 공유 합산 */
-    private static final int GALLERY_LIMIT = 21;
+    private static final int GALLERY_LIMIT = POPULAR_LIMIT + RECENT_LIMIT;
 
     private final ModelShareRepository shareRepository;
     private final ModelRepository modelRepository;
@@ -98,10 +100,11 @@ public class ShareService {
     /**
      * 공개 조회(무인증) — 토큰을 아는 누구나. 시작 전·종료 후면 410 SHARE_INACTIVE로
      * 링크의 죽음을 알린다. 문서가 삭제되었으면(FK CASCADE로 링크도 삭제) 404 SHARE_NOT_FOUND.
-     * 조회 수는 성공 응답마다 원자 증가한다(단순 카운트 — 방문자·크롤러 구분 없음, 갤러리 인기 원료).
+     * 조회 수는 countView인 성공 응답마다 원자 증가한다(단순 카운트, 갤러리 인기 원료) — 컨트롤러가
+     * crowfoot_share_views 쿠키로 판정한 대로 30분 창 안의 같은 방문자 재조회는 세지 않는다.
      */
     @Transactional
-    public PublicShareResponse resolve(String token) {
+    public PublicShareResponse resolve(String token, boolean countView) {
         ModelShare share = shareRepository.findByShareToken(token)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
         if (!isActive(share, Instant.now())) {
@@ -109,7 +112,9 @@ public class ShareService {
         }
         Model model = modelRepository.findById(share.getModelId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
-        shareRepository.incrementViewCount(token);
+        if (countView) {
+            shareRepository.incrementViewCount(token);
+        }
         return new PublicShareResponse(
                 model.getName(),
                 model.getDescription(),
@@ -123,7 +128,8 @@ public class ShareService {
     /**
      * 공개 갤러리(무인증, 08-core/02-model.md Section 1.10.5) — 현재 공유 중인 문서의 목록.
      * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개. **조회수 상위 {@value POPULAR_LIMIT}건(인기)을 먼저,
-     * 나머지를 최근 공유순으로 최대 {@value GALLERY_LIMIT}건**까지 내려준다 — 랜딩의 인기·최신 구성.
+     * 나머지를 최근 공유순으로 인기 {@value POPULAR_LIMIT}+최근 {@value RECENT_LIMIT}건**까지 내려준다 —
+     * 랜딩의 인기 박스 3+최근 카드 구성.
      * 전 워크스페이스의 공유를 모은다(템플릿 문서 포함 — 랜딩의 템플릿 전용 섹션은 폐지됐다).
      * 본문(content, 최대 5MB)은 미포함 — 랜딩 카드는 메타만 보여준다.
      */
