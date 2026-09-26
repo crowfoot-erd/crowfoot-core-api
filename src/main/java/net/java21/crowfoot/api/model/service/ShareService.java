@@ -2,7 +2,6 @@ package net.java21.crowfoot.api.model.service;
 
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
-import net.java21.crowfoot.api.config.AppProperties;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
@@ -35,7 +34,7 @@ import java.util.stream.Collectors;
 public class ShareService {
 
     /** 갤러리 인기 구간 — 조회수 상위 N건을 최근 공유보다 먼저 띄운다(1.10.5) */
-    private static final int POPULAR_LIMIT = 6;
+    private static final int POPULAR_LIMIT = 3;
     /** 갤러리 총량 상한 — 인기 + 최근 공유 합산 */
     private static final int GALLERY_LIMIT = 21;
 
@@ -44,7 +43,6 @@ public class ShareService {
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ShareTokenGenerator tokenGenerator;
-    private final AppProperties properties;
 
     /** 발급(Editor 이상) — startsAt > endsAt이면 400, 없는 문서면 404 */
     @Transactional
@@ -126,13 +124,12 @@ public class ShareService {
      * 공개 갤러리(무인증, 08-core/02-model.md Section 1.10.5) — 현재 공유 중인 문서의 목록.
      * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개. **조회수 상위 {@value POPULAR_LIMIT}건(인기)을 먼저,
      * 나머지를 최근 공유순으로 최대 {@value GALLERY_LIMIT}건**까지 내려준다 — 랜딩의 인기·최신 구성.
-     * 템플릿 워크스페이스 문서는 제외한다(템플릿은 전용 섹션 09-templates.md Section 1이 따로 있다).
+     * 전 워크스페이스의 공유를 모은다(템플릿 문서 포함 — 랜딩의 템플릿 전용 섹션은 폐지됐다).
      * 본문(content, 최대 5MB)은 미포함 — 랜딩 카드는 메타만 보여준다.
      */
     @Transactional(readOnly = true)
     public List<GalleryShareResponse> gallery() {
         Instant now = Instant.now();
-        Long templateWsId = templateWorkspaceId();
         Map<Long, ModelShare> latestByModel = new LinkedHashMap<>();
         for (ModelShare share : shareRepository.findAllByOrderByCreatedAtDescIdDesc()) {
             if (isActive(share, now)) {
@@ -147,8 +144,6 @@ public class ShareService {
         record Item(ModelShare share, Model model) {}
         List<Item> items = latestByModel.entrySet().stream()
                 .filter(entry -> models.containsKey(entry.getKey())) // 방어 — CASCADE 삭제로 사실상 없는 경우
-                .filter(entry -> templateWsId == null
-                        || !templateWsId.equals(models.get(entry.getKey()).getWorkspaceId()))
                 .map(entry -> new Item(entry.getValue(), models.get(entry.getKey())))
                 .toList();
         // 인기 구간 — 조회수 desc(동률은 최근 공유순), 나머지는 최근 공유순으로 상한까지 채운다
@@ -171,12 +166,6 @@ public class ShareService {
                         item.share().getCreatedAt(),
                         item.share().getViewCount()))
                 .toList();
-    }
-
-    /** 템플릿 워크스페이스 ID — 설정이 없으면 null(갤러리 제외 없음) */
-    private Long templateWorkspaceId() {
-        AppProperties.Template template = properties.template();
-        return template == null ? null : template.workspaceId();
     }
 
     /** 링크 기간 판정 — 시작일 null은 즉시, 종료일 null은 무제한 */

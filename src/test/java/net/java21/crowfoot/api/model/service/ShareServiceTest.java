@@ -1,7 +1,6 @@
 package net.java21.crowfoot.api.model.service;
 
 import net.java21.crowfoot.api.account.service.AuditRecorder;
-import net.java21.crowfoot.api.config.AppProperties;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
@@ -39,7 +38,7 @@ import static org.mockito.Mockito.never;
 /**
  * 문서 공유 링크 API 단위 테스트 (08-core/02-model.md Section 1.10) —
  * 발급(기간 검증·토큰 생성)·목록·철회·공개 조회(기간 밖 410·토큰 없음 404·조회 수 증가)·
- * 공개 갤러리(활성만·문서당 최근 링크 1개·인기 6 우선+최근 공유·템플릿 워크스페이스 제외)를 검증한다.
+ * 공개 갤러리(활성만·문서당 최근 링크 1개·인기 3 우선+최근 공유·전 워크스페이스 템플릿 포함)를 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class ShareServiceTest {
@@ -55,8 +54,6 @@ class ShareServiceTest {
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
-    @Mock
-    private AppProperties properties;
     @Spy
     private ShareTokenGenerator tokenGenerator = new ShareTokenGenerator();
     @InjectMocks
@@ -225,9 +222,9 @@ class ShareServiceTest {
     }
 
     @Test
-    @DisplayName("갤러리는 조회수 상위 6건을 인기 구간으로 먼저, 나머지는 최근 공유순으로 최대 21건까지 채운다")
-    void galleryPopularSixThenRecentUpToTwentyOne() {
-        // given — 오래된 고조회 8건(인기 후보는 상위 6) + 최근 무조회 15건 = 23건, 상한 21
+    @DisplayName("갤러리는 조회수 상위 3건을 인기 구간으로 먼저, 나머지는 최근 공유순으로 최대 21건까지 채운다")
+    void galleryPopularThreeThenRecentUpToTwentyOne() {
+        // given — 오래된 고조회 8건(인기 후보는 상위 3) + 최근 무조회 15건 = 23건, 상한 21
         List<ModelShare> shares = new java.util.ArrayList<>();
         List<Model> models = new java.util.ArrayList<>();
         for (int i = 0; i < 8; i++) { // 9월 1일~8일 발급, 조회수 100-i
@@ -246,32 +243,32 @@ class ShareServiceTest {
 
         List<GalleryShareResponse> gallery = shareService.gallery();
 
-        // then — 상한 21, 인기 6(old0..old5 조회수순), 이후 최근 공유순(new14..new9), 탈락 = 무조회 오래된 old6·old7
+        // then — 상한 21, 인기 3(old0..old2 조회수순), 이후 최근 공유순(new14..new0 + old7..old5),
+        // 탈락 = 인기 밀린 고조회 old3·old4 — 최근 무조회 문서가 먼저 채운다
         assertThat(gallery).hasSize(21);
-        assertThat(gallery.subList(0, 6)).extracting(GalleryShareResponse::shareToken)
-                .containsExactly("old0", "old1", "old2", "old3", "old4", "old5");
-        assertThat(gallery.subList(6, 21)).extracting(GalleryShareResponse::shareToken)
+        assertThat(gallery.subList(0, 3)).extracting(GalleryShareResponse::shareToken)
+                .containsExactly("old0", "old1", "old2");
+        assertThat(gallery.subList(3, 21)).extracting(GalleryShareResponse::shareToken)
                 .containsExactly("new14", "new13", "new12", "new11", "new10", "new9", "new8",
-                        "new7", "new6", "new5", "new4", "new3", "new2", "new1", "new0");
-        assertThat(gallery).extracting(GalleryShareResponse::shareToken).doesNotContain("old6", "old7");
+                        "new7", "new6", "new5", "new4", "new3", "new2", "new1", "new0",
+                        "old7", "old6", "old5");
+        assertThat(gallery).extracting(GalleryShareResponse::shareToken).doesNotContain("old3", "old4");
     }
 
     @Test
-    @DisplayName("갤러리는 템플릿 워크스페이스 문서를 제외한다 — 설정이 없으면 제외 없음")
-    void galleryExcludesTemplateWorkspace() {
+    @DisplayName("갤러리는 전 워크스페이스의 공유를 모은다 — 템플릿 문서도 포함(랜딩 전용 섹션 폐지)")
+    void galleryIncludesTemplateWorkspace() {
         given(shareRepository.findAllByOrderByCreatedAtDescIdDesc()).willReturn(List.of(
                 share(501L, "tokA", null, null, "2026-09-14T10:00:00Z", 11L, 3L),
                 share(502L, "tokB", null, null, "2026-09-15T10:00:00Z", 12L, 0L)));
         Model templateModel = model(501L, "템플릿 ERD", "2026-09-16T09:00:00Z");
         ReflectionTestUtils.setField(templateModel, "workspaceId", 34L); // 템플릿 워크스페이스
-        given(modelRepository.findAllById(any())).willReturn(List.of(templateModel, model(502L, "커뮤니티 ERD", "2026-09-15T09:00:00Z")));
+        given(modelRepository.findAllById(any()))
+                .willReturn(List.of(templateModel, model(502L, "커뮤니티 ERD", "2026-09-15T09:00:00Z")));
 
-        given(properties.template()).willReturn(new AppProperties.Template(34L));
-        assertThat(shareService.gallery()).extracting(GalleryShareResponse::shareToken).containsExactly("tokB");
-
-        given(properties.template()).willReturn(null); // 설정 없음 = 제외 없음(존재 은닉과 같은 축의 완화)
+        // 워크스페이스 구분 없이 전부 — 조회수 순(tokA 3회 우선)
         assertThat(shareService.gallery()).extracting(GalleryShareResponse::shareToken)
-                .containsExactlyInAnyOrder("tokA", "tokB");
+                .containsExactly("tokA", "tokB");
     }
 
     @Test
