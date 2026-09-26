@@ -1,0 +1,21 @@
+GeoIP 데이터베이스 — 국가 판정용 (08-core/10-metrics.md Section 6)
+=================================================================
+
+번들 파일: dbip-country-lite.mmdb
+
+출처: DB-IP (https://db-ip.com) — DB-IP Country Lite
+라이선스: Creative Commons Attribution 4.0 International (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/
+
+귀속(attribution) 요건에 따라 원저작자 표기:
+  "This product includes DB-IP's IP Geolocation data
+   (https://db-ip.com), licensed under CC BY 4.0."
+
+선정 사유: MaxMind GeoLite2-Country는 다운로드에 계정·라이선스 키가 필요하지만,
+DB-IP Country Lite는 같은 CC BY 4.0 라이선스로 직접 다운로드할 수 있고 mmdb
+형식이 MaxMind 리더(geoip2)와 호환된다. 규모·정확도는 국가 판정 용도에 충분하다.
+
+갱신(월 1회 수동 — 갱신을 놓쳐도 국가 통계만 옛 데이터로 동작한다):
+  curl -sL https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).mmdb.gz \
+    | gunzip > src/main/resources/geoip/dbip-country-lite.mmdb
+  git commit -m "chore: GeoIP DB 월간 갱신"

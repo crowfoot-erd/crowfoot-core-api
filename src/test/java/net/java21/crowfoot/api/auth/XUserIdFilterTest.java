@@ -16,7 +16,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-/** X-USER-ID 검증 필터 테스트 — 공개 경로(/core/providers·/core/shares·/core/community/release-notes·/core/templates)는 헤더 없이도 통과한다. */
+/** X-USER-ID 검증 필터 테스트 — 공개 경로(/core/providers·/core/shares·/core/community/release-notes·/core/templates·/core/metrics)는 헤더 없이도 통과한다. */
 @ExtendWith(MockitoExtension.class)
 class XUserIdFilterTest {
 
@@ -61,6 +61,29 @@ class XUserIdFilterTest {
 
         verify(filterChain).doFilter(request, response);
         assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("접속 비콘(/core/metrics/visit)은 X-USER-ID 없이도 체인을 통과한다 — 무인증 수집")
+    void metricsBeaconPathSkipsAuthentication() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/core/metrics/visit");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("관리자 통계(/core/admin/metrics/**)는 X-USER-ID 없으면 401 — 공개 prefix(/core/metrics)가 넘지 않는지 감시")
+    void adminMetricsPathRequiresUserId() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/core/admin/metrics/summary");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, filterChain);
+
+        assertThat(response.getStatus()).isEqualTo(401);
     }
 
     @Test

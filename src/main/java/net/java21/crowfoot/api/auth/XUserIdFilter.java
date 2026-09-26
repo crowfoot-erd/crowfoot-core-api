@@ -23,6 +23,8 @@ import java.io.IOException;
  * {@code /core/shares/**}(공유 문서 공개 조회 — 토큰이 자격),
  * {@code /core/community/release-notes/**}(릴리스 노트 공개 조회),
  * {@code /core/templates}(템플릿 공개 목록 — 08-core/09-templates.md),
+ * {@code /core/metrics/**}(접속 비콘 수집 — 무인증, 08-core/10-metrics.md Section 3.
+ * 관리자 조회 {@code /core/admin/metrics/**}는 제외 대상 아니다 — X-USER-ID 필요),
  * {@code /actuator/**}(헬스체크).
  */
 @Component
@@ -41,6 +43,7 @@ public class XUserIdFilter extends OncePerRequestFilter {
                 || path.startsWith("/core/shares")             // 공유 문서 공개 조회 — 토큰이 자격
                 || path.startsWith("/core/community/release-notes") // 릴리스 노트 공개 조회 — Section 3.11
                 || path.startsWith("/core/templates")            // 템플릿 공개 목록 — GET만 Gateway 화이트리스트
+                || path.startsWith("/core/metrics")              // 접속 비콘 수집(POST visit) — 무인증, 관리자 /core/admin/metrics는 별도
                 || "OPTIONS".equalsIgnoreCase(request.getMethod());
     }
 

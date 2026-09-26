@@ -8,9 +8,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param rotation Refresh Rotation 판정 설정
  * @param auth     인증 서버(crowfoot-auth) 연동 설정 — 내부망 직접 호출 (Gateway 경유 없이)
  * @param template 템플릿 워크스페이스 설정 — 설정이 없으면 템플릿 목록은 빈 배열로 응답한다(존재 은닉)
+ * @param metrics  접속 통계 설정 (08-core/10-metrics.md)
  */
 @ConfigurationProperties(prefix = "crowfoot")
-public record AppProperties(Rotation rotation, Auth auth, Template template) {
+public record AppProperties(Rotation rotation, Auth auth, Template template, Metrics metrics) {
 
     /** @param graceSeconds Rotation 유예 기준 시간(초) — 유예 내 구 Refresh 재사용은 GRACE로 정상 처리 */
     public record Rotation(int graceSeconds) {
@@ -22,5 +23,12 @@ public record AppProperties(Rotation rotation, Auth auth, Template template) {
 
     /** @param workspaceId 템플릿 원천 워크스페이스 — 이 워크스페이스의 문서가 공개 목록으로 노출된다 */
     public record Template(Long workspaceId) {
+    }
+
+    /**
+     * @param ipHashSecret 쿠키 미보유 방문자 일일 IP 해시 솔트 원천 — 솔트 자체은
+     * {@code HMAC(secret, 날짜)}로 유도된다. 운영은 환경변수로 지정, 기본값은 개발 전용
+     */
+    public record Metrics(String ipHashSecret) {
     }
 }

@@ -97,14 +97,14 @@ class TemplateServiceTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(templateService, "properties",
-                new AppProperties(null, null, new AppProperties.Template(TEMPLATE_WS)));
+                new AppProperties(null, null, new AppProperties.Template(TEMPLATE_WS), null));
     }
 
     @Test
     @DisplayName("목록은 설정이 없으면 빈 배열로 은닉한다 — 문서를 조회하지 않는다")
     void listHidesTemplatesWhenNotConfigured() {
         ReflectionTestUtils.setField(templateService, "properties",
-                new AppProperties(null, null, null));
+                new AppProperties(null, null, null, null));
 
         assertThat(templateService.list()).isEmpty();
 

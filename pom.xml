@@ -46,6 +46,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- GeoIP 국가 판정 (08-core/10-metrics.md Section 6) — 클래스패스 번들 mmdb 읽기 전용.
+             Jackson 2(fasterxml)를 끌어들이지만 패키지가 달라 앱의 Jackson 3(tools.jackson)과 공존한다 -->
+        <dependency>
+            <groupId>com.maxmind.geoip2</groupId>
+            <artifactId>geoip2</artifactId>
+            <version>4.3.0</version>
+        </dependency>
         <!-- JPA — 커넥션 풀은 DBCP2(아래) 사용: Spring Boot 기본 HikariCP 제외 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

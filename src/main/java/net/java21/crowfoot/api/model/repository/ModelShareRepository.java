@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,6 +26,14 @@ public interface ModelShareRepository extends JpaRepository<ModelShare, Long> {
 
     /** 문서의 링크 목록 — 최근 발급순 */
     List<ModelShare> findByModelIdOrderByCreatedAtDescIdDesc(Long modelId);
+
+    /** 토큰→문서명(관리자 트래픽 share 차원 표기 — 08-core/10-metrics.md §5.2). 행 배열: [shareToken, modelName] */
+    @Query("""
+            select s.shareToken, m.name
+            from ModelShare s join Model m on m.id = s.modelId
+            where s.shareToken in :tokens
+            """)
+    List<Object[]> findDocumentNamesByTokens(@Param("tokens") Collection<String> tokens);
 
     /** 공개 갤러리 원료 — 전체 링크를 최근 발급순으로(활성 필터·문서당 1건은 서비스에서, 링크 수가 적다) */
     List<ModelShare> findAllByOrderByCreatedAtDescIdDesc();
