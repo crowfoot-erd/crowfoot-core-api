@@ -21,6 +21,9 @@ public interface ModelRepository extends JpaRepository<Model, Long> {
 
     Optional<Model> findByIdAndWorkspaceId(Long id, Long workspaceId);
 
+    /** 템플릿 공개 목록(08-core/09-templates.md Section 2.1) — 워크스페이스 문서 전체를 갱신순으로 */
+    List<Model> findByWorkspaceIdOrderByUpdatedAtDescIdDesc(Long workspaceId);
+
     /** 버전 경량 조회(1.9 협업 폴링) — content(최대 5MB)를 로드하지 않기 위한 프로젝션 */
     @Query("select m.version, m.updatedAt from Model m"
             + " where m.id = :id and m.workspaceId = :workspaceId")

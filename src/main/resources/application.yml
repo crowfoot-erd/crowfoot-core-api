@@ -27,6 +27,8 @@ management:
 crowfoot:
   rotation:
     grace-seconds: 30                    # Refresh Rotation 유예 (02-auth/requirements.md Section 1.4.4)
+  template:
+    workspace-id: ${CROWFOOT_TEMPLATE_WORKSPACE_ID:34}  # 템플릿 원천 워크스페이스 (08-core/09-templates.md Section 1)
   connection:
     # 커넥션 비밀번호 암호화 키(AES-256-GCM, base64 32바이트) — 운영은 환경변수 CROWFOOT_CONNECTION_SECRET_KEY 필수.
     # 기본값은 개발 전용: 운영에서 키를 바꾸면 기존 암호문을 풀 수 없다(커넥션 재등록 필요) — 08-core/06-connection.md Section 2

@@ -59,7 +59,7 @@ class InternalRefreshTokenServiceTest {
         Clock fixed = Clock.fixed(NOW, ZoneOffset.UTC);
         service = new InternalRefreshTokenService(refreshTokenRepository, refreshTokenQueryRepository,
                 sessionRevoker, fixed, new AppProperties(new AppProperties.Rotation(30),
-                new AppProperties.Auth("http://localhost:8081")));
+                new AppProperties.Auth("http://localhost:8081"), null));
     }
 
     @Test

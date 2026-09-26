@@ -22,6 +22,7 @@ import java.io.IOException;
  * 제외 경로: {@code /internal/**}(내부망 — 인증 서버 호출), {@code /core/providers}(공개),
  * {@code /core/shares/**}(공유 문서 공개 조회 — 토큰이 자격),
  * {@code /core/community/release-notes/**}(릴리스 노트 공개 조회),
+ * {@code /core/templates}(템플릿 공개 목록 — 08-core/09-templates.md),
  * {@code /actuator/**}(헬스체크).
  */
 @Component
@@ -39,6 +40,7 @@ public class XUserIdFilter extends OncePerRequestFilter {
                 || "/core/providers".equals(path)              // 활성 제공자 목록 — 공개
                 || path.startsWith("/core/shares")             // 공유 문서 공개 조회 — 토큰이 자격
                 || path.startsWith("/core/community/release-notes") // 릴리스 노트 공개 조회 — Section 3.11
+                || path.startsWith("/core/templates")            // 템플릿 공개 목록 — GET만 Gateway 화이트리스트
                 || "OPTIONS".equalsIgnoreCase(request.getMethod());
     }
 

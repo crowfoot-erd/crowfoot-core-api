@@ -76,7 +76,10 @@ public enum ErrorCode {
     COMMUNITY_POST_NOT_FOUND(HttpStatus.NOT_FOUND, "COMMUNITY_POST_NOT_FOUND", "게시글을 찾을 수 없습니다"),
     COMMUNITY_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "COMMUNITY_COMMENT_NOT_FOUND", "코멘트를 찾을 수 없습니다"),
     COMMUNITY_COMMENT_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "COMMUNITY_COMMENT_NOT_ALLOWED",
-            "이 게시판에서는 코멘트를 사용할 수 없습니다");
+            "이 게시판에서는 코멘트를 사용할 수 없습니다"),
+
+    // Template (08-core/09-templates.md Section 2.3)
+    TEMPLATE_NOT_FOUND(HttpStatus.NOT_FOUND, "TEMPLATE_NOT_FOUND", "템플릿을 찾을 수 없습니다");
 
     private final HttpStatus status;
     private final String code;
