@@ -16,6 +16,8 @@ import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelShareRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
+import net.java21.crowfoot.api.term.domain.WorkspaceTerm;
+import net.java21.crowfoot.api.term.repository.WorkspaceTermRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -34,10 +37,12 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
@@ -45,7 +50,7 @@ import static org.mockito.Mockito.never;
 
 /**
  * 템플릿 API 단위 테스트 (08-core/09-templates.md) — 공개 목록(설정 은닉·카운트 산출·활성 공유
- * 최근 1건 조인)과 복제(원천 검증·이름 규칙·저장 시퀀스·v0 요약·감사 액션)를 검증한다.
+ * 최근 1건 조인)과 복제(원천 검증·이름 규칙·저장 시퀀스·v0 요약·감사 액션·도메인 표준 사전 동반)을 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class TemplateServiceTest {
@@ -56,6 +61,11 @@ class TemplateServiceTest {
     private static final Instant PAST = Instant.parse("2026-09-01T00:00:00Z");
     private static final String CONTENT =
             "{\"schemaVersion\":1,\"model\":{\"tables\":[{},{},{}],\"relationships\":[{}]}}";
+    /** 사전 동반 검증용 — 테이블 member(컬럼 member_id·email)·orders(컬럼 order_no) */
+    private static final String TERM_CONTENT = "{\"schemaVersion\":1,\"model\":{\"tables\":["
+            + "{\"physicalName\":\"member\",\"columns\":[{\"physicalName\":\"member_id\"},{\"physicalName\":\"email\"}]},"
+            + "{\"physicalName\":\"orders\",\"columns\":[{\"physicalName\":\"order_no\"}]}],"
+            + "\"relationships\":[]}}";
 
     @Mock
     private ModelRepository modelRepository;
@@ -66,6 +76,8 @@ class TemplateServiceTest {
     @Mock
     private ModelShareRepository shareRepository;
     @Mock
+    private WorkspaceTermRepository termRepository;
+    @Mock
     private ModelVersionPruner modelVersionPruner;
     @Mock
     private UserRepository userRepository;
@@ -75,6 +87,8 @@ class TemplateServiceTest {
     private AuditRecorder auditRecorder;
     @Mock
     private DatabaseTypeRepository databaseTypeRepository;
+    @Captor
+    private ArgumentCaptor<List<WorkspaceTerm>> copiedTermsCaptor;
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
     @InjectMocks
@@ -248,8 +262,90 @@ class TemplateServiceTest {
         then(auditRecorder).shouldHaveNoInteractions();
     }
 
+    @Test
+    @DisplayName("복제는 문서에 쓰인 물리명의 템플릿 사전 용어만 동반한다 — 대상 기존 용어는 덮어쓰지 않는다")
+    void cloneCopiesTemplateTermsMatchingContentPhysicalNames() {
+        Model source = templateModel(501L, "쇼핑몰 ERD", "2026-09-16T09:00:00Z", TERM_CONTENT);
+        given(modelRepository.findByIdAndWorkspaceId(501L, TEMPLATE_WS)).willReturn(Optional.of(source));
+        given(databaseTypeRepository.findByCodeAndIsActiveTrue("postgresql"))
+                .willReturn(Optional.of(new DatabaseType("postgresql", "PostgreSQL", true)));
+        given(modelRepository.existsByWorkspaceIdAndName(TARGET_WS, "내 쇼핑몰 ERD")).willReturn(false);
+        given(modelRepository.save(any(Model.class))).willAnswer(inv -> {
+            Model model = inv.getArgument(0);
+            ReflectionTestUtils.setField(model, "id", 601L);
+            return model;
+        });
+        // 템플릿 사전: 문서에 있는 member_id(타입 맵 포함)·email, 없는 isbn — 대상에는 email이 이미 있다
+        given(termRepository.findByWorkspaceIdOrderByTermAsc(TEMPLATE_WS)).willReturn(List.of(
+                new WorkspaceTerm(TEMPLATE_WS, "member_id", "회원ID",
+                        "{\"mysql\":\"BIGINT\",\"postgresql\":\"BIGINT\"}", 2L),
+                new WorkspaceTerm(TEMPLATE_WS, "email", "이메일", null, 2L),
+                new WorkspaceTerm(TEMPLATE_WS, "isbn", "ISBN", null, 2L)));
+        given(termRepository.findByWorkspaceIdOrderByTermAsc(TARGET_WS))
+                .willReturn(List.of(new WorkspaceTerm(TARGET_WS, "email", "우리 워크스페이스 이메일", null, 7L)));
+
+        templateService.clone(USER_ID, TARGET_WS, new CloneFromTemplateRequest(501L, "내 쇼핑몰 ERD"));
+
+        // 동반 = 문서 물리명 일치(member_id·email) ∩ 대상 없음(email 제외) = member_id 1건
+        then(termRepository).should().saveAll(copiedTermsCaptor.capture());
+        assertThat(copiedTermsCaptor.getValue()).hasSize(1);
+        WorkspaceTerm copied = copiedTermsCaptor.getValue().get(0);
+        assertThat(copied.getWorkspaceId()).isEqualTo(TARGET_WS);
+        assertThat(copied.getTerm()).isEqualTo("member_id");
+        assertThat(copied.getLabel()).isEqualTo("회원ID");
+        assertThat(copied.getTermTypes()).isEqualTo("{\"mysql\":\"BIGINT\",\"postgresql\":\"BIGINT\"}");
+        assertThat(copied.getCreatedBy()).isEqualTo(USER_ID); // 복제자 명의 — 일반 등록과 같은 형태
+    }
+
+    @Test
+    @DisplayName("복제는 content를 파싱할 수 없으면 사전 동반을 건너뛴다 — 복제 자체는 성공")
+    void cloneSkipsTermCopyForUnparseableContent() {
+        Model source = templateModel(501L, "쇼핑몰 ERD", "2026-09-16T09:00:00Z", "{not-json");
+        given(modelRepository.findByIdAndWorkspaceId(501L, TEMPLATE_WS)).willReturn(Optional.of(source));
+        given(databaseTypeRepository.findByCodeAndIsActiveTrue("postgresql"))
+                .willReturn(Optional.of(new DatabaseType("postgresql", "PostgreSQL", true)));
+        given(modelRepository.existsByWorkspaceIdAndName(TARGET_WS, "쇼핑몰 ERD")).willReturn(false);
+        given(modelRepository.save(any(Model.class))).willAnswer(inv -> {
+            Model model = inv.getArgument(0);
+            ReflectionTestUtils.setField(model, "id", 601L);
+            return model;
+        });
+
+        ModelResponse response = templateService.clone(USER_ID, TARGET_WS, new CloneFromTemplateRequest(501L, null));
+
+        assertThat(response.modelId()).isEqualTo("601");
+        then(termRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("복제는 대상 사전이 상한(1,000)에 가득 차 있으면 용어를 더하지 않는다")
+    void cloneStopsTermCopyAtWorkspaceLimit() {
+        Model source = templateModel(501L, "쇼핑몰 ERD", "2026-09-16T09:00:00Z", TERM_CONTENT);
+        given(modelRepository.findByIdAndWorkspaceId(501L, TEMPLATE_WS)).willReturn(Optional.of(source));
+        given(databaseTypeRepository.findByCodeAndIsActiveTrue("postgresql"))
+                .willReturn(Optional.of(new DatabaseType("postgresql", "PostgreSQL", true)));
+        given(modelRepository.existsByWorkspaceIdAndName(TARGET_WS, "쇼핑몰 ERD")).willReturn(false);
+        given(modelRepository.save(any(Model.class))).willAnswer(inv -> {
+            Model model = inv.getArgument(0);
+            ReflectionTestUtils.setField(model, "id", 601L);
+            return model;
+        });
+        given(termRepository.findByWorkspaceIdOrderByTermAsc(TARGET_WS)).willReturn(
+                IntStream.rangeClosed(1, 1000) // 상한만큼 이미 있다
+                        .mapToObj(i -> new WorkspaceTerm(TARGET_WS, "term" + i, "용어" + i, null, 7L))
+                        .toList());
+
+        templateService.clone(USER_ID, TARGET_WS, new CloneFromTemplateRequest(501L, null));
+
+        then(termRepository).should(never()).saveAll(anyList());
+    }
+
     private static Model templateModel(long id, String name, String updatedAt) {
-        Model model = new Model(TEMPLATE_WS, name, "설명", "postgresql", CONTENT, USER_ID);
+        return templateModel(id, name, updatedAt, CONTENT);
+    }
+
+    private static Model templateModel(long id, String name, String updatedAt, String content) {
+        Model model = new Model(TEMPLATE_WS, name, "설명", "postgresql", content, USER_ID);
         ReflectionTestUtils.setField(model, "id", id);
         ReflectionTestUtils.setField(model, "updatedAt", Instant.parse(updatedAt));
         return model;
