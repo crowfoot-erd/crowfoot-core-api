@@ -122,12 +122,13 @@ class ModelShareControllerWebTest {
     void galleryIsPublicWithoutUserId() throws Exception {
         given(shareService.gallery()).willReturn(List.of(new GalleryShareResponse(
                 "Ab3xYz0123456789QrStUv", "주문 ERD", "설명", "postgresql",
-                Instant.parse("2026-09-16T09:00:00Z"), Instant.parse("2026-09-15T07:30:00Z"))));
+                Instant.parse("2026-09-16T09:00:00Z"), Instant.parse("2026-09-15T07:30:00Z"), 42L)));
 
         mockMvc.perform(get("/core/shares"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.responses[0].shareToken").value("Ab3xYz0123456789QrStUv"))
                 .andExpect(jsonPath("$.responses[0].modelName").value("주문 ERD"))
+                .andExpect(jsonPath("$.responses[0].viewCount").value(42))
                 .andExpect(jsonPath("$.responses[0].content").doesNotExist())
                 .andExpect(jsonPath("$.totalCount").value(1));
     }

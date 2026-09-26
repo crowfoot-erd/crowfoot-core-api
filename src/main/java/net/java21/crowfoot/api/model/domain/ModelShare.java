@@ -42,6 +42,9 @@ public class ModelShare {
 
     private Long createdBy;
 
+    /** 공개 조회 수 — 토큰 리졸브(공개 뷰어·미리보기)마다 단순 증가. 방문자·크롤러 구분 없음(1.10.5 인기 정렬 원료) */
+    private long viewCount;
+
     @CreationTimestamp
     private Instant createdAt;
 

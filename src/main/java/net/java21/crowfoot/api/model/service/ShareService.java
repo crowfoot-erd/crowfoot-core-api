@@ -2,6 +2,7 @@ package net.java21.crowfoot.api.model.service;
 
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.config.AppProperties;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,11 +34,17 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ShareService {
 
+    /** 갤러리 인기 구간 — 조회수 상위 N건을 최근 공유보다 먼저 띄운다(1.10.5) */
+    private static final int POPULAR_LIMIT = 6;
+    /** 갤러리 총량 상한 — 인기 + 최근 공유 합산 */
+    private static final int GALLERY_LIMIT = 21;
+
     private final ModelShareRepository shareRepository;
     private final ModelRepository modelRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ShareTokenGenerator tokenGenerator;
+    private final AppProperties properties;
 
     /** 발급(Editor 이상) — startsAt > endsAt이면 400, 없는 문서면 404 */
     @Transactional
@@ -92,8 +100,9 @@ public class ShareService {
     /**
      * 공개 조회(무인증) — 토큰을 아는 누구나. 시작 전·종료 후면 410 SHARE_INACTIVE로
      * 링크의 죽음을 알린다. 문서가 삭제되었으면(FK CASCADE로 링크도 삭제) 404 SHARE_NOT_FOUND.
+     * 조회 수는 성공 응답마다 원자 증가한다(단순 카운트 — 방문자·크롤러 구분 없음, 갤러리 인기 원료).
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public PublicShareResponse resolve(String token) {
         ModelShare share = shareRepository.findByShareToken(token)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
@@ -102,6 +111,7 @@ public class ShareService {
         }
         Model model = modelRepository.findById(share.getModelId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
+        shareRepository.incrementViewCount(token);
         return new PublicShareResponse(
                 model.getName(),
                 model.getDescription(),
@@ -114,12 +124,15 @@ public class ShareService {
 
     /**
      * 공개 갤러리(무인증, 08-core/02-model.md Section 1.10.5) — 현재 공유 중인 문서의 목록.
-     * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개, 문서 갱신순으로 내려준다.
+     * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개. **조회수 상위 {@value POPULAR_LIMIT}건(인기)을 먼저,
+     * 나머지를 최근 공유순으로 최대 {@value GALLERY_LIMIT}건**까지 내려준다 — 랜딩의 인기·최신 구성.
+     * 템플릿 워크스페이스 문서는 제외한다(템플릿은 전용 섹션 09-templates.md Section 1이 따로 있다).
      * 본문(content, 최대 5MB)은 미포함 — 랜딩 카드는 메타만 보여준다.
      */
     @Transactional(readOnly = true)
     public List<GalleryShareResponse> gallery() {
         Instant now = Instant.now();
+        Long templateWsId = templateWorkspaceId();
         Map<Long, ModelShare> latestByModel = new LinkedHashMap<>();
         for (ModelShare share : shareRepository.findAllByOrderByCreatedAtDescIdDesc()) {
             if (isActive(share, now)) {
@@ -131,21 +144,39 @@ public class ShareService {
         }
         Map<Long, Model> models = modelRepository.findAllById(latestByModel.keySet()).stream()
                 .collect(Collectors.toMap(Model::getId, Function.identity()));
-        return latestByModel.entrySet().stream()
+        record Item(ModelShare share, Model model) {}
+        List<Item> items = latestByModel.entrySet().stream()
                 .filter(entry -> models.containsKey(entry.getKey())) // 방어 — CASCADE 삭제로 사실상 없는 경우
-                .map(entry -> {
-                    Model model = models.get(entry.getKey());
-                    ModelShare share = entry.getValue();
-                    return new GalleryShareResponse(
-                            share.getShareToken(),
-                            model.getName(),
-                            model.getDescription(),
-                            model.getDatabaseType(),
-                            model.getUpdatedAt(),
-                            share.getCreatedAt());
-                })
-                .sorted(Comparator.comparing(GalleryShareResponse::updatedAt).reversed())
+                .filter(entry -> templateWsId == null
+                        || !templateWsId.equals(models.get(entry.getKey()).getWorkspaceId()))
+                .map(entry -> new Item(entry.getValue(), models.get(entry.getKey())))
                 .toList();
+        // 인기 구간 — 조회수 desc(동률은 최근 공유순), 나머지는 최근 공유순으로 상한까지 채운다
+        Comparator<Item> byViews = Comparator
+                .comparingLong((Item item) -> item.share().getViewCount()).reversed()
+                .thenComparing(item -> item.share().getCreatedAt(), Comparator.reverseOrder());
+        List<Item> ordered = new ArrayList<>(items.stream().sorted(byViews).limit(POPULAR_LIMIT).toList());
+        items.stream()
+                .sorted(Comparator.comparing((Item item) -> item.share().getCreatedAt(), Comparator.reverseOrder()))
+                .filter(item -> !ordered.contains(item))
+                .limit(GALLERY_LIMIT - ordered.size())
+                .forEach(ordered::add);
+        return ordered.stream()
+                .map(item -> new GalleryShareResponse(
+                        item.share().getShareToken(),
+                        item.model().getName(),
+                        item.model().getDescription(),
+                        item.model().getDatabaseType(),
+                        item.model().getUpdatedAt(),
+                        item.share().getCreatedAt(),
+                        item.share().getViewCount()))
+                .toList();
+    }
+
+    /** 템플릿 워크스페이스 ID — 설정이 없으면 null(갤러리 제외 없음) */
+    private Long templateWorkspaceId() {
+        AppProperties.Template template = properties.template();
+        return template == null ? null : template.workspaceId();
     }
 
     /** 링크 기간 판정 — 시작일 null은 즉시, 종료일 null은 무제한 */

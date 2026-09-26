@@ -2,6 +2,9 @@ package net.java21.crowfoot.api.model.repository;
 
 import net.java21.crowfoot.api.model.domain.ModelShare;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -11,6 +14,11 @@ public interface ModelShareRepository extends JpaRepository<ModelShare, Long> {
 
     /** 토큰 중복 재시도 판정 — UNIQUE(share_token) 앱 레벨 선검사 */
     boolean existsByShareToken(String shareToken);
+
+    /** 공개 조회 수 증가 — 앱 레벨 증감 경합을 막는 원자 갱신(읽기-수정-쓰기 금지) */
+    @Modifying
+    @Query("update ModelShare s set s.viewCount = s.viewCount + 1 where s.shareToken = :token")
+    void incrementViewCount(@Param("token") String token);
 
     /** 공개 조회 — 토큰이 곧 주소다 */
     Optional<ModelShare> findByShareToken(String shareToken);
