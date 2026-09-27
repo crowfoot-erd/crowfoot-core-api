@@ -14,10 +14,12 @@ import net.java21.crowfoot.api.model.dto.ModelSummaryResponse;
 import net.java21.crowfoot.api.model.dto.ModelVersionResponse;
 import net.java21.crowfoot.api.model.dto.SaveContentRequest;
 import net.java21.crowfoot.api.model.dto.SaveContentResponse;
+import net.java21.crowfoot.api.model.dto.ValidationRunRequest;
 import net.java21.crowfoot.api.model.service.DdlService;
 import net.java21.crowfoot.api.model.service.MigrationDdlService;
 import net.java21.crowfoot.api.model.service.DeployService;
 import net.java21.crowfoot.api.model.service.ModelService;
+import net.java21.crowfoot.api.model.service.ValidationRunService;
 import net.java21.crowfoot.common.ApiResponse;
 import net.java21.crowfoot.common.ListApiResponse;
 import org.springframework.http.HttpStatus;
@@ -47,6 +49,7 @@ public class ModelController {
     private final DdlService ddlService;
     private final DeployService deployService;
     private final MigrationDdlService migrationDdlService;
+    private final ValidationRunService validationRunService;
 
     /** 모델 목록(요약 — content 제외) — Viewer */
     @GetMapping("/core/workspaces/{workspace-id}/models")
@@ -130,6 +133,16 @@ public class ModelController {
             @PathVariable("connection-id") long connectionId) {
         return ApiResponse.success(migrationDdlService.generateConnectionMigration(
                 CurrentUserHolder.get().userId(), workspaceId, modelId, connectionId));
+    }
+
+    /** 검증 실행 기록 — Editor 이상, 에디터 린터가 계산한 건수를 감사로 남긴다(본문 없음, 1.13) */
+    @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/validation-runs")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void recordValidationRun(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @Valid @RequestBody ValidationRunRequest request) {
+        validationRunService.record(CurrentUserHolder.get().userId(), workspaceId, modelId, request);
     }
 
     /** 모델 삭제 — Owner 전용, 본문 없음 */

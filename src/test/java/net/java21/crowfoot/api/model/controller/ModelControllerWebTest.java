@@ -50,6 +50,9 @@ class ModelControllerWebTest {
     @MockitoBean
     private net.java21.crowfoot.api.model.service.MigrationDdlService migrationDdlService;
 
+    @MockitoBean
+    private net.java21.crowfoot.api.model.service.ValidationRunService validationRunService;
+
     @Test
     @DisplayName("생성은 201 + Location(외부 URI) + databaseType·캔버스 크기를 응답한다")
     void createReturns201WithLocation() throws Exception {
@@ -288,5 +291,65 @@ class ModelControllerWebTest {
                 .andExpect(jsonPath("$.header.resultCode").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.header.resultMessage").value(
                         "문서의 DBMS(postgresql)와 커넥션의 DBMS(mysql)가 다릅니다"));
+    }
+
+    @Test
+    @DisplayName("검증 실행 기록은 204 본문 없음이다 (1.13)")
+    void validationRunReturns204() throws Exception {
+        mockMvc.perform(post("/core/workspaces/77/models/501/validation-runs").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"errorCount\":1,\"warningCount\":3,\"infoCount\":2}"))
+                .andExpect(status().isNoContent());
+
+        org.mockito.BDDMockito.then(validationRunService).should().record(7L, 77L, 501L,
+                new net.java21.crowfoot.api.model.dto.ValidationRunRequest(1, 3, 2));
+    }
+
+    @Test
+    @DisplayName("검증 실행 기록 — 건수 누락·범위 초과는 400 INVALID_REQUEST다")
+    void validationRunRejectsOutOfRangeCounts() throws Exception {
+        mockMvc.perform(post("/core/workspaces/77/models/501/validation-runs").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"errorCount\":-1,\"warningCount\":0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.header.resultCode").value("INVALID_REQUEST"));
+
+        mockMvc.perform(post("/core/workspaces/77/models/501/validation-runs").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"errorCount\":100001,\"warningCount\":0,\"infoCount\":0}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.header.resultCode").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("검증 실행 기록 — Viewer는 403 PERMISSION_DENIED다")
+    void validationRunDeniesViewer() throws Exception {
+        org.mockito.BDDMockito.willThrow(
+                        new net.java21.crowfoot.common.error.BusinessException(
+                                net.java21.crowfoot.common.error.ErrorCode.PERMISSION_DENIED))
+                .given(validationRunService).record(7L, 77L, 501L,
+                        new net.java21.crowfoot.api.model.dto.ValidationRunRequest(0, 0, 0));
+
+        mockMvc.perform(post("/core/workspaces/77/models/501/validation-runs").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"errorCount\":0,\"warningCount\":0,\"infoCount\":0}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.header.resultCode").value("PERMISSION_DENIED"));
+    }
+
+    @Test
+    @DisplayName("검증 실행 기록 — 없는 모델은 404 MODEL_NOT_FOUND다")
+    void validationRunReturns404ForMissingModel() throws Exception {
+        org.mockito.BDDMockito.willThrow(
+                        new net.java21.crowfoot.common.error.BusinessException(
+                                net.java21.crowfoot.common.error.ErrorCode.MODEL_NOT_FOUND))
+                .given(validationRunService).record(7L, 77L, 501L,
+                        new net.java21.crowfoot.api.model.dto.ValidationRunRequest(0, 0, 0));
+
+        mockMvc.perform(post("/core/workspaces/77/models/501/validation-runs").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"errorCount\":0,\"warningCount\":0,\"infoCount\":0}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.header.resultCode").value("MODEL_NOT_FOUND"));
     }
 }
