@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ShareService {
 
-    /** 갤러리 인기 구간 — 조회수 상위 N건을 최근 공유보다 먼저 띄운다(1.10.5) */
+    /** 갤러리 인기 구간 — 반응 수 우선 상위 N건을 최근 공유보다 먼저 띄운다(1.10.5) */
     private static final int POPULAR_LIMIT = 3;
     /** 갤러리 최근 구간 상한 — 인기 3을 제외한 나머지 최근 공유 건수(랜딩 "최근 공유" 카드 수) */
     private static final int RECENT_LIMIT = 15;
@@ -127,9 +127,10 @@ public class ShareService {
 
     /**
      * 공개 갤러리(무인증, 08-core/02-model.md Section 1.10.5) — 현재 공유 중인 문서의 목록.
-     * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개. **조회수 상위 {@value POPULAR_LIMIT}건(인기)을 먼저,
-     * 나머지를 최근 공유순으로 인기 {@value POPULAR_LIMIT}+최근 {@value RECENT_LIMIT}건**까지 내려준다 —
-     * 랜딩의 인기 박스 3+최근 카드 구성.
+     * 활성 링크(기간 내)만, 문서당 최근 발급 링크 1개. **반응 수 우선 상위 {@value POPULAR_LIMIT}건(인기)을
+     * 먼저, 나머지를 최근 공유순으로 인기 {@value POPULAR_LIMIT}+최근 {@value RECENT_LIMIT}건**까지
+     * 내려준다 — 랜딩의 인기 박스 3+최근 카드 구성. 인기 산정은 능동 신호(반응)를 먼저 본다:
+     * reactionCount desc → viewCount desc → 최근 공유순(v1.21부터).
      * 전 워크스페이스의 공유를 모은다(템플릿 문서 포함 — 랜딩의 템플릿 전용 섹션은 폐지됐다).
      * 본문(content, 최대 5MB)은 미포함 — 랜딩 카드는 메타만 보여준다.
      */
@@ -152,11 +153,12 @@ public class ShareService {
                 .filter(entry -> models.containsKey(entry.getKey())) // 방어 — CASCADE 삭제로 사실상 없는 경우
                 .map(entry -> new Item(entry.getValue(), models.get(entry.getKey())))
                 .toList();
-        // 인기 구간 — 조회수 desc(동률은 최근 공유순), 나머지는 최근 공유순으로 상한까지 채운다
-        Comparator<Item> byViews = Comparator
-                .comparingLong((Item item) -> item.share().getViewCount()).reversed()
+        // 인기 구간 — 반응 수 desc → 조회수 desc(동률은 최근 공유순), 나머지는 최근 공유순으로 상한까지 채운다
+        Comparator<Item> byPopularity = Comparator
+                .comparingLong((Item item) -> item.share().getReactionCount()).reversed()
+                .thenComparing(item -> item.share().getViewCount(), Comparator.reverseOrder())
                 .thenComparing(item -> item.share().getCreatedAt(), Comparator.reverseOrder());
-        List<Item> ordered = new ArrayList<>(items.stream().sorted(byViews).limit(POPULAR_LIMIT).toList());
+        List<Item> ordered = new ArrayList<>(items.stream().sorted(byPopularity).limit(POPULAR_LIMIT).toList());
         items.stream()
                 .sorted(Comparator.comparing((Item item) -> item.share().getCreatedAt(), Comparator.reverseOrder()))
                 .filter(item -> !ordered.contains(item))
@@ -170,12 +172,16 @@ public class ShareService {
                         item.model().getDatabaseType(),
                         item.model().getUpdatedAt(),
                         item.share().getCreatedAt(),
+                        item.share().getReactionCount(),
                         item.share().getViewCount()))
                 .toList();
     }
 
-    /** 링크 기간 판정 — 시작일 null은 즉시, 종료일 null은 무제한 */
-    private static boolean isActive(ModelShare share, Instant now) {
+    /**
+     * 링크 기간 판정 — 시작일 null은 즉시, 종료일 null은 무제한. 피드백 경로(1.10.6·1.10.7)가
+     * 같은 판정(404/410)으로 재사용한다.
+     */
+    static boolean isActive(ModelShare share, Instant now) {
         return (share.getStartsAt() == null || !now.isBefore(share.getStartsAt()))
                 && (share.getEndsAt() == null || !now.isAfter(share.getEndsAt()));
     }
@@ -186,6 +192,9 @@ public class ShareService {
                 share.getShareToken(),
                 share.getStartsAt(),
                 share.getEndsAt(),
-                share.getCreatedAt());
+                share.getCreatedAt(),
+                share.getViewCount(),
+                share.getReactionCount(),
+                share.getCommentCount());
     }
 }

@@ -47,7 +47,7 @@ class ModelShareControllerWebTest {
         // given
         given(shareService.create(eq(7L), eq(77L), eq(501L), eq(new CreateShareRequest(null, null))))
                 .willReturn(new ModelShareResponse("9", "Ab3xYz0123456789QrStUv", null, null,
-                        Instant.parse("2026-09-15T00:00:00Z")));
+                        Instant.parse("2026-09-15T00:00:00Z"), 0L, 0L, 0L));
 
         // when & then
         mockMvc.perform(post("/core/workspaces/77/models/501/shares").header("X-USER-ID", "7")
@@ -63,17 +63,20 @@ class ModelShareControllerWebTest {
     }
 
     @Test
-    @DisplayName("목록은 최근 발급순 배열로 응답한다")
+    @DisplayName("목록은 최근 발급순 배열과 카운터 3종(조회·반응·댓글)을 응답한다")
     void listReturnsShares() throws Exception {
         given(shareService.list(7L, 77L, 501L)).willReturn(List.of(
                 new ModelShareResponse("9", "tok456",
                         Instant.parse("2026-09-01T00:00:00Z"), Instant.parse("2026-10-01T00:00:00Z"),
-                        Instant.parse("2026-09-15T00:00:00Z"))));
+                        Instant.parse("2026-09-15T00:00:00Z"), 42L, 7L, 3L)));
 
         mockMvc.perform(get("/core/workspaces/77/models/501/shares").header("X-USER-ID", "7"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.responses[0].shareToken").value("tok456"))
                 .andExpect(jsonPath("$.responses[0].startsAt").value("2026-09-01T00:00:00Z"))
+                .andExpect(jsonPath("$.responses[0].viewCount").value(42))
+                .andExpect(jsonPath("$.responses[0].reactionCount").value(7))
+                .andExpect(jsonPath("$.responses[0].commentCount").value(3))
                 .andExpect(jsonPath("$.totalCount").value(1));
     }
 
@@ -140,16 +143,17 @@ class ModelShareControllerWebTest {
     }
 
     @Test
-    @DisplayName("갤러리는 X-USER-ID 없이도 200으로 목록 포맷을 내려준다 — 본문 없이 메타만")
+    @DisplayName("갤러리는 X-USER-ID 없이도 200으로 목록 포맷을 내려준다 — 본문 없이 메타만, 반응 수도 표기 원료로")
     void galleryIsPublicWithoutUserId() throws Exception {
         given(shareService.gallery()).willReturn(List.of(new GalleryShareResponse(
                 "Ab3xYz0123456789QrStUv", "주문 ERD", "설명", "postgresql",
-                Instant.parse("2026-09-16T09:00:00Z"), Instant.parse("2026-09-15T07:30:00Z"), 42L)));
+                Instant.parse("2026-09-16T09:00:00Z"), Instant.parse("2026-09-15T07:30:00Z"), 7L, 42L)));
 
         mockMvc.perform(get("/core/shares"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.responses[0].shareToken").value("Ab3xYz0123456789QrStUv"))
                 .andExpect(jsonPath("$.responses[0].modelName").value("주문 ERD"))
+                .andExpect(jsonPath("$.responses[0].reactionCount").value(7))
                 .andExpect(jsonPath("$.responses[0].viewCount").value(42))
                 .andExpect(jsonPath("$.responses[0].content").doesNotExist())
                 .andExpect(jsonPath("$.totalCount").value(1));

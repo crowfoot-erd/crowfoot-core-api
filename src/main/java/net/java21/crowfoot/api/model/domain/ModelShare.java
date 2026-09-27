@@ -45,6 +45,12 @@ public class ModelShare {
     /** 공개 조회 수 — 토큰 리졸브(공개 뷰어·미리보기)마다 단순 증가. 방문자·크롤러 구분 없음(1.10.5 인기 정렬 원료) */
     private long viewCount;
 
+    /** 반응(좋아요) 수 — 방문자마다 1회, 토글로 ±1(1.10.6). 인기 정렬 1순위 원료 */
+    private long reactionCount;
+
+    /** 댓글 수 — 원댓글+답글 합계. 원댓글 삭제 시 답글 수만큼 동반 감소(1.10.7) */
+    private long commentCount;
+
     @CreationTimestamp
     private Instant createdAt;
 

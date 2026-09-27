@@ -20,7 +20,7 @@ import java.io.IOException;
  * <p>구현 경로 {@code /core/**}는 Gateway가 주입한 X-USER-ID(sub 문자열)를 요구한다 —
  * 헤더 없는 요청은 Gateway를 거치지 않은 요청이므로 401로 거부한다(공통 실패 포맷).
  * 제외 경로: {@code /internal/**}(내부망 — 인증 서버 호출), {@code /core/providers}(공개),
- * {@code /core/shares/**}(공유 문서 공개 조회 — 토큰이 자격),
+ * {@code /core/shares/**}(공유 문서 공개 조회·피드백(반응·댓글) — 토큰이 자격, 02-model.md Section 1.10.6·1.10.7),
  * {@code /core/community/release-notes/**}(릴리스 노트 공개 조회),
  * {@code /core/templates}(템플릿 공개 목록 — 08-core/09-templates.md),
  * {@code /core/metrics/**}(접속 비콘 수집 — 무인증, 08-core/10-metrics.md Section 3.
@@ -40,7 +40,7 @@ public class XUserIdFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         return !path.startsWith("/core")                       // /core/** 외에는 인증 대상 아님
                 || "/core/providers".equals(path)              // 활성 제공자 목록 — 공개
-                || path.startsWith("/core/shares")             // 공유 문서 공개 조회 — 토큰이 자격
+                || path.startsWith("/core/shares")             // 공개 조회·피드백(반응·댓글) — 토큰이 자격
                 || path.startsWith("/core/community/release-notes") // 릴리스 노트 공개 조회 — Section 3.11
                 || path.startsWith("/core/templates")            // 템플릿 공개 목록 — GET만 Gateway 화이트리스트
                 || path.startsWith("/core/metrics")              // 접속 비콘 수집(POST visit) — 무인증, 관리자 /core/admin/metrics는 별도

@@ -21,6 +21,16 @@ public interface ModelShareRepository extends JpaRepository<ModelShare, Long> {
     @Query("update ModelShare s set s.viewCount = s.viewCount + 1 where s.shareToken = :token")
     void incrementViewCount(@Param("token") String token);
 
+    /** 반응 수 ±delta(1.10.6) — 토글 한 번과 갱신 한 번이 원자적으로 짝 짓는다 */
+    @Modifying
+    @Query("update ModelShare s set s.reactionCount = s.reactionCount + :delta where s.id = :id")
+    void addReactionCount(@Param("id") long id, @Param("delta") long delta);
+
+    /** 댓글 수 ±delta(1.10.7) — 등록 +1, 원댓글 삭제는 −(1+답글 수) */
+    @Modifying
+    @Query("update ModelShare s set s.commentCount = s.commentCount + :delta where s.id = :id")
+    void addCommentCount(@Param("id") long id, @Param("delta") long delta);
+
     /** 공개 조회 — 토큰이 곧 주소다 */
     Optional<ModelShare> findByShareToken(String shareToken);
 
