@@ -16,7 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-/** X-USER-ID 검증 필터 테스트 — 공개 경로(/core/providers·/core/shares·/core/community/release-notes·/core/templates·/core/metrics)는 헤더 없이도 통과한다. */
+/** X-USER-ID 검증 필터 테스트 — 공개 경로는 헤더 없이도 통과하고, 공유 경로(/core/shares)는
+ * 3계층으로 판정한다(선택 인증 댓글·회원전용 반응 토글 — 08-core/02-model.md §1.10.6·1.10.7). */
 @ExtendWith(MockitoExtension.class)
 class XUserIdFilterTest {
 
@@ -37,6 +38,43 @@ class XUserIdFilterTest {
 
         verify(filterChain).doFilter(request, response);
         assertThat(response.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("댓글 경로(GET·POST .../comments)는 선택 인증 — 헤더 없어도 통과(비회원), 있으면 신원을 얹는다")
+    void commentsPathIsOptionallyAuthenticated() throws Exception {
+        MockHttpServletRequest anonymous =
+                new MockHttpServletRequest("POST", "/core/shares/tok123/comments");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(anonymous, response, filterChain);
+        verify(filterChain).doFilter(anonymous, response); // 비회원 통과
+        assertThat(CurrentUserHolder.getOrNull()).isNull();
+
+        MockHttpServletRequest member =
+                new MockHttpServletRequest("POST", "/core/shares/tok123/comments");
+        member.addHeader("X-USER-ID", "8");
+        MockHttpServletResponse memberResponse = new MockHttpServletResponse();
+        filter.doFilter(member, memberResponse, filterChain);
+        verify(filterChain).doFilter(member, memberResponse);
+        assertThat(CurrentUserHolder.getOrNull()).isNull(); // finally 에서 clear 된다
+    }
+
+    @Test
+    @DisplayName("반응 토글(POST .../reactions)은 회원전용 — X-USER-ID 없으면 401, 있으면 통과")
+    void reactionsPathRequiresMember() throws Exception {
+        MockHttpServletRequest anonymous =
+                new MockHttpServletRequest("POST", "/core/shares/tok123/reactions");
+        MockHttpServletResponse rejected = new MockHttpServletResponse();
+        filter.doFilter(anonymous, rejected, filterChain);
+        verify(filterChain, never()).doFilter(anonymous, rejected);
+        assertThat(rejected.getStatus()).isEqualTo(401);
+
+        MockHttpServletRequest member =
+                new MockHttpServletRequest("POST", "/core/shares/tok123/reactions");
+        member.addHeader("X-USER-ID", "7");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(member, response, filterChain);
+        verify(filterChain).doFilter(member, response);
     }
 
     @Test

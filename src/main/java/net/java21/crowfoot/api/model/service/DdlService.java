@@ -9,9 +9,11 @@ import net.java21.crowfoot.api.model.ddl.DbmsTemplates.DbmsTemplate;
 import net.java21.crowfoot.api.model.ddl.ErdContentParser;
 import net.java21.crowfoot.api.model.ddl.SqlDialect;
 import net.java21.crowfoot.api.model.domain.Model;
+import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.DdlWarningResponse;
 import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
+import net.java21.crowfoot.api.model.repository.ModelShareRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -21,8 +23,10 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
+
 /**
- * DDL 스크립트 생성 (05-editor/04-dbms-engineering.md §3.1 — 08-core/02-model.md Section 1.7).
+ * DDL 스크립트 생성 (05-editor/04-dbms-engineering.md §3.1 — 08-core/02-model.md Section 1.7·1.10.8).
  *
  * <p>대상 DBMS는 문서 메타 databaseType에서 파생한다(문서 생성 시점 고정).
  * 해석·조립은 {@link net.java21.crowfoot.api.model.ddl} 전략 구조가 담당하고,
@@ -33,6 +37,7 @@ import tools.jackson.databind.ObjectMapper;
 public class DdlService {
 
     private final ModelRepository modelRepository;
+    private final ModelShareRepository shareRepository;
     private final RoleChecker roleChecker;
     private final ObjectMapper objectMapper;
 
@@ -42,7 +47,26 @@ public class DdlService {
         roleChecker.requireMember(userId, workspaceId);
         Model model = modelRepository.findByIdAndWorkspaceId(modelId, workspaceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
+        return assemble(model);
+    }
 
+    /**
+     * 공개 뷰어 생성(무인증, 1.10.8) — 토큰이 자격. 링크 활성 판정(404/410)은 1.10.4와 같은 규칙이고
+     * 방언 파생·조립은 워크스페이스 경로(1.7)와 같은 전략 구조 — 읽기 동작이라 조회 수도 세지 않는다.
+     */
+    @Transactional(readOnly = true)
+    public ModelDdlResponse generateShared(String token) {
+        ModelShare share = shareRepository.findByShareToken(token)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
+        if (!ShareService.isActive(share, Instant.now())) {
+            throw new BusinessException(ErrorCode.SHARE_INACTIVE);
+        }
+        Model model = modelRepository.findById(share.getModelId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.SHARE_NOT_FOUND));
+        return assemble(model);
+    }
+
+    private ModelDdlResponse assemble(Model model) {
         String templateId = DbmsTemplates.templateIdForDatabase(model.getDatabaseType());
         DbmsTemplate template = DbmsTemplates.byId(templateId);
         SqlDialect dialect = Dialects.byId(templateId);

@@ -2,8 +2,10 @@ package net.java21.crowfoot.api.model.controller;
 
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
 import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
+import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
+import net.java21.crowfoot.api.model.service.DdlService;
 import net.java21.crowfoot.api.model.service.ShareService;
 import net.java21.crowfoot.common.ListApiResponse;
 import net.java21.crowfoot.common.error.BusinessException;
@@ -40,6 +42,8 @@ class ModelShareControllerWebTest {
 
     @MockitoBean
     private ShareService shareService;
+    @MockitoBean
+    private DdlService ddlService;
 
     @Test
     @DisplayName("발급은 201 + Location(관리 리소스) + 토큰을 응답한다")
@@ -157,5 +161,19 @@ class ModelShareControllerWebTest {
                 .andExpect(jsonPath("$.responses[0].viewCount").value(42))
                 .andExpect(jsonPath("$.responses[0].content").doesNotExist())
                 .andExpect(jsonPath("$.totalCount").value(1));
+    }
+
+    @Test
+    @DisplayName("공개 DDL 생성은 X-USER-ID 없이도 200 — 응답 형식은 워크스페이스 경로(1.7)와 같다")
+    void ddlIsPublicWithoutUserId() throws Exception {
+        given(ddlService.generateShared("tok123")).willReturn(new ModelDdlResponse(
+                "-- 주문 ERD — PostgreSQL DDL", List.of(), 5, 4));
+
+        mockMvc.perform(get("/core/shares/tok123/ddl"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.sql").value("-- 주문 ERD — PostgreSQL DDL"))
+                .andExpect(jsonPath("$.response.warnings").isEmpty())
+                .andExpect(jsonPath("$.response.tableCount").value(5))
+                .andExpect(jsonPath("$.response.relationshipCount").value(4));
     }
 }

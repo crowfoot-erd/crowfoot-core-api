@@ -133,7 +133,7 @@ public class SqlImportService {
         if (introspector == null) {
             throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
         }
-        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(parsed.schema(), introspector);
+        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(parsed.schema(), introspector, databaseType);
         if (assembled.content().getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
             throw new BusinessException(ErrorCode.REVERSE_FAILED,
                     "DDL이 너무 커 문서 상한(5MB)을 초과했습니다 — 대상 테이블을 줄여 다시 시도하세요");

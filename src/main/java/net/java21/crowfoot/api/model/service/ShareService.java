@@ -66,19 +66,18 @@ public class ShareService {
                         "shareId", Long.toString(share.getId()),
                         "startsAt", startsAt == null ? "" : startsAt.toString(),
                         "endsAt", endsAt == null ? "" : endsAt.toString()));
-        return toResponse(share);
+        return toResponse(share, model);
     }
 
-    /** 목록(Editor 이상) — 없는 문서면 404, 최근 발급순 */
+    /** 목록(Editor 이상) — 없는 문서면 404, 최근 발급순. 카운터는 조회 수만 링크 고유, 반응·댓글 수는 문서 단위다 */
     @Transactional(readOnly = true)
     public List<ModelShareResponse> list(long userId, long workspaceId, long modelId) {
         roleChecker.requireEditor(userId, workspaceId);
-        if (modelRepository.findByIdAndWorkspaceId(modelId, workspaceId).isEmpty()) {
-            throw new BusinessException(ErrorCode.MODEL_NOT_FOUND);
-        }
+        Model model = modelRepository.findByIdAndWorkspaceId(modelId, workspaceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
         return shareRepository.findByModelIdOrderByCreatedAtDescIdDesc(modelId)
                 .stream()
-                .map(ShareService::toResponse)
+                .map(share -> toResponse(share, model))
                 .toList();
     }
 
@@ -155,7 +154,7 @@ public class ShareService {
                 .toList();
         // 인기 구간 — 반응 수 desc → 조회수 desc(동률은 최근 공유순), 나머지는 최근 공유순으로 상한까지 채운다
         Comparator<Item> byPopularity = Comparator
-                .comparingLong((Item item) -> item.share().getReactionCount()).reversed()
+                .comparingLong((Item item) -> item.model().getReactionCount()).reversed()
                 .thenComparing(item -> item.share().getViewCount(), Comparator.reverseOrder())
                 .thenComparing(item -> item.share().getCreatedAt(), Comparator.reverseOrder());
         List<Item> ordered = new ArrayList<>(items.stream().sorted(byPopularity).limit(POPULAR_LIMIT).toList());
@@ -172,7 +171,7 @@ public class ShareService {
                         item.model().getDatabaseType(),
                         item.model().getUpdatedAt(),
                         item.share().getCreatedAt(),
-                        item.share().getReactionCount(),
+                        item.model().getReactionCount(),
                         item.share().getViewCount()))
                 .toList();
     }
@@ -186,7 +185,8 @@ public class ShareService {
                 && (share.getEndsAt() == null || !now.isAfter(share.getEndsAt()));
     }
 
-    private static ModelShareResponse toResponse(ModelShare share) {
+    /** 링크 응답 조립 — 조회 수는 링크 고유, 반응·댓글 수는 문서 단위 값(2026-09-28 — 1.10.6·1.10.7) */
+    private static ModelShareResponse toResponse(ModelShare share, Model model) {
         return new ModelShareResponse(
                 Long.toString(share.getId()),
                 share.getShareToken(),
@@ -194,7 +194,7 @@ public class ShareService {
                 share.getEndsAt(),
                 share.getCreatedAt(),
                 share.getViewCount(),
-                share.getReactionCount(),
-                share.getCommentCount());
+                model.getReactionCount(),
+                model.getCommentCount());
     }
 }

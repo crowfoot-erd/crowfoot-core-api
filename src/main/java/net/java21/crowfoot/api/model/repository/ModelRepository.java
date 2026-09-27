@@ -21,6 +21,16 @@ public interface ModelRepository extends JpaRepository<Model, Long> {
 
     Optional<Model> findByIdAndWorkspaceId(Long id, Long workspaceId);
 
+    /** 반응 수 ±delta(1.10.6 — 문서 단위) — 토글 한 번과 갱신 한 번이 원자적으로 짝 짓는다 */
+    @Modifying
+    @Query("update Model m set m.reactionCount = m.reactionCount + :delta where m.id = :id")
+    void addReactionCount(@Param("id") long id, @Param("delta") long delta);
+
+    /** 댓글 수 ±delta(1.10.7 — 문서 단위) — 등록 +1, 원댓글 삭제는 −(1+답글 수) */
+    @Modifying
+    @Query("update Model m set m.commentCount = m.commentCount + :delta where m.id = :id")
+    void addCommentCount(@Param("id") long id, @Param("delta") long delta);
+
     /** 템플릿 공개 목록(08-core/09-templates.md Section 2.1) — 워크스페이스 문서 전체를 갱신순으로 */
     List<Model> findByWorkspaceIdOrderByUpdatedAtDescIdDesc(Long workspaceId);
 

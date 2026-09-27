@@ -5,8 +5,10 @@ import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
 import net.java21.crowfoot.api.model.dto.CreateShareRequest;
 import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
+import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
+import net.java21.crowfoot.api.model.service.DdlService;
 import net.java21.crowfoot.api.model.service.ShareService;
 import net.java21.crowfoot.common.ApiResponse;
 import net.java21.crowfoot.common.ListApiResponse;
@@ -42,6 +44,7 @@ public class ModelShareController {
     private static final String VIEWED_COOKIE_PATH = "/api/v1/core/shares";
 
     private final ShareService shareService;
+    private final DdlService ddlService;
 
     /** 링크 발급 — Editor 이상, 201 + Location(관리 리소스), 토큰으로 공개 주소를 만든다 */
     @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/shares")
@@ -106,5 +109,11 @@ public class ModelShareController {
     @GetMapping("/core/shares")
     public ListApiResponse<GalleryShareResponse> gallery() {
         return ListApiResponse.of(shareService.gallery());
+    }
+
+    /** 공개 DDL 생성 — 무인증(1.10.8), 토큰이 자격. 마지막 저장 본문 기준이고 조립·응답은 1.7과 같다 */
+    @GetMapping("/core/shares/{token}/ddl")
+    public ApiResponse<ModelDdlResponse> ddl(@PathVariable("token") String token) {
+        return ApiResponse.success(ddlService.generateShared(token));
     }
 }

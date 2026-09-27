@@ -3,6 +3,7 @@ package net.java21.crowfoot.api.connection.reverse;
 import net.java21.crowfoot.api.connection.introspect.IntrospectedSchema;
 import net.java21.crowfoot.api.connection.introspect.SchemaIntrospector;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Introspection 결과 → Canonical content v1 조립 (05-editor/04-dbms-engineering.md Section 3.2).
@@ -25,6 +27,12 @@ import java.util.UUID;
  *
  * <p>키 이름은 문서 전체 단일 네임스페이스(01-core.md Section 18)라 DB 제약 이름을 그대로
  * 쓰되, MySQL PK 상수명({@code PRIMARY})은 {@code PK_{테이블}}으로 정규화한다.
+ *
+ * <p>FK 인덱스 자동 생성 (05-editor/01-core.md §6.6 인덱스 자동 생성 정책) — PostgreSQL·Oracle·
+ * SQL Server 등 FK 선언만으로 자식 인덱스를 만들지 않는 DBMS는 조립 시점에 FK 전체 컬럼으로
+ * 복합 인덱스({@code idx_{테이블}_{컬럼…}})를 만든다. MySQL(InnoDB)은 FK 제약 생성 시 DB가
+ * 알아서 만들므로 ERD에 만들지 않는다. PK·UK의 백킹 인덱스는 모든 DBMS가 자동 생성하므로
+ * 별도 Index 객체로 만들지 않는다 — FK 선두 컬럼이 PK·UK 선두로 덮이면 자동 인덱스도 건너뛴다.
  */
 @Component
 public class ReverseContentAssembler {
@@ -44,14 +52,19 @@ public class ReverseContentAssembler {
     /** MySQL PK 제약의 상수 이름 — 모든 테이블이 같아서 단일 네임스페이스 규칙 위반 */
     private static final String MYSQL_PRIMARY = "PRIMARY";
 
+    /** FK 선언만으로 자식 컬럼 인덱스를 자동 생성하는 DBMS — 이 문서는 FK 인덱스를 ERD에 만들지 않는다 */
+    private static final String FK_AUTO_INDEX_DBMS = "mysql";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 조립 결과 — content JSON 문자열과 리버스 요약(08-core/06-connection.md Section 3.6) */
     public record AssembledContent(String content, int tableCount, int relationshipCount, List<String> skipped) {
     }
 
-    public AssembledContent assemble(IntrospectedSchema schema, SchemaIntrospector introspector) {
+    public AssembledContent assemble(IntrospectedSchema schema, SchemaIntrospector introspector, String databaseType) {
         List<String> skipped = new ArrayList<>();
+        boolean fkIndexesManagedByDb = databaseType != null
+                && FK_AUTO_INDEX_DBMS.equalsIgnoreCase(databaseType.trim());
 
         Map<String, String> tableIds = new HashMap<>();
         Map<String, Map<String, String>> columnIds = new HashMap<>();
@@ -68,8 +81,16 @@ public class ReverseContentAssembler {
         root.put("schemaVersion", 1);
         ObjectNode modelNode = root.putObject("model");
         ArrayNode tablesNode = modelNode.putArray("tables");
+        Map<String, ObjectNode> tableNodes = new HashMap<>();
+        Set<String> usedKeyNames = new HashSet<>();
         for (IntrospectedSchema.IntrospectedTable table : schema.tables()) {
-            tablesNode.add(table(table, introspector, tableIds.get(table.name()), columnIds.get(table.name())));
+            ObjectNode tableNode = table(table, introspector, tableIds.get(table.name()), columnIds.get(table.name()));
+            tablesNode.add(tableNode);
+            tableNodes.put(table.name(), tableNode);
+            if (tableNode.hasNonNull("primaryKey")) {
+                usedKeyNames.add(tableNode.get("primaryKey").get("name").asText().toLowerCase());
+            }
+            tableNode.get("uniques").forEach(u -> usedKeyNames.add(u.get("name").asText().toLowerCase()));
         }
 
         ArrayNode relationshipsNode = modelNode.putArray("relationships");
@@ -88,6 +109,12 @@ public class ReverseContentAssembler {
                 continue;
             }
             relationshipsNode.add(relationship);
+            // FK 인덱스 자동 생성(§6.6) — DB가 알아서 만드는 DBMS는 건너뛰고, 선두 컬럼이
+            // PK·UK 선두로 덮이는 FK도 건너뛴다(키 백킹 인덱스가 이미 커버)
+            if (!fkIndexesManagedByDb) {
+                addFkIndexIfNeeded(tableNodes.get(fk.childTable()), fk,
+                        columnIds.get(fk.childTable()), usedKeyNames);
+            }
         }
 
         ObjectNode diagramNode = root.putObject("diagram");
@@ -146,6 +173,48 @@ public class ReverseContentAssembler {
         }
         node.putArray("indexes");
         return node;
+    }
+
+    /**
+     * FK 인덱스 자동 생성 (§6.6) — FK 전체 컬럼으로 복합 인덱스를 자식 테이블에 추가한다.
+     * 이름은 에디터 생성 기본값과 같은 {@code idx_{테이블}_{컬럼…}}(소문자). 선두 자식 컬럼이
+     * PK·UK·이미 만든 인덱스의 선두 컬럼이면 건너뛴다(키 백킹 인덱스가 접두를 이미 커버).
+     */
+    private void addFkIndexIfNeeded(ObjectNode childTable, IntrospectedSchema.IntrospectedFk fk,
+                                    Map<String, String> childColumnIds, Set<String> usedKeyNames) {
+        List<String> columnIdList = new ArrayList<>();
+        for (String name : fk.childColumns()) {
+            String id = childColumnIds.get(name);
+            if (id == null) return; // 관계는 만들어졌지만 컬럼을 못 찾으면 인덱스도 만들지 않는다
+            columnIdList.add(id);
+        }
+        String leading = columnIdList.get(0);
+        if (childTable.hasNonNull("primaryKey")) {
+            if (leading.equals(childTable.get("primaryKey").get("columnIds").get(0).asText())) return;
+        }
+        for (JsonNode unique : childTable.get("uniques")) {
+            if (leading.equals(unique.get("columnIds").get(0).asText())) return;
+        }
+        for (JsonNode index : childTable.get("indexes")) {
+            if (leading.equals(index.get("columns").get(0).get("columnId").asText())) return;
+        }
+
+        String tableName = childTable.get("physicalName").asText().toLowerCase();
+        String base = "idx_" + tableName + "_" + fk.childColumns().stream()
+                .map(name -> name.toLowerCase()).collect(Collectors.joining("_"));
+        String name = base;
+        int suffix = 2;
+        while (!usedKeyNames.add(name)) {
+            name = base + "_" + suffix++;
+        }
+
+        ObjectNode index = ((ArrayNode) childTable.get("indexes")).addObject(); // 조립 직후라 항상 빈 배열
+        index.put("id", UUID.randomUUID().toString());
+        index.put("name", name);
+        ArrayNode columns = index.putArray("columns");
+        for (String columnId : columnIdList) {
+            columns.addObject().put("columnId", columnId).put("order", "ASC");
+        }
     }
 
     private ObjectNode column(IntrospectedSchema.IntrospectedColumn column, SchemaIntrospector introspector,

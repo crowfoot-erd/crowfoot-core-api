@@ -25,6 +25,7 @@ public class RoleChecker {
 
     private static final String OWNER_CODE = "OWNER";
     private static final String EDITOR_CODE = "EDITOR";
+    private static final String COMMENTER_CODE = "COMMENTER";
 
     private final WorkspaceMembershipQueryRepository membershipQueryRepository;
     private final RoleRepository roleRepository;
@@ -58,6 +59,15 @@ public class RoleChecker {
     @Transactional(readOnly = true)
     public EffectiveRole requireEditor(long userId, long workspaceId) {
         return requireLevel(userId, workspaceId, EDITOR_CODE);
+    }
+
+    /**
+     * Commenter 이상 검사 — 문서 댓글 등록(08-core/02-model.md Section 1.10.7 멤버 문서 경로).
+     * Viewer는 읽기·반응만 가능하다. 비멤버는 존재 은닉 404, 멤버이지만 Commenter 미만이면 403.
+     */
+    @Transactional(readOnly = true)
+    public EffectiveRole requireCommenter(long userId, long workspaceId) {
+        return requireLevel(userId, workspaceId, COMMENTER_CODE);
     }
 
     private EffectiveRole requireLevel(long userId, long workspaceId, String code) {

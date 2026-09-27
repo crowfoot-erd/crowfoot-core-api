@@ -51,6 +51,12 @@ public class Model {
 
     private long version;
 
+    /** 문서 단위 반응(좋아요) 수(1.10.6 — 2026-09-28 링크 단위에서 이관). 문서당 회원 1회, 토글로 원자 ±1 */
+    private long reactionCount;
+
+    /** 문서 단위 댓글 수(1.10.7 — 원댓글+답글 합계). 원댓글 삭제 시 답글 수만큼 동반 감소 */
+    private long commentCount;
+
     private Long createdBy;
 
     @CreationTimestamp

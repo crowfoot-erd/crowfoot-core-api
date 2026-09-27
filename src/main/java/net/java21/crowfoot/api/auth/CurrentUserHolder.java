@@ -22,6 +22,11 @@ public final class CurrentUserHolder {
         return user;
     }
 
+    /** 선택 인증 경로(공유 댓글 — 02-model.md §1.10.7)용 — 없으면 null(비회원 요청) */
+    public static CurrentUser getOrNull() {
+        return HOLDER.get();
+    }
+
     public static void clear() {
         HOLDER.remove();
     }

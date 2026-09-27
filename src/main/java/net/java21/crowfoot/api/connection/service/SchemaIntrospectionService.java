@@ -80,7 +80,7 @@ public class SchemaIntrospectionService {
             throw new BusinessException(ErrorCode.CONNECTION_UNREACHABLE, JdbcDiagnostics.diagnoseStatement(e));
         }
 
-        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(schema, introspector);
+        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(schema, introspector, connection.getDbmsType());
         if (assembled.content().getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
             throw new BusinessException(ErrorCode.REVERSE_FAILED,
                     "스키마가 너무 커 문서 상한(5MB)을 초과했습니다 — 대상 스키마를 줄여 다시 시도하세요");

@@ -111,12 +111,14 @@ class ShareServiceTest {
     }
 
     @Test
-    @DisplayName("목록은 문서의 링크를 그대로 매핑해 내려준다")
+    @DisplayName("목록은 문서의 링크를 그대로 매핑해 내려준다 — 조회 수는 링크 고유, 반응·댓글 수는 문서 단위 값")
     void listMapsShares() {
-        Model model = new Model(77L, "주문 ERD", null, "postgresql", "{}", 7L);
+        Model model = model(501L, "주문 ERD", "2026-09-16T09:00:00Z", 7L);
+        model.setCommentCount(2L);
         given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(model));
         ModelShare share = new ModelShare(501L, "tok123", PAST, FUTURE, 7L);
         ReflectionTestUtils.setField(share, "id", 9L);
+        share.setViewCount(5L);
         given(shareRepository.findByModelIdOrderByCreatedAtDescIdDesc(501L)).willReturn(List.of(share));
 
         List<ModelShareResponse> responses = shareService.list(7L, 77L, 501L);
@@ -125,6 +127,9 @@ class ShareServiceTest {
         assertThat(responses.get(0).shareToken()).isEqualTo("tok123");
         assertThat(responses.get(0).startsAt()).isEqualTo(PAST);
         assertThat(responses.get(0).endsAt()).isEqualTo(FUTURE);
+        assertThat(responses.get(0).viewCount()).isEqualTo(5L);      // 그 링크 고유값
+        assertThat(responses.get(0).reactionCount()).isEqualTo(7L);  // 문서 단위(models)
+        assertThat(responses.get(0).commentCount()).isEqualTo(2L);
     }
 
     @Test
@@ -209,28 +214,28 @@ class ShareServiceTest {
     @Test
     @DisplayName("갤러리는 활성 링크만, 문서당 최근 링크 1개씩, 인기(반응 수 우선 — 조회수가 높아도) + 나머지 최근 공유순으로 내려준다")
     void galleryListsActiveSharesDedupedByModel() {
-        // given — 최근 발급순: 회원 ERD 최신 링크(반응 5·조회 12) → 주문 ERD 링크(반응 2·조회 30) →
+        // given — 최근 발급순: 회원 ERD 최신 링크(문서 반응 5·링크 조회 12) → 주문 ERD 링크(문서 반응 2·링크 조회 30) →
         // 회원 ERD 옛 링크 → 종료된 링크 → 시작 전 링크
         given(shareRepository.findAllByOrderByCreatedAtDescIdDesc()).willReturn(List.of(
-                share(502L, "tokB2", null, null, "2026-09-15T10:00:00Z", 12L, 5L, 12L),
-                share(501L, "tokA", null, null, "2026-09-14T10:00:00Z", 11L, 2L, 30L),
-                share(502L, "tokB1", PAST, FUTURE, "2026-09-13T10:00:00Z", 10L, 0L, 0L),
-                share(503L, "tokC", PAST, PAST, "2026-09-12T10:00:00Z", 9L, 0L, 0L),
-                share(504L, "tokD", FUTURE, null, "2026-09-11T10:00:00Z", 8L, 0L, 0L)));
+                share(502L, "tokB2", null, null, "2026-09-15T10:00:00Z", 12L, 12L),
+                share(501L, "tokA", null, null, "2026-09-14T10:00:00Z", 11L, 30L),
+                share(502L, "tokB1", PAST, FUTURE, "2026-09-13T10:00:00Z", 10L, 0L),
+                share(503L, "tokC", PAST, PAST, "2026-09-12T10:00:00Z", 9L, 0L),
+                share(504L, "tokD", FUTURE, null, "2026-09-11T10:00:00Z", 8L, 0L)));
         given(modelRepository.findAllById(any())).willReturn(List.of(
-                model(501L, "주문 ERD", "2026-09-16T09:00:00Z"),
-                model(502L, "회원 ERD", "2026-09-15T09:00:00Z")));
+                model(501L, "주문 ERD", "2026-09-16T09:00:00Z", 2L),
+                model(502L, "회원 ERD", "2026-09-15T09:00:00Z", 5L)));
 
         // when
         List<GalleryShareResponse> gallery = shareService.gallery();
 
-        // then — 인기 구간: 반응 5인 회원 ERD 먼저(조회수 30 주문 ERD를 제친다 — v1.21 반응 우선),
+        // then — 인기 구간: 문서 반응 5인 회원 ERD 먼저(링크 조회수 30 주문 ERD를 제친다 — v1.21 반응 우선),
         // 회원 ERD는 최신 링크 토큰만, 종료·예약 링크 문서는 없다
         assertThat(gallery).hasSize(2);
         assertThat(gallery.get(0).modelName()).isEqualTo("회원 ERD");
         assertThat(gallery.get(0).shareToken()).isEqualTo("tokB2");
-        assertThat(gallery.get(0).reactionCount()).isEqualTo(5L);
-        assertThat(gallery.get(0).viewCount()).isEqualTo(12L);
+        assertThat(gallery.get(0).reactionCount()).isEqualTo(5L); // 문서 단위 카운터
+        assertThat(gallery.get(0).viewCount()).isEqualTo(12L);    // 대표 링크 고유값
         assertThat(gallery.get(0).sharedAt()).isEqualTo(Instant.parse("2026-09-15T10:00:00Z"));
         assertThat(gallery.get(0).updatedAt()).isEqualTo(Instant.parse("2026-09-15T09:00:00Z"));
         assertThat(gallery.get(1).modelName()).isEqualTo("주문 ERD");
@@ -244,15 +249,15 @@ class ShareServiceTest {
         // given — 오래된 고반응 8건(인기 후보는 상위 3) + 최근 무반응 13건 = 21건, 상한 18(3+15)
         List<ModelShare> shares = new java.util.ArrayList<>();
         List<Model> models = new java.util.ArrayList<>();
-        for (int i = 0; i < 8; i++) { // 9월 1일~8일 발급, 반응 100-i
+        for (int i = 0; i < 8; i++) { // 9월 1일~8일 발급, 문서 반응 100-i·링크 조회 100-i
             String day = String.format("2026-09-0%dT10:00:00Z", i + 1);
-            shares.add(share(600L + i, "old" + i, null, null, day, 100L + i, 100L - i, 100L - i));
-            models.add(model(600L + i, "오래된 ERD " + i, "2026-09-25T09:00:00Z"));
+            shares.add(share(600L + i, "old" + i, null, null, day, 100L + i, 100L - i));
+            models.add(model(600L + i, "오래된 ERD " + i, "2026-09-25T09:00:00Z", 100L - i));
         }
         for (int i = 0; i < 13; i++) { // 9월 11일~23일 발급, 무반응
             shares.add(share(700L + i, "new" + i, null, null,
-                    String.format("2026-09-%dT10:00:00Z", 11 + i), 200L + i, 0L, 0L));
-            models.add(model(700L + i, "최근 ERD " + i, "2026-09-26T09:00:00Z"));
+                    String.format("2026-09-%dT10:00:00Z", 11 + i), 200L + i, 0L));
+            models.add(model(700L + i, "최근 ERD " + i, "2026-09-26T09:00:00Z", 0L));
         }
         given(shareRepository.findAllByOrderByCreatedAtDescIdDesc()).willReturn(
                 shares.reversed()); // 저장소 계약 = 최근 발급순
@@ -277,12 +282,12 @@ class ShareServiceTest {
     @DisplayName("갤러리는 전 워크스페이스의 공유를 모은다 — 템플릿 문서도 포함(랜딩 전용 섹션 폐지)")
     void galleryIncludesTemplateWorkspace() {
         given(shareRepository.findAllByOrderByCreatedAtDescIdDesc()).willReturn(List.of(
-                share(501L, "tokA", null, null, "2026-09-14T10:00:00Z", 11L, 0L, 3L),
-                share(502L, "tokB", null, null, "2026-09-15T10:00:00Z", 12L, 0L, 0L)));
-        Model templateModel = model(501L, "템플릿 ERD", "2026-09-16T09:00:00Z");
+                share(501L, "tokA", null, null, "2026-09-14T10:00:00Z", 11L, 3L),
+                share(502L, "tokB", null, null, "2026-09-15T10:00:00Z", 12L, 0L)));
+        Model templateModel = model(501L, "템플릿 ERD", "2026-09-16T09:00:00Z", 0L);
         ReflectionTestUtils.setField(templateModel, "workspaceId", 34L); // 템플릿 워크스페이스
         given(modelRepository.findAllById(any()))
-                .willReturn(List.of(templateModel, model(502L, "커뮤니티 ERD", "2026-09-15T09:00:00Z")));
+                .willReturn(List.of(templateModel, model(502L, "커뮤니티 ERD", "2026-09-15T09:00:00Z", 0L)));
 
         // 워크스페이스 구분 없이 전부 — 반응 0 동률이라 조회수로 가른다(tokA 3회 우선)
         assertThat(shareService.gallery()).extracting(GalleryShareResponse::shareToken)
@@ -293,26 +298,28 @@ class ShareServiceTest {
     @DisplayName("갤러리는 활성 링크가 없으면 빈 목록이고 문서를 조회하지 않는다")
     void galleryReturnsEmptyWhenNoActiveShare() {
         given(shareRepository.findAllByOrderByCreatedAtDescIdDesc())
-                .willReturn(List.of(share(503L, "tokC", PAST, PAST, "2026-09-12T10:00:00Z", 9L, 0L, 0L)));
+                .willReturn(List.of(share(503L, "tokC", PAST, PAST, "2026-09-12T10:00:00Z", 9L, 0L)));
 
         assertThat(shareService.gallery()).isEmpty();
         then(modelRepository).shouldHaveNoInteractions();
     }
 
+    /** 링크 픽스처 — 조회 수만 링크 고유값(반응·댓글 카운터는 문서 단위 — 2026-09-28 이관) */
     private static ModelShare share(long modelId, String token, Instant startsAt, Instant endsAt,
-                                    String createdAt, long id, long reactionCount, long viewCount) {
+                                    String createdAt, long id, long viewCount) {
         ModelShare share = new ModelShare(modelId, token, startsAt, endsAt, 7L);
         ReflectionTestUtils.setField(share, "id", id);
         ReflectionTestUtils.setField(share, "createdAt", Instant.parse(createdAt));
-        share.setReactionCount(reactionCount);
         share.setViewCount(viewCount);
         return share;
     }
 
-    private static Model model(long id, String name, String updatedAt) {
+    /** 문서 픽스처 — reactionCount는 문서 단위 카운터(models.reaction_count) */
+    private static Model model(long id, String name, String updatedAt, long reactionCount) {
         Model model = new Model(77L, name, "설명", "postgresql", "{}", 7L);
         ReflectionTestUtils.setField(model, "id", id);
         ReflectionTestUtils.setField(model, "updatedAt", Instant.parse(updatedAt));
+        model.setReactionCount(reactionCount);
         return model;
     }
 }

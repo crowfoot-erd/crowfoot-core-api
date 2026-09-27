@@ -1,8 +1,10 @@
 package net.java21.crowfoot.api.model.service;
 
 import net.java21.crowfoot.api.model.domain.Model;
+import net.java21.crowfoot.api.model.domain.ModelShare;
 import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
+import net.java21.crowfoot.api.model.repository.ModelShareRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -12,21 +14,26 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.Instant;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 
 /**
- * DDL 생성 서비스 (08-core/02-model.md Section 1.7) — 권한·모델 로드·방언 파생·경고 전달.
- * ObjectMapper는 실물 — content 해석 자체가 테스트 대상이다.
+ * DDL 생성 서비스 (08-core/02-model.md Section 1.7·1.10.8) — 권한·모델 로드·방언 파생·경고 전달과
+ * 공개 뷰어 경로(토큰 자격·1.10.4와 같은 404/410 판정). ObjectMapper는 실물 — content 해석 자체가 테스트 대상이다.
  */
 @ExtendWith(MockitoExtension.class)
 class DdlServiceTest {
 
+    private static final Instant PAST = Instant.parse("2026-09-01T00:00:00Z");
+    private static final Instant FUTURE = Instant.parse("2099-01-01T00:00:00Z");
     private static final String CONTENT = """
             {"schemaVersion":1,"model":{
               "tables":[
@@ -43,19 +50,28 @@ class DdlServiceTest {
     @Mock
     private ModelRepository modelRepository;
     @Mock
+    private ModelShareRepository shareRepository;
+    @Mock
     private RoleChecker roleChecker;
 
     private DdlService ddlService;
 
     @BeforeEach
     void setUp() {
-        ddlService = new DdlService(modelRepository, roleChecker, new ObjectMapper());
+        ddlService = new DdlService(modelRepository, shareRepository, roleChecker, new ObjectMapper());
     }
 
     private Model model(String databaseType, String content) {
         Model model = new Model(77L, "주문 서비스 ERD", null, databaseType, content, 7L);
         model.setId(501L);
         return model;
+    }
+
+    /** 활성 공유 — modelId 501 */
+    private static ModelShare activeShare() {
+        ModelShare share = new ModelShare(501L, "tok123", PAST, FUTURE, 7L);
+        ReflectionTestUtils.setField(share, "id", 9L);
+        return share;
     }
 
     @Test
@@ -112,5 +128,37 @@ class DdlServiceTest {
         assertThatThrownBy(() -> ddlService.generate(7L, 77L, 501L))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+    }
+
+    // --- 공개 뷰어 생성 (1.10.8 — 토큰이 자격)
+
+    @Test
+    @DisplayName("공개 생성은 토큰으로 문서를 찾아 워크스페이스 경로와 같은 조립을 한다 — 권한 판정 없음")
+    void generateSharedAssemblesSameScript() {
+        given(shareRepository.findByShareToken("tok123")).willReturn(Optional.of(activeShare()));
+        given(modelRepository.findById(501L)).willReturn(Optional.of(model("postgresql", CONTENT)));
+
+        ModelDdlResponse response = ddlService.generateShared("tok123");
+
+        assertThat(response.sql())
+                .startsWith("-- 주문 서비스 ERD — PostgreSQL DDL")
+                .contains("CONSTRAINT pk_member PRIMARY KEY (id)");
+        assertThat(response.tableCount()).isEqualTo(1);
+        then(roleChecker).shouldHaveNoInteractions(); // 회원 판정을 거치지 않는다
+    }
+
+    @Test
+    @DisplayName("공개 생성도 공개 조회와 같은 판정 — 없는 토큰 404, 기간 밖 410")
+    void generateSharedSharesTokenVerdicts() {
+        given(shareRepository.findByShareToken("nope")).willReturn(Optional.empty());
+        ModelShare expired = new ModelShare(501L, "expired", null, PAST, 7L);
+        given(shareRepository.findByShareToken("expired")).willReturn(Optional.of(expired));
+
+        assertThatThrownBy(() -> ddlService.generateShared("nope"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.SHARE_NOT_FOUND));
+        assertThatThrownBy(() -> ddlService.generateShared("expired"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.SHARE_INACTIVE));
     }
 }

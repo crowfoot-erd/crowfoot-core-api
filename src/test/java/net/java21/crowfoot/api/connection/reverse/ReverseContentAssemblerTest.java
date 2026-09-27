@@ -14,7 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 리버스 content 조립 테스트 (05-editor/04-dbms-engineering.md Section 3.2) —
- * 물리→공용 코드 역매핑·PK 이름 정규화·FK→관계 변환(식별/UK 1:1·기수·rule)·그리드 배치·스킵.
+ * 물리→공용 코드 역매핑·PK 이름 정규화·FK→관계 변환(식별/UK 1:1·기수·rule)·그리드 배치·스킵·
+ * FK 인덱스 자동 생성(05-editor/01-core.md §6.6 — PG 생성·MySQL 미생성·키 선두 스킵·복합).
  * 전략은 실물(PostgreSQL) — commonTypeCode가 순수 매핑이라 DB 접속이 필요 없다.
  */
 class ReverseContentAssemblerTest {
@@ -58,7 +59,7 @@ class ReverseContentAssemblerTest {
     @DisplayName("물리 타입을 공용 논리 코드로 역매핑하고 length·기본값·자동증가를 보존한다")
     void typeMappingAndColumns() {
         IntrospectedSchema schema = new IntrospectedSchema(List.of(memberTable()), List.of());
-        JsonNode content = mapper.readTree(assembler.assemble(schema, introspector).content());
+        JsonNode content = mapper.readTree(assembler.assemble(schema, introspector, "postgresql").content());
 
         JsonNode columns = content.path("model").path("tables").get(0).path("columns");
         assertThat(columns).hasSize(3);
@@ -85,7 +86,7 @@ class ReverseContentAssemblerTest {
                                 "email", "varchar", 255, null, null, false, null, false, "이메일")),
                 "member_pkey", List.of("id"), List.of());
         JsonNode content = mapper.readTree(assembler.assemble(
-                new IntrospectedSchema(List.of(withColumnComment, orderTable()), List.of()), introspector).content());
+                new IntrospectedSchema(List.of(withColumnComment, orderTable()), List.of()), introspector, "postgresql").content());
 
         JsonNode tables = content.path("model").path("tables");
         // 테이블 — 코멘트가 논리명으로, 없으면 물리명
@@ -107,7 +108,7 @@ class ReverseContentAssemblerTest {
                 List.of(col("span", "interval", null, null, null, true, null, false)),
                 null, List.of(), List.of());
         JsonNode content = mapper.readTree(
-                assembler.assemble(new IntrospectedSchema(List.of(table), List.of()), introspector).content());
+                assembler.assemble(new IntrospectedSchema(List.of(table), List.of()), introspector, "postgresql").content());
         assertThat(content.path("model").path("tables").get(0).path("columns").get(0)
                 .path("dataType").asText()).isEqualTo("INTERVAL");
     }
@@ -117,7 +118,7 @@ class ReverseContentAssemblerTest {
     void pkNameNormalization() {
         IntrospectedSchema schema = new IntrospectedSchema(
                 List.of(memberTable(), orderTable()), List.of());
-        JsonNode content = mapper.readTree(assembler.assemble(schema, introspector).content());
+        JsonNode content = mapper.readTree(assembler.assemble(schema, introspector, "postgresql").content());
 
         JsonNode tables = content.path("model").path("tables");
         assertThat(tables.get(0).path("primaryKey").path("name").asText()).isEqualTo("member_pkey");
@@ -133,7 +134,7 @@ class ReverseContentAssemblerTest {
                 "member", List.of("id"), "CASCADE", "NO ACTION");
         JsonNode content = mapper.readTree(
                 assembler.assemble(new IntrospectedSchema(List.of(memberTable(), orderTable()), List.of(fk)),
-                        introspector).content());
+                        introspector, "postgresql").content());
 
         JsonNode rel = content.path("model").path("relationships").get(0);
         assertThat(rel.path("type").asText()).isEqualTo("ONE_TO_MANY");
@@ -171,7 +172,7 @@ class ReverseContentAssemblerTest {
 
         JsonNode content = mapper.readTree(assembler.assemble(new IntrospectedSchema(
                 List.of(memberTable(), childIdentified, childUnique), List.of(identifying, unique)),
-                introspector).content());
+                introspector, "postgresql").content());
 
         JsonNode relationships = content.path("model").path("relationships");
         assertThat(relationships.get(0).path("type").asText()).isEqualTo("ONE_TO_ONE");
@@ -188,7 +189,7 @@ class ReverseContentAssemblerTest {
     @DisplayName("diagram.nodes는 4열 그리드 좌표를 주고 notes·viewport는 비어 있다")
     void gridLayout() {
         IntrospectedSchema schema = new IntrospectedSchema(List.of(memberTable(), orderTable()), List.of());
-        JsonNode content = mapper.readTree(assembler.assemble(schema, introspector).content());
+        JsonNode content = mapper.readTree(assembler.assemble(schema, introspector, "postgresql").content());
 
         JsonNode nodes = content.path("diagram").path("nodes");
         assertThat(nodes).hasSize(2);
@@ -210,12 +211,113 @@ class ReverseContentAssemblerTest {
         IntrospectedSchema.IntrospectedFk dangling = new IntrospectedSchema.IntrospectedFk(
                 "fk_ghost", "orders", List.of("x"), "ghost_table", List.of("id"), "CASCADE", "CASCADE");
         ReverseContentAssembler.AssembledContent assembled = assembler.assemble(
-                new IntrospectedSchema(List.of(orderTable()), List.of(dangling)), introspector);
+                new IntrospectedSchema(List.of(orderTable()), List.of(dangling)), introspector, "postgresql");
 
         assertThat(assembled.tableCount()).isEqualTo(1);
         assertThat(assembled.relationshipCount()).isZero();
         assertThat(assembled.skipped()).hasSize(1);
         JsonNode content = mapper.readTree(assembled.content());
         assertThat(content.path("model").path("relationships")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("§6.6 PostgreSQL은 FK 전체 컬럼으로 idx_ 인덱스를 자동 생성한다")
+    void fkIndexAutoCreatedForPostgres() {
+        IntrospectedSchema.IntrospectedFk fk = new IntrospectedSchema.IntrospectedFk(
+                "fk_orders_member", "orders", List.of("member_id"),
+                "member", List.of("id"), "CASCADE", "NO ACTION");
+        JsonNode content = mapper.readTree(assembler.assemble(
+                new IntrospectedSchema(List.of(memberTable(), orderTable()), List.of(fk)),
+                introspector, "postgresql").content());
+
+        // member_id는 orders PK(id)·UK(code) 선두가 아니라 자동 인덱스 대상
+        JsonNode indexes = content.path("model").path("tables").get(1).path("indexes");
+        assertThat(indexes).hasSize(1);
+        assertThat(indexes.get(0).path("name").asText()).isEqualTo("idx_orders_member_id");
+        JsonNode columns = content.path("model").path("tables").get(1).path("columns");
+        assertThat(indexes.get(0).path("columns").get(0).path("columnId").asText())
+                .isEqualTo(columns.get(1).path("id").asText()); // 실제 member_id 컬럼을 가리킨다
+        assertThat(indexes.get(0).path("columns").get(0).path("order").asText()).isEqualTo("ASC");
+    }
+
+    @Test
+    @DisplayName("§6.6 MySQL(InnoDB)은 FK 선언만으로 DB가 자식 인덱스를 만든다 — ERD에 남기지 않는다")
+    void fkIndexSkippedForMysql() {
+        IntrospectedSchema.IntrospectedFk fk = new IntrospectedSchema.IntrospectedFk(
+                "fk_orders_member", "orders", List.of("member_id"),
+                "member", List.of("id"), "CASCADE", "NO ACTION");
+        JsonNode content = mapper.readTree(assembler.assemble(
+                new IntrospectedSchema(List.of(memberTable(), orderTable()), List.of(fk)),
+                introspector, "mysql").content());
+
+        assertThat(content.path("model").path("tables").get(1).path("indexes")).isEmpty();
+        assertThat(content.path("model").path("relationships")).hasSize(1); // 관계 자체는 만든다
+    }
+
+    @Test
+    @DisplayName("§6.6 FK 선두 컬럼이 PK·UK 선두면 자동 인덱스를 건너뛴다 — 키 백킹 인덱스가 접두를 커버")
+    void fkIndexSkippedWhenLeadingColumnCovered() {
+        // 식별 — FK 컬럼 member_id가 복합 PK 선두
+        IntrospectedSchema.IntrospectedTable identified = new IntrospectedSchema.IntrospectedTable(
+                "member_profile", null,
+                List.of(
+                        col("member_id", "int8", null, null, null, false, null, false),
+                        col("seq", "int4", null, null, null, false, null, false)),
+                "member_profile_pkey", List.of("member_id", "seq"), List.of());
+        IntrospectedSchema.IntrospectedFk identifying = new IntrospectedSchema.IntrospectedFk(
+                "fk_profile_member", "member_profile", List.of("member_id"),
+                "member", List.of("id"), "NO ACTION", "NO ACTION");
+
+        // UK 커버 — FK 컬럼 member_id가 단일 컬럼 UK 선두
+        IntrospectedSchema.IntrospectedTable ukCovered = new IntrospectedSchema.IntrospectedTable(
+                "member_setting", null,
+                List.of(
+                        col("id", "int8", null, null, null, false, null, true),
+                        col("member_id", "int8", null, null, null, true, null, false)),
+                "member_setting_pkey", List.of("id"),
+                List.of(new IntrospectedSchema.IntrospectedUnique("uq_setting_member", List.of("member_id"))));
+        IntrospectedSchema.IntrospectedFk ukFk = new IntrospectedSchema.IntrospectedFk(
+                "fk_setting_member", "member_setting", List.of("member_id"),
+                "member", List.of("id"), "NO ACTION", "NO ACTION");
+
+        JsonNode content = mapper.readTree(assembler.assemble(new IntrospectedSchema(
+                List.of(memberTable(), identified, ukCovered), List.of(identifying, ukFk)),
+                introspector, "postgresql").content());
+
+        assertThat(content.path("model").path("tables").get(1).path("indexes")).isEmpty();
+        assertThat(content.path("model").path("tables").get(2).path("indexes")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("§6.6 복합 FK(A,B)는 전체 컬럼 복합 인덱스를 만든다 — 이름은 idx_{테이블}_{컬럼…}")
+    void compositeFkGetsCompositeIndex() {
+        IntrospectedSchema.IntrospectedTable parent = new IntrospectedSchema.IntrospectedTable(
+                "tenant_code", null,
+                List.of(
+                        col("tenant_id", "int8", null, null, null, false, null, false),
+                        col("code", "varchar", 32, null, null, false, null, false)),
+                "tenant_code_pkey", List.of("tenant_id", "code"), List.of());
+        IntrospectedSchema.IntrospectedTable child = new IntrospectedSchema.IntrospectedTable(
+                "tenant_order", null,
+                List.of(
+                        col("id", "int8", null, null, null, false, null, true),
+                        col("tenant_id", "int8", null, null, null, false, null, false),
+                        col("code", "varchar", 32, null, null, false, null, false)),
+                "tenant_order_pkey", List.of("id"), List.of());
+        IntrospectedSchema.IntrospectedFk fk = new IntrospectedSchema.IntrospectedFk(
+                "fk_tenant_order_code", "tenant_order", List.of("tenant_id", "code"),
+                "tenant_code", List.of("tenant_id", "code"), "NO ACTION", "NO ACTION");
+
+        JsonNode content = mapper.readTree(assembler.assemble(
+                new IntrospectedSchema(List.of(parent, child), List.of(fk)),
+                introspector, "postgresql").content());
+
+        JsonNode indexes = content.path("model").path("tables").get(1).path("indexes");
+        assertThat(indexes).hasSize(1);
+        assertThat(indexes.get(0).path("name").asText()).isEqualTo("idx_tenant_order_tenant_id_code");
+        assertThat(indexes.get(0).path("columns")).hasSize(2); // A,B 둘 다 — 절반 인덱스가 아니다
+        JsonNode columns = content.path("model").path("tables").get(1).path("columns");
+        assertThat(indexes.get(0).path("columns").get(1).path("columnId").asText())
+                .isEqualTo(columns.get(2).path("id").asText()); // 둘째 자리는 code 컬럼
     }
 }

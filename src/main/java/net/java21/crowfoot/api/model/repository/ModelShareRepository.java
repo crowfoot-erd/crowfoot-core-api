@@ -16,20 +16,11 @@ public interface ModelShareRepository extends JpaRepository<ModelShare, Long> {
     /** 토큰 중복 재시도 판정 — UNIQUE(share_token) 앱 레벨 선검사 */
     boolean existsByShareToken(String shareToken);
 
-    /** 공개 조회 수 증가 — 앱 레벨 증감 경합을 막는 원자 갱신(읽기-수정-쓰기 금지) */
+    /** 공개 조회 수 증가 — 앱 레벨 증감 경합을 막는 원자 갱신(읽기-수정-쓰기 금지).
+     *  반응·댓글 카운터는 문서 단위(ModelRepository)로 이관했다(2026-09-28, 1.10.6·1.10.7) */
     @Modifying
     @Query("update ModelShare s set s.viewCount = s.viewCount + 1 where s.shareToken = :token")
     void incrementViewCount(@Param("token") String token);
-
-    /** 반응 수 ±delta(1.10.6) — 토글 한 번과 갱신 한 번이 원자적으로 짝 짓는다 */
-    @Modifying
-    @Query("update ModelShare s set s.reactionCount = s.reactionCount + :delta where s.id = :id")
-    void addReactionCount(@Param("id") long id, @Param("delta") long delta);
-
-    /** 댓글 수 ±delta(1.10.7) — 등록 +1, 원댓글 삭제는 −(1+답글 수) */
-    @Modifying
-    @Query("update ModelShare s set s.commentCount = s.commentCount + :delta where s.id = :id")
-    void addCommentCount(@Param("id") long id, @Param("delta") long delta);
 
     /** 공개 조회 — 토큰이 곧 주소다 */
     Optional<ModelShare> findByShareToken(String shareToken);

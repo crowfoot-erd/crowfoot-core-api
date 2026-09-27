@@ -57,7 +57,7 @@ public enum ErrorCode {
     // Share (08-core/02-model.md Section 1.10)
     SHARE_NOT_FOUND(HttpStatus.NOT_FOUND, "SHARE_NOT_FOUND", "공유 링크를 찾을 수 없습니다"),
     SHARE_INACTIVE(HttpStatus.GONE, "SHARE_INACTIVE", "공유 기간이 아니거나 만료되었습니다"),
-    SHARE_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "SHARE_COMMENT_NOT_FOUND", "공유 문서 댓글을 찾을 수 없습니다"),
+    MODEL_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_COMMENT_NOT_FOUND", "문서 댓글을 찾을 수 없습니다"),
 
     // Connection (08-core/06-connection.md Section 3.7)
     CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "CONNECTION_NOT_FOUND", "커넥션을 찾을 수 없습니다"),
