@@ -1,6 +1,7 @@
 package net.java21.crowfoot.api.model.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelShare;
@@ -8,8 +9,10 @@ import net.java21.crowfoot.api.model.dto.CreateShareRequest;
 import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
+import net.java21.crowfoot.api.model.dto.SitemapShareResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelShareRepository;
+import net.java21.crowfoot.api.model.repository.ShareQueryRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -29,6 +32,7 @@ import java.util.stream.Collectors;
  * 문서 공유 링크 API (08-core/02-model.md Section 1.10) — 발급·목록·철회(관리, Editor 이상)와
  * 토큰 기반 공개 조회(무인증). 링크는 문서의 읽기 전용 스냅샷이 아니라 최신 본문을 노출한다.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ShareService {
@@ -39,12 +43,15 @@ public class ShareService {
     private static final int RECENT_LIMIT = 15;
     /** 갤러리 총량 상한 — 인기 + 최근 공유 합산 */
     private static final int GALLERY_LIMIT = POPULAR_LIMIT + RECENT_LIMIT;
+    /** 사이트맵 상한(1.10.10) — 이보다 많으면 최신 순으로 자르고 경고 로그 */
+    private static final int SITEMAP_LIMIT = 5_000;
 
     private final ModelShareRepository shareRepository;
     private final ModelRepository modelRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ShareTokenGenerator tokenGenerator;
+    private final ShareQueryRepository shareQueryRepository;
 
     /** 발급(Editor 이상) — startsAt > endsAt이면 400, 없는 문서면 404 */
     @Transactional
@@ -173,6 +180,25 @@ public class ShareService {
                         item.share().getCreatedAt(),
                         item.model().getReactionCount(),
                         item.share().getViewCount()))
+                .toList();
+    }
+
+    /**
+     * 사이트맵 원료(무인증, 08-core/02-model.md Section 1.10.10) — 활성 공유 문서 전부를
+     * 문서당 최신 링크 토큰 + 문서 갱신시각(lastmod)으로 내려준다(빌드 시 sitemap.xml 생성이
+     * 소비). 상한 {@value SITEMAP_LIMIT}건 — 초과분은 최신 순으로 잘리고 경고 로그.
+     * 저장소 단일 쿼리(조인 프로젝션)라 문서 수만큼의 추가 조회가 없다.
+     */
+    @Transactional(readOnly = true)
+    public List<SitemapShareResponse> sitemap() {
+        List<ShareQueryRepository.SitemapRow> rows =
+                shareQueryRepository.findSitemapShares(Instant.now(), SITEMAP_LIMIT + 1);
+        if (rows.size() > SITEMAP_LIMIT) {
+            log.warn("사이트맵 상한 초과 — 활성 공유 문서 {}건 중 최신 {}건만 내려준다", rows.size(), SITEMAP_LIMIT);
+            rows = rows.subList(0, SITEMAP_LIMIT);
+        }
+        return rows.stream()
+                .map(row -> new SitemapShareResponse(row.shareToken(), row.lastmod()))
                 .toList();
     }
 

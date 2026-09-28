@@ -8,6 +8,7 @@ import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
+import net.java21.crowfoot.api.model.dto.SitemapShareResponse;
 import net.java21.crowfoot.api.model.service.DdlService;
 import net.java21.crowfoot.api.model.service.ShareService;
 import net.java21.crowfoot.common.ApiResponse;
@@ -109,6 +110,14 @@ public class ModelShareController {
     @GetMapping("/core/shares")
     public ListApiResponse<GalleryShareResponse> gallery() {
         return ListApiResponse.of(shareService.gallery());
+    }
+
+    /** 사이트맵 원료 — 무인증(1.10.10), 토큰(22자)과 경로가 겹치지 않는 리터럴 경로.
+     *  활성 공유 문서 전부(문서당 최신 링크, updated_at desc, 상한 5,000) — 빌드 시
+     *  sitemap.xml 생성 스크립트가 소비한다 */
+    @GetMapping("/core/shares/sitemap")
+    public ListApiResponse<SitemapShareResponse> sitemap() {
+        return ListApiResponse.of(shareService.sitemap());
     }
 
     /** 공개 DDL 생성 — 무인증(1.10.8), 토큰이 자격. 마지막 저장 본문 기준이고 조립·응답은 1.7과 같다 */

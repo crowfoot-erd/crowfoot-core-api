@@ -5,6 +5,7 @@ import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelDdlResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
+import net.java21.crowfoot.api.model.dto.SitemapShareResponse;
 import net.java21.crowfoot.api.model.service.DdlService;
 import net.java21.crowfoot.api.model.service.ShareService;
 import net.java21.crowfoot.common.ListApiResponse;
@@ -175,5 +176,23 @@ class ModelShareControllerWebTest {
                 .andExpect(jsonPath("$.response.warnings").isEmpty())
                 .andExpect(jsonPath("$.response.tableCount").value(5))
                 .andExpect(jsonPath("$.response.relationshipCount").value(4));
+    }
+
+    @Test
+    @DisplayName("사이트맵 원료는 X-USER-ID 없이도 200 — 토큰+lastmod만(1.10.10), /core/shares/{token}과 공존하는 리터럴 경로")
+    void sitemapIsPublicWithoutUserId() throws Exception {
+        given(shareService.sitemap()).willReturn(List.of(
+                new SitemapShareResponse("Ab3xYz0123456789QrStUv", Instant.parse("2026-09-28T00:00:00Z")),
+                new SitemapShareResponse("Zx9wVu8TsRqPoNmLkJiHgF", Instant.parse("2026-09-27T00:00:00Z"))));
+
+        mockMvc.perform(get("/core/shares/sitemap"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.responses[0].shareToken").value("Ab3xYz0123456789QrStUv"))
+                .andExpect(jsonPath("$.responses[0].lastmod").value("2026-09-28T00:00:00Z"))
+                .andExpect(jsonPath("$.responses[1].shareToken").value("Zx9wVu8TsRqPoNmLkJiHgF"))
+                .andExpect(jsonPath("$.totalCount").value(2));
+        // "sitemap" 리터럴이 {token} 패턴을 이긴다 — 토큰 조회가 아니라 목록이 응답했다
+        then(shareService).should().sitemap();
+        then(shareService).shouldHaveNoMoreInteractions();
     }
 }

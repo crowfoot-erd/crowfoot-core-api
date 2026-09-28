@@ -7,8 +7,10 @@ import net.java21.crowfoot.api.model.dto.CreateShareRequest;
 import net.java21.crowfoot.api.model.dto.GalleryShareResponse;
 import net.java21.crowfoot.api.model.dto.ModelShareResponse;
 import net.java21.crowfoot.api.model.dto.PublicShareResponse;
+import net.java21.crowfoot.api.model.dto.SitemapShareResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelShareRepository;
+import net.java21.crowfoot.api.model.repository.ShareQueryRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -29,6 +31,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
@@ -54,6 +57,8 @@ class ShareServiceTest {
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private ShareQueryRepository shareQueryRepository;
     @Spy
     private ShareTokenGenerator tokenGenerator = new ShareTokenGenerator();
     @InjectMocks
@@ -302,6 +307,47 @@ class ShareServiceTest {
 
         assertThat(shareService.gallery()).isEmpty();
         then(modelRepository).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("사이트맵은 저장소 행을 토큰+lastmod로 매핑해 그대로 내려준다 — 저장소 1회 호출(단일 쿼리)")
+    void sitemapMapsRowsFromSingleRepositoryCall() {
+        given(shareQueryRepository.findSitemapShares(any(), anyInt()))
+                .willReturn(List.of(
+                        new ShareQueryRepository.SitemapRow("tokB", FUTURE),
+                        new ShareQueryRepository.SitemapRow("tokA", PAST)));
+
+        List<SitemapShareResponse> sitemap = shareService.sitemap();
+
+        assertThat(sitemap).hasSize(2);
+        assertThat(sitemap.get(0).shareToken()).isEqualTo("tokB");
+        assertThat(sitemap.get(0).lastmod()).isEqualTo(FUTURE);
+        assertThat(sitemap.get(1).shareToken()).isEqualTo("tokA");
+        then(shareQueryRepository).should().findSitemapShares(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("사이트맵은 상한 5,000을 넘으면 최신 순으로 자른다 — 상한+1을 받아 초과를 판정한다")
+    void sitemapTruncatesAtLimit() {
+        List<ShareQueryRepository.SitemapRow> over = java.util.stream.IntStream.rangeClosed(1, 5_001)
+                .mapToObj(i -> new ShareQueryRepository.SitemapRow("tok" + i, PAST))
+                .toList();
+        given(shareQueryRepository.findSitemapShares(any(), anyInt()))
+                .willReturn(over);
+
+        List<SitemapShareResponse> sitemap = shareService.sitemap();
+
+        assertThat(sitemap).hasSize(5_000); // 초과 1건 잘림 — 정렬은 저장소 계약(updatedAt desc)을 그대로
+        assertThat(sitemap.get(4_999).shareToken()).isEqualTo("tok5000");
+    }
+
+    @Test
+    @DisplayName("사이트맵은 활성 공유가 없으면 빈 목록이다")
+    void sitemapEmptyWithoutActiveShare() {
+        given(shareQueryRepository.findSitemapShares(any(), anyInt()))
+                .willReturn(List.of());
+
+        assertThat(shareService.sitemap()).isEmpty();
     }
 
     /** 링크 픽스처 — 조회 수만 링크 고유값(반응·댓글 카운터는 문서 단위 — 2026-09-28 이관) */
