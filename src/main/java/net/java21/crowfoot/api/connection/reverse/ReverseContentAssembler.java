@@ -289,9 +289,12 @@ public class ReverseContentAssembler {
         node.put("type", oneToOne ? "ONE_TO_ONE" : "ONE_TO_MANY");
         node.put("identifying", fkInsidePrimaryKey);
         node.put("parentMultiplicity", allNotNull ? "EXACTLY_ONE" : "ZERO_OR_ONE");
+        // 1:N 자식 기수(부모 행마다 자식이 몇 개인가)는 DDL·스키마 어느 쪽으로도 증명되지 않는다 —
+        // 에디터 관계 생성 기본값(양쪽 모두 필수, ONE_OR_MORE)과 일관되게 둔다(#279). 임포트 결과가
+        // 수동 생성 문서와 다른 표기(○< vs |<)로 보이는 것이 사용자에게 버그로 읽혔던 원인.
         node.put("childMultiplicity", oneToOne
                 ? (allNotNull ? "EXACTLY_ONE" : "ZERO_OR_ONE")
-                : "ZERO_OR_MORE");
+                : "ONE_OR_MORE");
         node.put("fkName", fk.name());
         ArrayNode mappings = node.putArray("columnMappings");
         for (int i = 0; i < childColumnIdList.size(); i++) {

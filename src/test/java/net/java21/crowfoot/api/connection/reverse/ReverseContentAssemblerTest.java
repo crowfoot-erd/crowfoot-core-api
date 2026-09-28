@@ -127,7 +127,7 @@ class ReverseContentAssemblerTest {
     }
 
     @Test
-    @DisplayName("FK는 비식별 1:N 관계가 된다 — 부모 기수는 FK NOT NULL로 EXACTLY_ONE, rule은 enum으로")
+    @DisplayName("FK는 비식별 1:N 관계가 된다 — 부모 기수는 FK NOT NULL로 EXACTLY_ONE, 자식 1:N은 에디터 기본값(ONE_OR_MORE), rule은 enum으로")
     void oneToManyRelationship() {
         IntrospectedSchema.IntrospectedFk fk = new IntrospectedSchema.IntrospectedFk(
                 "fk_orders_member", "orders", List.of("member_id"),
@@ -140,7 +140,7 @@ class ReverseContentAssemblerTest {
         assertThat(rel.path("type").asText()).isEqualTo("ONE_TO_MANY");
         assertThat(rel.path("identifying").asBoolean()).isFalse();
         assertThat(rel.path("parentMultiplicity").asText()).isEqualTo("EXACTLY_ONE");
-        assertThat(rel.path("childMultiplicity").asText()).isEqualTo("ZERO_OR_MORE");
+        assertThat(rel.path("childMultiplicity").asText()).isEqualTo("ONE_OR_MORE");
         assertThat(rel.path("onDelete").asText()).isEqualTo("CASCADE");
         assertThat(rel.path("onUpdate").asText()).isEqualTo("NO_ACTION");
         assertThat(rel.path("fkName").asText()).isEqualTo("fk_orders_member");
