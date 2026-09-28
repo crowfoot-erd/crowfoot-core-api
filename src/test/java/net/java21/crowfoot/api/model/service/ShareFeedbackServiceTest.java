@@ -20,6 +20,7 @@ import net.java21.crowfoot.api.model.repository.ModelReactionQueryRepository;
 import net.java21.crowfoot.api.model.repository.ModelReactionRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelShareRepository;
+import net.java21.crowfoot.api.notification.service.NotificationRecorder;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -40,6 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willThrow;
@@ -79,6 +82,8 @@ class ShareFeedbackServiceTest {
     private AdminGuard adminGuard;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private NotificationRecorder notificationRecorder;
 
     private final GuestPasswordHasher passwordHasher = new GuestPasswordHasher();
     private ShareFeedbackService feedbackService;
@@ -87,7 +92,7 @@ class ShareFeedbackServiceTest {
     void setUp() {
         feedbackService = new ShareFeedbackService(shareRepository, reactionRepository, commentRepository,
                 commentQueryRepository, reactionQueryRepository, modelRepository, userRepository,
-                roleChecker, passwordHasher, adminGuard, auditRecorder);
+                roleChecker, passwordHasher, adminGuard, auditRecorder, notificationRecorder);
     }
 
     // --- 반응 토글 (1.10.6 — 회원전용, 문서 단위)
@@ -106,6 +111,7 @@ class ShareFeedbackServiceTest {
         then(reactionRepository).should(never()).deleteByModelIdAndUserId(anyLong(), anyLong());
         then(auditRecorder).should().record(7L, "MODEL_REACTION_TOGGLED", "MODEL", "501",
                 Map.of("added", "true"));
+        then(notificationRecorder).should().notifyReactionAdded(any(Model.class), eq(7L)); // on만 발행
     }
 
     @Test
@@ -122,6 +128,7 @@ class ShareFeedbackServiceTest {
         then(modelRepository).should().addReactionCount(501L, -1L);
         then(auditRecorder).should().record(7L, "MODEL_REACTION_TOGGLED", "MODEL", "501",
                 Map.of("added", "false"));
+        then(notificationRecorder).should(never()).notifyReactionAdded(any(Model.class), anyLong()); // off는 무발행
     }
 
     // --- 피드백 초기화 (1.10.7 — 선택 인증)
@@ -197,6 +204,7 @@ class ShareFeedbackServiceTest {
         then(modelRepository).should().addCommentCount(501L, 1L);
         then(auditRecorder).should().record(8L, "MODEL_COMMENT_CREATED", "MODEL_COMMENT", "31",
                 Map.of("modelId", "501", "authorType", "member"));
+        then(notificationRecorder).should().notifyCommentCreated(any(Model.class), eq(8L), isNull());
     }
 
     @Test
@@ -227,6 +235,7 @@ class ShareFeedbackServiceTest {
         assertThat(passwordHasher.matches(GUEST_PASSWORD, captor.getValue().getPasswordHash())).isTrue();
         then(auditRecorder).should().record(null, "MODEL_COMMENT_CREATED", "MODEL_COMMENT", "31",
                 Map.of("modelId", "501", "authorType", "guest"));
+        then(notificationRecorder).should().notifyCommentCreated(any(Model.class), isNull(), eq("방문자"));
     }
 
     @Test
@@ -434,6 +443,7 @@ class ShareFeedbackServiceTest {
         then(modelRepository).should().addCommentCount(501L, 1L);
         then(auditRecorder).should().record(8L, "MODEL_COMMENT_CREATED", "MODEL_COMMENT", "33",
                 Map.of("modelId", "501", "authorType", "member"));
+        then(notificationRecorder).should().notifyCommentCreated(any(Model.class), eq(8L), isNull());
     }
 
     @Test
@@ -468,6 +478,7 @@ class ShareFeedbackServiceTest {
         then(adminGuard).should(never()).requireAdmin(anyLong()); // 작성자 본인이라 관리자 판정 불필요
         then(auditRecorder).should().record(7L, "MODEL_COMMENT_CREATED", "MODEL_COMMENT", "32",
                 Map.of("modelId", "501", "authorType", "owner", "parentCommentId", "31"));
+        then(notificationRecorder).should().notifyOwnerReplied(any(Model.class), any(ModelComment.class), eq(7L));
     }
 
     @Test

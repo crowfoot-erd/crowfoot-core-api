@@ -59,6 +59,9 @@ public enum ErrorCode {
     SHARE_INACTIVE(HttpStatus.GONE, "SHARE_INACTIVE", "공유 기간이 아니거나 만료되었습니다"),
     MODEL_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_COMMENT_NOT_FOUND", "문서 댓글을 찾을 수 없습니다"),
 
+    // Notification (08-core/11-notification.md Section 5)
+    NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다"),
+
     // Connection (08-core/06-connection.md Section 3.7)
     CONNECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "CONNECTION_NOT_FOUND", "커넥션을 찾을 수 없습니다"),
     INVALID_DBMS_TYPE(HttpStatus.BAD_REQUEST, "INVALID_DBMS_TYPE", "지원하지 않는 데이터베이스 종류입니다"),

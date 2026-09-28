@@ -22,6 +22,7 @@ import net.java21.crowfoot.api.model.repository.ModelReactionQueryRepository;
 import net.java21.crowfoot.api.model.repository.ModelReactionRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelShareRepository;
+import net.java21.crowfoot.api.notification.service.NotificationRecorder;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -59,6 +60,7 @@ public class ShareFeedbackService {
     private final GuestPasswordHasher passwordHasher;
     private final AdminGuard adminGuard;
     private final AuditRecorder auditRecorder;
+    private final NotificationRecorder notificationRecorder;
 
     // ---- 공개 토큰 경로(선택 인증·회원전용 반응) — 토큰→문서 해석 뒤 문서 스레드에 기록한다 ----
 
@@ -103,6 +105,7 @@ public class ShareFeedbackService {
         modelRepository.addCommentCount(model.getId(), 1);
         auditRecorder.record(userId, "MODEL_COMMENT_CREATED", "MODEL_COMMENT", Long.toString(comment.getId()),
                 Map.of("modelId", Long.toString(model.getId()), "authorType", authorType));
+        notificationRecorder.notifyCommentCreated(model, userId, userId == null ? request.nickname() : null);
         return toResponse(comment, displayNameOf(comment), authorType, false);
     }
 
@@ -167,6 +170,7 @@ public class ShareFeedbackService {
                     Long.toString(comment.getId()), Map.of(
                             "modelId", Long.toString(model.getId()),
                             "authorType", authorTypeOf(userId, model.getCreatedBy())));
+            notificationRecorder.notifyCommentCreated(model, userId, null);
             return toResponse(comment, displayNameOf(comment), authorTypeOf(userId, model.getCreatedBy()), false);
         }
         requireModelOwner(userId, model);
@@ -184,6 +188,7 @@ public class ShareFeedbackService {
         details.put("parentCommentId", Long.toString(parent.getId()));
         auditRecorder.record(userId, "MODEL_COMMENT_CREATED", "MODEL_COMMENT",
                 Long.toString(comment.getId()), details);
+        notificationRecorder.notifyOwnerReplied(model, parent, userId);
         return toResponse(comment, displayNameOf(comment), "owner", false);
     }
 
@@ -270,6 +275,9 @@ public class ShareFeedbackService {
         modelRepository.addReactionCount(model.getId(), added ? 1 : -1);
         auditRecorder.record(userId, "MODEL_REACTION_TOGGLED", "MODEL", Long.toString(model.getId()),
                 Map.of("added", Boolean.toString(added)));
+        if (added) {
+            notificationRecorder.notifyReactionAdded(model, userId); // 토글 on만 알림 — 재토글은 Recorder가 억제
+        }
         return new ShareReactionResponse(model.getReactionCount() + (added ? 1 : -1), added);
     }
 
