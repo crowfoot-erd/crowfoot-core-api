@@ -68,7 +68,7 @@ public class UserQueryRepository {
 
     // ----- 관리자 — 전체 사용자 목록 (08-core/05-account.md Section 2.1) -----
 
-    /** 관리자 검색 — 탈퇴 사용자도 포함(soft 방식, 상태 배지로 구분). 정렬 userId asc 고정 */
+    /** 관리자 검색 — 탈퇴 사용자도 포함(soft 방식, 상태 배지로 구분). 정렬 createdAt desc 고정(최신 가입순 — 같은 시각은 userId desc, 08-core/14-admin.md Section 1.1) */
     public List<AdminUserRow> searchAdminUsers(String keyword, long offset, int limit) {
         QUser user = QUser.user;
         return query
@@ -76,7 +76,7 @@ public class UserQueryRepository {
                         user.isAdmin, user.withdrawnAt, user.createdAt))
                 .from(user)
                 .where(adminKeyword(user, keyword))
-                .orderBy(user.id.asc())
+                .orderBy(user.createdAt.desc(), user.id.desc())
                 .offset(offset)
                 .limit(limit)
                 .fetch();
