@@ -24,7 +24,10 @@ import java.util.regex.Pattern;
 @Component
 public class PostgresIntrospector implements SchemaIntrospector {
 
-    /** 물리 타입(udt_name) → 공용 논리 코드 — DbmsTemplates.postgres 정방향의 역 */
+    /** 물리 타입(udt_name·SQL 텍스트 표기) → 공용 논리 코드 — DbmsTemplates.postgres 정방향의 역.
+     *  udt_name은 카탈로그 조회(introspection), 텍스트 표기는 SQL 가져오기(DdlTextParser) 경로다 —
+     *  INTEGER·REAL처럼 텍스트로만 오는 표기도 접지 않으면 문서가 비정규형으로 저장돼
+     *  마이그레이션 diff가 같은 타입을 영구 TYPE 변경으로 잡는다(MySQL은 원래 둘 다 갖춘다). */
     private static final Map<String, String> COMMON_TYPES = Map.ofEntries(
             Map.entry("int2", "SMALLINT"),
             Map.entry("int4", "INT"),
@@ -47,7 +50,18 @@ public class PostgresIntrospector implements SchemaIntrospector {
             Map.entry("json", "JSON"),
             Map.entry("jsonb", "JSON"),
             Map.entry("uuid", "UUID"),
-            Map.entry("bytea", "BLOB"));
+            Map.entry("bytea", "BLOB"),
+            // SQL 텍스트 표기 — 카탈로그 udt_name과 뜻이 같은 철자
+            Map.entry("integer", "INT"),
+            Map.entry("int", "INT"),
+            Map.entry("smallint", "SMALLINT"),
+            Map.entry("bigint", "BIGINT"),
+            Map.entry("decimal", "DECIMAL"),
+            Map.entry("dec", "DECIMAL"),
+            Map.entry("real", "FLOAT"),
+            Map.entry("double", "DOUBLE"),
+            Map.entry("double precision", "DOUBLE"),
+            Map.entry("boolean", "BOOLEAN"));
 
     /** PG 기본값 표현의 캐스트 접미사 — {@code '0'::integer}, {@code now()::timestamp(6)} */
     private static final Pattern CAST_SUFFIX = Pattern.compile("^(.*?)::[a-zA-Z][a-zA-Z0-9_ ()]*$");

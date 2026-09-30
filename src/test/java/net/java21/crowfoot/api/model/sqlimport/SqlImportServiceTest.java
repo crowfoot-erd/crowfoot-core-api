@@ -163,6 +163,38 @@ class SqlImportServiceTest {
     }
 
     @Test
+    @DisplayName("PG 생성 — INTEGER·REAL·DOUBLE PRECISION 텍스트 표기는 공용 코드로 정규화해 저장한다")
+    void importDocumentNormalizesPostgresTextTypes() {
+        // 카탈로그 udt_name(int4)이 아니라 SQL 덤프 표기(INTEGER)로 와도 문서는 정규형(INT)이어야
+        // 한다 — 비정규형이면 introspection(INT)과 마이그레이션 diff가 같은 타입을 영구 비교한다
+        given(databaseTypeRepository.findByCodeAndIsActiveTrue("postgresql"))
+                .willReturn(Optional.of(new DatabaseType("postgresql", "PostgreSQL", true)));
+        org.mockito.Mockito.lenient().when(introspectors.forDbmsType("postgresql"))
+                .thenReturn(new net.java21.crowfoot.api.connection.introspect.PostgresIntrospector());
+        given(modelRepository.existsByWorkspaceIdAndName(7L, "SQL ERD")).willReturn(false);
+        stubSave();
+
+        SqlImportResponse response = service.importDocument(2L, 7L, new SqlImportRequest(null, null,
+                "postgresql", """
+                        CREATE TABLE users (
+                          id INTEGER PRIMARY KEY,
+                          score REAL,
+                          ratio DOUBLE PRECISION
+                        );
+                        """));
+
+        assertThat(response.tableCount()).isEqualTo(1);
+        ArgumentCaptor<Model> modelCaptor = ArgumentCaptor.forClass(Model.class);
+        verify(modelRepository).save(modelCaptor.capture());
+        assertThat(modelCaptor.getValue().getContent())
+                .contains("\"dataType\":\"INT\"")
+                .contains("\"dataType\":\"FLOAT\"")
+                .contains("\"dataType\":\"DOUBLE\"")
+                .doesNotContain("\"dataType\":\"INTEGER\"")
+                .doesNotContain("\"dataType\":\"REAL\"");
+    }
+
+    @Test
     @DisplayName("CREATE TABLE 0개는 400 SQL_IMPORT_NO_TABLES — 문서가 만들어지지 않는다")
     void importDocumentRequiresTables() {
         stubActiveType();

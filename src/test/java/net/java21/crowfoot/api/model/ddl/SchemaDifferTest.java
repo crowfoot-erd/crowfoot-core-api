@@ -94,6 +94,33 @@ class SchemaDifferTest {
     }
 
     @Test
+    @DisplayName("타입 표기 동의어는 TYPE 변경이 아니다 — INTEGER≡INT·NUMERIC≡DECIMAL·대소문자 무시")
+    void typeSynonymsAreNotTypeChange() {
+        DdlContent from = content(table("t1", "users",
+                column("c1", "a", "INT", true),
+                column("c2", "b", "NUMERIC", true),
+                column("c3", "c", "DOUBLE", true)));
+        DdlContent to = content(table("t1", "users",
+                column("x1", "a", "INTEGER", true),
+                column("x2", "b", "decimal", true),
+                column("x3", "c", "double precision", true)));
+
+        assertThat(of(SchemaDiffer.diff(from, to, false), SchemaDiffer.ColumnAltered.class)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("동의어가 아닌 타입 교체는 여전히 TYPE 변경이다 — INT→BIGINT")
+    void distinctTypesAreStillTypeChange() {
+        DdlContent from = content(table("t1", "users", column("c1", "a", "INT", true)));
+        DdlContent to = content(table("t1", "users", column("x1", "a", "BIGINT", true)));
+
+        List<SchemaDiffer.ColumnAltered> altered =
+                of(SchemaDiffer.diff(from, to, false), SchemaDiffer.ColumnAltered.class);
+        assertThat(altered).hasSize(1);
+        assertThat(altered.get(0).changedFields()).containsExactly(SchemaDiffer.FIELD_TYPE);
+    }
+
+    @Test
     @DisplayName("개명은 remove+add다 — 이름이 컬럼의 정체성이다")
     void renameIsDropAndAdd() {
         DdlContent from = content(table("t1", "users", column("c1", "name")));

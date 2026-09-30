@@ -4,6 +4,7 @@ import net.java21.crowfoot.common.i18n.ServerMessages;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -327,12 +328,35 @@ public final class DdlGenerator {
 
     /* ---------- 스키마 비교 헬퍼 — SchemaDiffer·PG 방언이 공유 ---------- */
 
-    /** 물리 타입 동등 — 논리 코드·길이·정밀도·스케일 조합(조립 결과를 좌우하는 전부) */
+    /** 타입 표기 동의어 — 뜻이 같은 철자를 하나로 접는다(SQL 표준 준수 동의어).
+     *  INTEGER로 적힌 문서(SQL 가져오기·과거 저장)가 introspection의 INT와, NUMERIC을
+     *  고른 문서가 introspection의 DECIMAL과(양쪽 인트로스펙터가 numeric→DECIMAL로 접는다)
+     *  같은 타입으로 비교되게 한다 — 접지 않으면 마이그레이션 diff가 같은 타입을
+     *  영구 TYPE 변경으로 잡는다. REAL은 DBMS마다 대응이 달라(MySQL=DOUBLE) 여기서
+     *  접지 않고 인트로스펙터 계층의 역방향 매핑이 담당한다. */
+    private static final Map<String, String> TYPE_SYNONYMS = Map.of(
+            "INTEGER", "INT",
+            "NUMERIC", "DECIMAL",
+            "CHARACTER", "CHAR",
+            "DEC", "DECIMAL",
+            "DOUBLE PRECISION", "DOUBLE");
+
+    /** 물리 타입 동등 — 논리 코드·길이·정밀도·스케일 조합(조립 결과를 좌우하는 전부).
+     *  코드는 {@link #typeKey}로 접어 비교한다(대소문자·공백·동의어 관용). */
     static boolean sameType(DdlContent.Column before, DdlContent.Column after) {
-        return java.util.Objects.equals(before.dataType(), after.dataType())
+        return java.util.Objects.equals(typeKey(before.dataType()), typeKey(after.dataType()))
                 && java.util.Objects.equals(before.length(), after.length())
                 && java.util.Objects.equals(before.precision(), after.precision())
                 && java.util.Objects.equals(before.scale(), after.scale());
+    }
+
+    /** 타입 비교 키 — 앞뒤 공백·대소문자를 무시하고 동의어를 공용 코드로 접는다 */
+    static String typeKey(String dataType) {
+        if (dataType == null) {
+            return null;
+        }
+        String upper = dataType.trim().toUpperCase(Locale.ROOT);
+        return TYPE_SYNONYMS.getOrDefault(upper, upper);
     }
 
     /** 기본값 정규화 — 빈 문자열과 null은 같은 것으로 본다(스키마 조회가 ''를 null로 돌리는 계열) */
