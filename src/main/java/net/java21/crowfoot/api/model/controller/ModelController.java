@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
+import net.java21.crowfoot.api.model.dto.ConnectModelRequest;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.DeployModelRequest;
 import net.java21.crowfoot.api.model.dto.MigrationDdlResponse;
@@ -122,6 +123,16 @@ public class ModelController {
             @PathVariable("model-id") long modelId,
             @Valid @RequestBody DeployModelRequest request) {
         return ApiResponse.success(deployService.deploy(CurrentUserHolder.get().userId(), workspaceId, modelId,
+                Long.parseLong(request.connectionId())));
+    }
+
+    /** 문서-데이터베이스 최초 연결 — Editor 이상, 미연결 문서에 원천 커넥션 지정 (1.14) */
+    @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/connections")
+    public ApiResponse<ModelSummaryResponse> connect(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @Valid @RequestBody ConnectModelRequest request) {
+        return ApiResponse.success(modelService.connect(CurrentUserHolder.get().userId(), workspaceId, modelId,
                 Long.parseLong(request.connectionId())));
     }
 

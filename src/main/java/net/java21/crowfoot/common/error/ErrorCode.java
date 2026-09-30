@@ -53,6 +53,7 @@ public enum ErrorCode {
     VERSION_CONFLICT(HttpStatus.CONFLICT, "VERSION_CONFLICT", "다른 클라이언트가 먼저 저장했습니다"),
     MODEL_VERSION_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_VERSION_NOT_FOUND", "버전 기록을 찾을 수 없습니다"),
     SQL_IMPORT_NO_TABLES(HttpStatus.BAD_REQUEST, "SQL_IMPORT_NO_TABLES", "CREATE TABLE 문을 찾을 수 없습니다"),
+    MODEL_ALREADY_CONNECTED(HttpStatus.CONFLICT, "MODEL_ALREADY_CONNECTED", "이미 커넥션이 연결된 문서입니다"),
 
     // Share (08-core/02-model.md Section 1.10)
     SHARE_NOT_FOUND(HttpStatus.NOT_FOUND, "SHARE_NOT_FOUND", "공유 링크를 찾을 수 없습니다"),

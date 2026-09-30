@@ -8,6 +8,8 @@ import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.connection.domain.DbConnection;
+import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelDiagram;
 import net.java21.crowfoot.api.model.domain.ModelVersion;
@@ -63,6 +65,7 @@ public class ModelService {
     private final ModelVersionRepository modelVersionRepository;
     private final ModelVersionPruner modelVersionPruner;
     private final UserRepository userRepository;
+    private final DbConnectionRepository connectionRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
@@ -176,6 +179,33 @@ public class ModelService {
 
         auditRecorder.record(userId, "MODEL_UPDATED", "MODEL",
                 Long.toString(model.getId()), null);
+        return toSummary(model);
+    }
+
+    /**
+     * 문서-데이터베이스 최초 연결(Editor 이상 — 1.14) — 미연결 문서에 원천 커넥션을 지정한다.
+     * 해지·전환은 제공하지 않는다(후속). 메타 계열이라 version은 올리지 않고 save 없이 dirty checking으로 반영한다.
+     * 문서 databaseType과 커넥션 dbmsType이 같아야 한다(대소문자·공백 무관 — 배포·마이그레이션과 같은 검사).
+     */
+    @Transactional
+    public ModelSummaryResponse connect(long userId, long workspaceId, long modelId, long connectionId) {
+        roleChecker.requireEditor(userId, workspaceId);
+        Model model = modelRepository.findByIdAndWorkspaceId(modelId, workspaceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
+        if (model.getSourceConnectionId() != null) {
+            throw new BusinessException(ErrorCode.MODEL_ALREADY_CONNECTED);
+        }
+        DbConnection connection = connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
+        if (!model.getDatabaseType().trim().equalsIgnoreCase(connection.getDbmsType().trim())) {
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.connect.dbms-mismatch",
+                    model.getDatabaseType(), connection.getDbmsType());
+        }
+        model.setSourceConnectionId(connectionId);
+        auditRecorder.record(userId, "MODEL_CONNECTED", "MODEL",
+                Long.toString(model.getId()), Map.of(
+                        "connectionId", Long.toString(connectionId),
+                        "connectionName", connection.getName()));
         return toSummary(model);
     }
 

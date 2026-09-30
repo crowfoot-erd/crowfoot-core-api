@@ -352,4 +352,44 @@ class ModelControllerWebTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.header.resultCode").value("MODEL_NOT_FOUND"));
     }
+
+    @Test
+    @DisplayName("최초 연결은 갱신된 요약을 응답한다 — sourceConnectionId 세팅 (1.14)")
+    void connectReturnsUpdatedSummary() throws Exception {
+        // given
+        given(modelService.connect(7L, 77L, 501L, 301L)).willReturn(
+                new ModelSummaryResponse("501", "77", "주문 서비스 ERD", null, "postgresql", "301",
+                        0, new UserRefResponse("7", "marco"),
+                        Instant.parse("2026-09-10T00:00:00Z"), Instant.parse("2026-09-10T00:00:00Z")));
+
+        // when & then
+        mockMvc.perform(post("/core/workspaces/77/models/501/connections").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"connectionId\":\"301\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.modelId").value("501"))
+                .andExpect(jsonPath("$.response.sourceConnectionId").value("301"));
+    }
+
+    @Test
+    @DisplayName("최초 연결 — connectionId가 숫자가 아니면 400이다")
+    void connectRejectsNonNumericConnectionId() throws Exception {
+        mockMvc.perform(post("/core/workspaces/77/models/501/connections").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"connectionId\":\"abc\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("최초 연결 — 이미 연결된 문서는 409 MODEL_ALREADY_CONNECTED다")
+    void connectMapsAlreadyConnected() throws Exception {
+        given(modelService.connect(7L, 77L, 501L, 301L))
+                .willThrow(new BusinessException(ErrorCode.MODEL_ALREADY_CONNECTED));
+
+        mockMvc.perform(post("/core/workspaces/77/models/501/connections").header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"connectionId\":\"301\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.header.resultCode").value("MODEL_ALREADY_CONNECTED"));
+    }
 }

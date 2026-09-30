@@ -3,6 +3,8 @@ package net.java21.crowfoot.api.model.service;
 import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.connection.domain.DbConnection;
+import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelDiagram;
 import net.java21.crowfoot.api.model.domain.ModelVersion;
@@ -35,6 +37,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,6 +74,8 @@ class ModelServiceTest {
     @Mock
     private UserRepository userRepository;
     @Mock
+    private DbConnectionRepository connectionRepository;
+    @Mock
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
@@ -82,7 +87,7 @@ class ModelServiceTest {
         // ObjectMapper는 실물 — JSON 파싱 검증 자체가 테스트 대상이다
         modelService = new ModelService(modelRepository, modelDiagramRepository, modelQueryRepository,
                 databaseTypeRepository, modelVersionRepository, modelVersionPruner, userRepository,
-                roleChecker, auditRecorder, new ObjectMapper());
+                connectionRepository, roleChecker, auditRecorder, new ObjectMapper());
     }
 
 
@@ -105,6 +110,14 @@ class ModelServiceTest {
                 V1_EMPTY, 7L);
         ReflectionTestUtils.setField(model, "id", 501L);
         return model;
+    }
+
+    /** 최초 연결 대상 커넥션(1.14) — workspace 77 소속, dbmsType만 갈아 끼운다 */
+    private static DbConnection connection(String dbmsType) {
+        DbConnection connection = new DbConnection(77L, "개발 PostgreSQL", dbmsType,
+                "db.dev.example.com", 5432, "orders", null, "crowfoot", "secret".getBytes(), 7L);
+        ReflectionTestUtils.setField(connection, "id", 301L);
+        return connection;
     }
 
     @Test
@@ -463,6 +476,76 @@ class ModelServiceTest {
 
         assertThatThrownBy(() -> modelService.saveContent(7L, 77L, 501L,
                 new SaveContentRequest(0, "{}")))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("최초 연결은 원천 커넥션을 지정하고 MODEL_CONNECTED 감사를 남긴다 — version 미증가")
+    void connectSetsSourceConnectionWithAudit() {
+        Model model = persisted();
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(model));
+        given(connectionRepository.findByIdAndWorkspaceId(301L, 77L))
+                .willReturn(Optional.of(connection("postgresql")));
+
+        ModelSummaryResponse response = modelService.connect(7L, 77L, 501L, 301L);
+
+        assertThat(response.sourceConnectionId()).isEqualTo("301");
+        assertThat(response.version()).isZero();
+        assertThat(model.getSourceConnectionId()).isEqualTo(301L);
+        verify(roleChecker).requireEditor(7L, 77L);
+        verify(auditRecorder).record(7L, "MODEL_CONNECTED", "MODEL", "501", Map.of(
+                "connectionId", "301", "connectionName", "개발 PostgreSQL"));
+    }
+
+    @Test
+    @DisplayName("이미 연결된 문서의 재연결은 409 MODEL_ALREADY_CONNECTED이다 — 커넥션 조회·감사 없음")
+    void connectRejectsAlreadyConnected() {
+        Model model = persisted();
+        model.setSourceConnectionId(999L);
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(model));
+
+        assertThatThrownBy(() -> modelService.connect(7L, 77L, 501L, 301L))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_ALREADY_CONNECTED));
+
+        verify(connectionRepository, never()).findByIdAndWorkspaceId(anyLong(), anyLong());
+        verify(auditRecorder, never()).record(anyLong(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("문서 DBMS와 커넥션 DBMS가 다르면 400 INVALID_REQUEST이다 — 연결·감사 없음")
+    void connectRejectsDbmsMismatch() {
+        Model model = persisted();
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(model));
+        given(connectionRepository.findByIdAndWorkspaceId(301L, 77L))
+                .willReturn(Optional.of(connection("mysql")));
+
+        assertThatThrownBy(() -> modelService.connect(7L, 77L, 501L, 301L))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+
+        assertThat(model.getSourceConnectionId()).isNull();
+        verify(auditRecorder, never()).record(anyLong(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Workspace에 없는 커넥션 연결은 404 CONNECTION_NOT_FOUND로 은닉된다")
+    void connectRejectsMissingConnection() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(persisted()));
+        given(connectionRepository.findByIdAndWorkspaceId(301L, 77L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> modelService.connect(7L, 77L, 501L, 301L))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONNECTION_NOT_FOUND));
+    }
+
+    @Test
+    @DisplayName("다른 Workspace 소속 모델의 최초 연결은 404 MODEL_NOT_FOUND로 은닉된다")
+    void connectRejectsModelOfOtherWorkspace() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> modelService.connect(7L, 77L, 501L, 301L))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
     }
