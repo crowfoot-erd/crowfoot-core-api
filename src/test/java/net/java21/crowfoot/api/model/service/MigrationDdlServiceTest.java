@@ -8,6 +8,7 @@ import net.java21.crowfoot.api.connection.service.SchemaIntrospectionService;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.domain.ModelVersion;
 import net.java21.crowfoot.api.model.dto.MigrationDdlResponse;
+import net.java21.crowfoot.api.model.dto.ModelDeployResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
@@ -17,27 +18,31 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
- * 마이그레이션 DDL 서비스 단위 테스트 (08-core/02-model.md Section 1.7.1) —
- * (a) 버전 비교(Viewer·감사 없음)와 (b) 문서↔DB 비교(Editor·DBMS 일치 검사·감사)를 검증한다.
- * 스키마 조회는 스텁으로 대체해 서비스 간 결계만 확인한다.
+ * 마이그레이션 DDL 서비스 단위 테스트 (08-core/02-model.md §1.7.1·§1.15) —
+ * (a) 버전 비교(Viewer·감사 없음)와 (b) 문서↔DB 비교(Editor·DBMS 일치 검사·감사)·
+ * 차분 실행(재계산 문장 그대로·0문장 접속 생략·감사)을 검증한다.
+ * 스키마 조회·문장 실행은 스텁으로 대체해 서비스 간 결계만 확인한다.
  */
 @ExtendWith(MockitoExtension.class)
 class MigrationDdlServiceTest {
@@ -87,13 +92,15 @@ class MigrationDdlServiceTest {
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private DdlStatementExecutor statementExecutor;
 
     private MigrationDdlService service;
 
     @BeforeEach
     void setUp() {
         service = new MigrationDdlService(modelRepository, modelVersionRepository, connectionRepository,
-                schemaIntrospectionService, roleChecker, auditRecorder, MAPPER);
+                schemaIntrospectionService, roleChecker, auditRecorder, MAPPER, statementExecutor);
     }
 
     private Model model(String databaseType, String content) {
@@ -221,6 +228,86 @@ class MigrationDdlServiceTest {
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L)).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.generateConnectionMigration(7L, 77L, 501L, 11L))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONNECTION_NOT_FOUND));
+    }
+
+    /* ---------- (b) 차분 실행(1.15) — Editor 이상 ---------- */
+
+    @Test
+    @DisplayName("차분 실행 — 실행 시점에 재계산한 문장을 그대로 실행하고 MODEL_MIGRATION_EXECUTED 감사를 남긴다")
+    void executeMigrationRunsRecomputedStatements() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L))
+                .willReturn(Optional.of(model("mysql", V3)));
+        given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
+                .willReturn(Optional.of(connection("mysql")));
+        given(schemaIntrospectionService.introspectContent(any())).willReturn(DB);
+        given(statementExecutor.execute(any(), anyList()))
+                .willReturn(List.of(new ModelDeployResponse.Statement(
+                        "ALTER TABLE users ADD COLUMN grade VARCHAR(10);", true, null)));
+
+        ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L);
+
+        verify(roleChecker).requireEditor(7L, 77L);
+        // 클라이언트 SQL이 아니라 재계산한 diff 문장이 실행 단위로 내려간다
+        ArgumentCaptor<List<String>> statementsCaptor = ArgumentCaptor.captor();
+        verify(statementExecutor).execute(any(), statementsCaptor.capture());
+        assertThat(statementsCaptor.getValue())
+                .containsExactly("ALTER TABLE users ADD COLUMN grade VARCHAR(10);");
+        assertThat(response.executedCount()).isEqualTo(1);
+        assertThat(response.failedCount()).isZero();
+        assertThat(response.statements()).hasSize(1);
+        assertThat(response.statements().get(0).ok()).isTrue();
+        verify(auditRecorder).record(7L, "MODEL_MIGRATION_EXECUTED", "MODEL", "501",
+                Map.of("connectionId", "11", "connectionName", "개발 DB", "executed", 1, "failed", 0));
+    }
+
+    @Test
+    @DisplayName("차분 실행 — 재계산 문장이 0개(이미 동일)면 접속 없이 빈 리포트를 돌려준다")
+    void executeMigrationSkipsExecutorWhenNoStatements() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L))
+                .willReturn(Optional.of(model("mysql", V3)));
+        given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
+                .willReturn(Optional.of(connection("mysql")));
+        // DB 스키마가 문서와 동일한 스냅샷 — diff 0문장
+        given(schemaIntrospectionService.introspectContent(any())).willReturn(V3);
+
+        ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L);
+
+        // introspection이 도달성을 증명했다 — 2차 JDBC 접속은 없다
+        verify(statementExecutor, never()).execute(any(), anyList());
+        assertThat(response.executedCount()).isZero();
+        assertThat(response.failedCount()).isZero();
+        assertThat(response.statements()).isEmpty();
+        verify(auditRecorder).record(7L, "MODEL_MIGRATION_EXECUTED", "MODEL", "501",
+                Map.of("connectionId", "11", "connectionName", "개발 DB", "executed", 0, "failed", 0));
+    }
+
+    @Test
+    @DisplayName("차분 실행 — 문서와 커넥션의 DBMS가 다르면 400(생성과 같은 검사)")
+    void executeMigrationRejectsDbmsMismatch() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L))
+                .willReturn(Optional.of(model("postgresql", V3)));
+        given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
+                .willReturn(Optional.of(connection("mysql")));
+
+        assertThatThrownBy(() -> service.executeConnectionMigration(7L, 77L, 501L, 11L))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST);
+                    assertThat(e.getMessageKey()).isEqualTo("detail.migration.dbms-mismatch");
+                    assertThat(e.getArgs()).containsExactly("postgresql", "mysql");
+                });
+        verify(statementExecutor, never()).execute(any(), anyList());
+    }
+
+    @Test
+    @DisplayName("차분 실행 — 없는 커넥션은 404 CONNECTION_NOT_FOUND")
+    void executeMigrationRejectsUnknownConnection() {
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L))
+                .willReturn(Optional.of(model("mysql", V3)));
+        given(connectionRepository.findByIdAndWorkspaceId(11L, 77L)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.executeConnectionMigration(7L, 77L, 501L, 11L))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONNECTION_NOT_FOUND));
     }

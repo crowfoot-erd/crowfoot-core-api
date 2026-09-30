@@ -14,6 +14,7 @@ import net.java21.crowfoot.api.model.ddl.SqlDialect;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.dto.DdlWarningResponse;
 import net.java21.crowfoot.api.model.dto.MigrationDdlResponse;
+import net.java21.crowfoot.api.model.dto.ModelDeployResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
@@ -23,15 +24,17 @@ import org.springframework.stereotype.Service;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * 마이그레이션 DDL 생성 (05-editor/04-dbms-engineering.md §3.3 — 08-core/02-model.md Section 1.7.1).
+ * 마이그레이션 DDL 생성·실행 (05-editor/04-dbms-engineering.md §3.3 — 08-core/02-model.md §1.7.1·§1.15).
  *
  * <p>두 가지 비교 원천: (a) 버전 A→B — 두 스냅샷 content, Viewer 이상(1.7 DDL 생성과 같은 읽기).
  * (b) 실제 DB→문서 — 스키마 조회(3.7)로 현재 DB를 읽어 문서(content)를 대상으로 비교,
- * Editor 이상(내부 DB 접속이므로 3.7과 같다). 결과는 어디까지나 검토·복사용 스크립트다 —
- * 실행은 제공하지 않는다.
+ * Editor 이상(내부 DB 접속이므로 3.7과 같다). (a)는 생성 전용(스냅샷은 비교 대상일 뿐 실행 대상이
+ * 없다), (b) 차분은 {@link #executeConnectionMigration}으로 연결된 DB에 그대로 반영할 수 있다 —
+ * 클라이언트 SQL을 받지 않고 실행 시점에 diff를 재계산해 그 문장을 실행한다.
  *
  * <p>트랜잭션을 열지 않는다 — (b)는 외부 JDBC 호출을 커넥션 점유 없이 실행(DeployService 관례),
  * (a)도 읽기 2회뿐이라 원자성 요건이 없다.
@@ -47,6 +50,7 @@ public class MigrationDdlService {
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
+    private final DdlStatementExecutor statementExecutor;
 
     /** (a) 버전 A→B 마이그레이션 DDL — Viewer 이상. 스냅샷은 불변이므로 읽기만 한다 */
     public MigrationDdlResponse generateVersionMigration(long userId, long workspaceId, long modelId,
@@ -61,7 +65,8 @@ public class MigrationDdlService {
         String toContent = modelVersionRepository.findByModelIdAndVersion(modelId, to)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_VERSION_NOT_FOUND)).getContent();
 
-        return generate(model, parse(fromContent), parse(toContent), "v" + from, "v" + to, false);
+        return toResponse(generate(model, parse(fromContent), parse(toContent), "v" + from, "v" + to, false),
+                "v" + from, "v" + to);
     }
 
     /** (b) 실제 DB→문서 마이그레이션 DDL — Editor 이상. from=DB 현재 스키마, to=문서(마지막 저장 본문) */
@@ -69,34 +74,72 @@ public class MigrationDdlService {
                                                             long connectionId) {
         roleChecker.requireEditor(userId, workspaceId);
         Model model = requireModel(modelId, workspaceId);
-        DbConnection connection = connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
-
-        // 문서 방언과 커넥션 DBMS가 다르면 DDL이 그 데이터베이스에 맞지 않는다 (1.8 배포와 같은 검사)
-        if (!model.getDatabaseType().trim().equalsIgnoreCase(connection.getDbmsType().trim())) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.migration.dbms-mismatch",
-                    model.getDatabaseType(), connection.getDbmsType());
-        }
-
-        String dbContent = schemaIntrospectionService.introspectContent(connection);
-        MigrationDdlResponse response = generate(model, parse(dbContent), parse(model.getContent()),
-                "DB", "문서", true);
+        DbConnection connection = requireConnection(connectionId, workspaceId);
+        MigrationDdlGenerator.Result result = connectionDiff(model, connection);
+        MigrationDdlResponse response = toResponse(result, "DB", "문서");
         auditRecorder.record(userId, "MODEL_MIGRATION_DDL_GENERATED", "MODEL", Long.toString(modelId),
                 Map.of("connectionId", Long.toString(connectionId),
                         "statements", response.statementCount()));
         return response;
     }
 
+    /**
+     * (b) 차분 실행(1.15) — Editor 이상. 클라이언트 SQL을 받지 않고 실행 시점에 DB→문서 diff를
+     * 재계산해 그 문장을 커넥션 DB에 반영한다(주입 방지·실행 시점 최신 상태). 문장 실패는
+     * 결과 항목으로 보고한다(부분 실패 리포트 — 1.8 배포와 같은 규칙).
+     */
+    public ModelDeployResponse executeConnectionMigration(long userId, long workspaceId, long modelId,
+                                                          long connectionId) {
+        roleChecker.requireEditor(userId, workspaceId);
+        Model model = requireModel(modelId, workspaceId);
+        DbConnection connection = requireConnection(connectionId, workspaceId);
+        MigrationDdlGenerator.Result result = connectionDiff(model, connection);
+
+        // 이미 동일(0문장)이면 접속 없이 빈 리포트 — introspection이 도달성을 증명했다(2차 접속 불필요)
+        List<ModelDeployResponse.Statement> statements = result.statements().isEmpty()
+                ? List.of()
+                : statementExecutor.execute(connection, result.statements());
+
+        int failed = (int) statements.stream().filter(statement -> !statement.ok()).count();
+        auditRecorder.record(userId, "MODEL_MIGRATION_EXECUTED", "MODEL", Long.toString(modelId), Map.of(
+                "connectionId", Long.toString(connectionId),
+                "connectionName", connection.getName(),
+                "executed", statements.size() - failed,
+                "failed", failed));
+        return new ModelDeployResponse(statements.size() - failed, failed, statements,
+                result.warnings().stream().map(w -> new DdlWarningResponse(w.code(), w.message())).toList());
+    }
+
+    /** (b) 공용 diff — 커넥션 현재 스키마(introspection)를 문서와 비교한다. 생성·실행이 같은 원천을 쓴다 */
+    private MigrationDdlGenerator.Result connectionDiff(Model model, DbConnection connection) {
+        // 문서 방언과 커넥션 DBMS가 다르면 DDL이 그 데이터베이스에 맞지 않는다 (1.8 배포와 같은 검사)
+        if (!model.getDatabaseType().trim().equalsIgnoreCase(connection.getDbmsType().trim())) {
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.migration.dbms-mismatch",
+                    model.getDatabaseType(), connection.getDbmsType());
+        }
+        String dbContent = schemaIntrospectionService.introspectContent(connection);
+        return generate(model, parse(dbContent), parse(model.getContent()), "DB", "문서", true);
+    }
+
     /** 공용 조립 — 방언은 문서 메타 databaseType에서 파생한다(1.7과 같다) */
-    private MigrationDdlResponse generate(Model model, DdlContent from, DdlContent to,
-                                          String fromLabel, String toLabel, boolean skipIndexes) {
+    private MigrationDdlGenerator.Result generate(Model model, DdlContent from, DdlContent to,
+                                                  String fromLabel, String toLabel, boolean skipIndexes) {
         String templateId = DbmsTemplates.templateIdForDatabase(model.getDatabaseType());
         SqlDialect dialect = Dialects.byId(templateId);
-        MigrationDdlGenerator.Result result = MigrationDdlGenerator.generate(from, to, dialect,
+        return MigrationDdlGenerator.generate(from, to, dialect,
                 DbmsTemplates.byId(templateId).label(), model.getName(), fromLabel, toLabel, skipIndexes);
+    }
+
+    private MigrationDdlResponse toResponse(MigrationDdlGenerator.Result result,
+                                            String fromLabel, String toLabel) {
         return new MigrationDdlResponse(result.sql(),
                 result.warnings().stream().map(w -> new DdlWarningResponse(w.code(), w.message())).toList(),
                 result.statementCount(), fromLabel, toLabel);
+    }
+
+    private DbConnection requireConnection(long connectionId, long workspaceId) {
+        return connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
     }
 
     private Model requireModel(long modelId, long workspaceId) {

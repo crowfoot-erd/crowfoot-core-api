@@ -3,7 +3,8 @@ package net.java21.crowfoot.api.model.dto;
 import java.util.List;
 
 /**
- * 마이그레이션 DDL 생성 결과 (08-core/02-model.md Section 1.7.1) — 생성만 제공, 실행은 범위 밖.
+ * 마이그레이션 DDL 생성 결과 (08-core/02-model.md Section 1.7.1) — 검토·복사용 스크립트.
+ * 문서↔DB 차분의 실행은 ModelDeployResponse를 돌려주는 실행 엔드포인트(Section 1.15)가 담당한다.
  *
  * @param sql            전체 스크립트 — 파괴적 연산은 마지막 별도 블록(경고 배너 포함)
  * @param warnings       DESTRUCTIVE(파괴 문장 존재)·NOT_INTROSPECTED(인덱스 제외)·COMMON_DIALECT·VALIDATION

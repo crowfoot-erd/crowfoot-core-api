@@ -16,15 +16,22 @@ import java.util.Map;
  * 파괴 연산을 뒤로 미루면 되돌릴 수 없는 변경이 스크립트 말미에 모여 검토 지점이 한 곳이 된다.
  *
  * <p>같은 이름의 제약·FK 재구성은 drop이 add보다 먼저 와야 한다(ADD가 기존 이름에 충돌) —
- * 이 쌍만 예외로 drop을 add 바로 앞에 붙인다. 생성 전용(§3.1)과 달리 실행은 제공하지 않는다:
- * 결과는 복사·검토용 스크립트고, 경고(DESTRUCTIVE·NOT_INTROSPECTED)로 리스크를 선표시한다.
+ * 이 쌍만 예외로 drop을 add 바로 앞에 붙인다. 결과는 문장 리스트를 그대로 노출해서
+ * 실행(§1.15)이 화면 검토와 같은 순서로 반영하게 하고, 경고(DESTRUCTIVE·NOT_INTROSPECTED)로
+ * 리스크를 선표시한다.
  */
 public final class MigrationDdlGenerator {
 
     /** 파괴적 연산 블록 배너 — 실행 전 검토 지점 */
     private static final String DESTRUCTIVE_BANNER = "-- ⚠ 파괴적 연산 — 실행 전 데이터 손실 가능성을 확인하세요";
 
-    public record Result(String sql, List<DdlGenerator.Warning> warnings, int statementCount) {
+    /** statements: 실행 단위 문장(스크립트 본문과 같은 순서) — sql은 여기에 헤더·배너를 얹은 전문 */
+    public record Result(String sql, List<DdlGenerator.Warning> warnings, List<String> statements) {
+
+        /** 문장 수 — statements 파생 */
+        public int statementCount() {
+            return statements.size();
+        }
     }
 
     private MigrationDdlGenerator() {
@@ -127,7 +134,7 @@ public final class MigrationDdlGenerator {
         List<String> statements = new ArrayList<>(createsAdds);
         statements.addAll(alters);
         statements.addAll(destructive);
-        return new Result(String.join("\n\n", blocks), List.copyOf(warnings), statements.size());
+        return new Result(String.join("\n\n", blocks), List.copyOf(warnings), List.copyOf(statements));
     }
 
     /* ---------- 연산별 조립 ---------- */

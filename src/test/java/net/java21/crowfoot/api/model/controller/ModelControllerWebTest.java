@@ -294,6 +294,43 @@ class ModelControllerWebTest {
     }
 
     @Test
+    @DisplayName("마이그레이션 DDL 실행은 문장별 결과를 응답한다 (1.15) — 본문 없음")
+    void executeConnectionMigrationReturnsStatementResults() throws Exception {
+        // given
+        given(migrationDdlService.executeConnectionMigration(7L, 77L, 501L, 9L)).willReturn(
+                new net.java21.crowfoot.api.model.dto.ModelDeployResponse(1, 0,
+                        List.of(new net.java21.crowfoot.api.model.dto.ModelDeployResponse.Statement(
+                                "ALTER TABLE users ADD COLUMN grade VARCHAR(10);", true, null)),
+                        List.of()));
+
+        // when & then — 재계산 후 실행이라 요청 본문이 없다
+        mockMvc.perform(post("/core/workspaces/77/models/501/connections/9/migration/execute")
+                        .header("X-USER-ID", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.executedCount").value(1))
+                .andExpect(jsonPath("$.response.failedCount").value(0))
+                .andExpect(jsonPath("$.response.statements[0].sql").value(
+                        "ALTER TABLE users ADD COLUMN grade VARCHAR(10);"))
+                .andExpect(jsonPath("$.response.statements[0].ok").value(true));
+    }
+
+    @Test
+    @DisplayName("마이그레이션 DDL 실행 — DBMS 불일치는 400 INVALID_REQUEST다 (1.15)")
+    void executeConnectionMigrationRejectsDbmsMismatch() throws Exception {
+        // given
+        org.mockito.BDDMockito.willThrow(new net.java21.crowfoot.common.error.BusinessException(
+                        net.java21.crowfoot.common.error.ErrorCode.INVALID_REQUEST,
+                        "문서의 DBMS(postgresql)와 커넥션의 DBMS(mysql)가 다릅니다"))
+                .given(migrationDdlService).executeConnectionMigration(7L, 77L, 501L, 9L);
+
+        // when & then
+        mockMvc.perform(post("/core/workspaces/77/models/501/connections/9/migration/execute")
+                        .header("X-USER-ID", "7"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.header.resultCode").value("INVALID_REQUEST"));
+    }
+
+    @Test
     @DisplayName("검증 실행 기록은 204 본문 없음이다 (1.13)")
     void validationRunReturns204() throws Exception {
         mockMvc.perform(post("/core/workspaces/77/models/501/validation-runs").header("X-USER-ID", "7")

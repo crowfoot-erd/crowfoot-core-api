@@ -75,8 +75,10 @@ class DeployServiceTest {
 
     @BeforeEach
     void setUp() {
+        // 실행 골격은 실물 DdlStatementExecutor를 쓴다 — 문장별 루프(부분 실패·접속 분류) 커버리지 유지
         deployService = new DeployService(modelRepository, connectionRepository, roleChecker,
-                auditRecorder, new ObjectMapper(), new ConnectionCrypto(TestKeys.DEV_KEY), introspectors);
+                auditRecorder, new ObjectMapper(),
+                new DdlStatementExecutor(introspectors, new ConnectionCrypto(TestKeys.DEV_KEY)));
     }
 
     static final class TestKeys {

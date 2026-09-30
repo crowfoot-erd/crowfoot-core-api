@@ -136,13 +136,23 @@ public class ModelController {
                 Long.parseLong(request.connectionId())));
     }
 
-    /** 실제 DB→문서 마이그레이션 DDL 생성(생성만 — 실행 미제공) — Editor 이상, 커넥션 스키마 조회 기반 (1.7.1) */
+    /** 실제 DB→문서 마이그레이션 DDL 생성 — Editor 이상, 커넥션 스키마 조회 기반 (1.7.1). 차분 실행은 아래 execute(1.15) */
     @GetMapping("/core/workspaces/{workspace-id}/models/{model-id}/connections/{connection-id}/migration")
     public ApiResponse<MigrationDdlResponse> connectionMigration(
             @PathVariable("workspace-id") long workspaceId,
             @PathVariable("model-id") long modelId,
             @PathVariable("connection-id") long connectionId) {
         return ApiResponse.success(migrationDdlService.generateConnectionMigration(
+                CurrentUserHolder.get().userId(), workspaceId, modelId, connectionId));
+    }
+
+    /** 마이그레이션 DDL 실행 — Editor 이상, 재계산한 DB→문서 차분을 커넥션 DB에 문장별 실행 (1.15) */
+    @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/connections/{connection-id}/migration/execute")
+    public ApiResponse<ModelDeployResponse> executeConnectionMigration(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @PathVariable("connection-id") long connectionId) {
+        return ApiResponse.success(migrationDdlService.executeConnectionMigration(
                 CurrentUserHolder.get().userId(), workspaceId, modelId, connectionId));
     }
 
