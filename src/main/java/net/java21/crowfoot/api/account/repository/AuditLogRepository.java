@@ -13,13 +13,15 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     /**
      * 일별 로그인 집계(관리자 트래픽 활동 탭 — 08-core/10-metrics.md Section 7).
      * 하루 경계는 KST — created_at을 Asia/Seoul로 환산해 날짜를 자른다.
+     * 성공은 USER_LOGGED_IN, 실패는 USER_LOGIN_FAILED — 인증 서버가 기록하는 액션 값이다
+     * (06-erd/00-domain.md Section 3.7, 02-auth/api.md Section 3.2).
      * 행 배열: [date(YYYY-MM-DD), action, count]
      */
     @Query(value = """
             SELECT to_char((a.created_at AT TIME ZONE 'Asia/Seoul')::date, 'YYYY-MM-DD') AS day,
                    a.action, COUNT(*)
             FROM crowfoot_core.audit_logs a
-            WHERE a.created_at >= :from AND a.action IN ('LOGIN_SUCCEEDED', 'LOGIN_FAILED')
+            WHERE a.created_at >= :from AND a.action IN ('USER_LOGGED_IN', 'USER_LOGIN_FAILED')
             GROUP BY 1, 2
             ORDER BY 1
             """, nativeQuery = true)

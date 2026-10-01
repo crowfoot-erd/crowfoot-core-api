@@ -43,6 +43,10 @@ public class AdminMetricsService {
 
     private static final int TOP = 20;
 
+    /** 일별 로그인 집계가 세는 감사 액션 — 인증 서버가 기록하는 값(06-erd/00-domain.md Section 3.7) */
+    static final String ACTION_LOGIN_SUCCEEDED = "USER_LOGGED_IN";
+    static final String ACTION_LOGIN_FAILED = "USER_LOGIN_FAILED";
+
     private final DailyMetricRollupRepository rollupRepository;
     private final AuditLogRepository auditLogRepository;
     private final AdminGuard adminGuard;
@@ -127,9 +131,9 @@ public class AdminMetricsService {
         }
         for (Object[] row : auditLogRepository.countDailyLogins(fromInstant)) {
             long[] pair = logins.computeIfAbsent((String) row[0], k -> new long[2]);
-            if ("LOGIN_SUCCEEDED".equals(row[1])) {
+            if (ACTION_LOGIN_SUCCEEDED.equals(row[1])) {
                 pair[0] += ((Number) row[2]).longValue();
-            } else if ("LOGIN_FAILED".equals(row[1])) {
+            } else if (ACTION_LOGIN_FAILED.equals(row[1])) {
                 pair[1] += ((Number) row[2]).longValue();
             }
         }

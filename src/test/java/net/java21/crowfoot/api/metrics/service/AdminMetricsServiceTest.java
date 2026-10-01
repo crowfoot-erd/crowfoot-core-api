@@ -174,12 +174,14 @@ class AdminMetricsServiceTest {
     void activityFillsEmptyDays() {
         LocalDate today = LocalDate.now(VisitMetricsService.KST);
         String yesterday = today.minusDays(1).toString();
+        // 액션 값은 인증 서버가 실제로 기록하는 문자열이다(crowfoot-auth TokenIssueService·TokenExchangeService) —
+        // 상수가 아니라 리터럴로 고정해, 집계가 기록되지 않는 값을 세는 회귀를 막는다
         given(auditLogRepository.countDailyLogins(any(Instant.class))).willReturn(List.of(
-                new Object[]{yesterday, "LOGIN_SUCCEEDED", 5L},
-                new Object[]{yesterday, "LOGIN_FAILED", 2L}));
+                new Object[]{yesterday, "USER_LOGGED_IN", 5L},
+                new Object[]{yesterday, "USER_LOGIN_FAILED", 2L}));
         given(auditLogRepository.countByAction(any(Instant.class))).willReturn(List.of(
                 new Object[]{"MODEL_CREATED", 10L},
-                new Object[]{"LOGIN_SUCCEEDED", 7L}));
+                new Object[]{"USER_LOGGED_IN", 7L}));
 
         MetricsActivityResponse response = service.activity(ADMIN, 7);
 
