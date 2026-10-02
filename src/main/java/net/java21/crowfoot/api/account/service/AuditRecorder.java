@@ -5,7 +5,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
+import net.java21.crowfoot.api.auth.CurrentUser;
+import net.java21.crowfoot.api.auth.CurrentUserHolder;
 
 /**
  * 감사 기록 (06-erd/00-domain.md Section 3.7) — INSERT-only, 기록 실패가 본류를 실패시키지 않는다(best-effort).
@@ -26,6 +29,13 @@ public class AuditRecorder {
 
     public void record(Long actorUserId, String action, String targetType, String targetId, Map<String, Object> detail) {
         try {
+            // 워크스페이스 액세스 토큰으로 온 요청이면 어느 토큰인지 남긴다 (08-core/18-access-token.md Section 4)
+            CurrentUser current = CurrentUserHolder.getOrNull();
+            if (current != null && current.tokenId() != null && (detail == null || !detail.containsKey("tokenId"))) {
+                Map<String, Object> withToken = detail == null ? new LinkedHashMap<>() : new LinkedHashMap<>(detail);
+                withToken.put("tokenId", String.valueOf(current.tokenId()));
+                detail = withToken;
+            }
             String detailJson = detail == null ? null : objectMapper.writeValueAsString(detail);
             auditLogWriter.write(actorUserId, action, targetType, targetId, detailJson);
         } catch (Exception ex) {

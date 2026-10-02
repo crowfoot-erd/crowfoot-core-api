@@ -14,6 +14,8 @@ public record WorkspaceResponse(
         boolean isDefault,
         int memberCount,
         UserRefResponse createdBy,
-        Instant createdAt
+        Instant createdAt,
+        /** 요청한 사용자의 유효 역할 코드(OWNER·EDITOR·COMMENTER·VIEWER) */
+        String myRole
 ) {
 }

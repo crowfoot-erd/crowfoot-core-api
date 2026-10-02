@@ -112,6 +112,6 @@ class WorkspaceControllerWebTest {
 
     private WorkspaceResponse workspace() {
         return new WorkspaceResponse("77", "ERD 작업실", "설명", false, 3,
-                new UserRefResponse("7", "앨리스"), Instant.parse("2026-09-01T00:00:00Z"));
+                new UserRefResponse("7", "앨리스"), Instant.parse("2026-09-01T00:00:00Z"), "OWNER");
     }
 }

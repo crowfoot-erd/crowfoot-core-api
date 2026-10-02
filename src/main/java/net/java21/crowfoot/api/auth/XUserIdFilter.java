@@ -37,6 +37,9 @@ import java.io.IOException;
 public class XUserIdFilter extends OncePerRequestFilter {
 
     public static final String USER_ID_HEADER = "X-USER-ID";
+    /** 워크스페이스 액세스 토큰이 묶인 워크스페이스 — 이 헤더가 있으면 토큰으로 온 요청이다 */
+    public static final String TOKEN_WORKSPACE_HEADER = "X-TOKEN-WORKSPACE-ID";
+    public static final String ACCESS_TOKEN_HEADER = "X-ACCESS-TOKEN-ID";
 
     private final ObjectMapper objectMapper;
 
@@ -71,8 +74,28 @@ public class XUserIdFilter extends OncePerRequestFilter {
             writeUnauthorized(response);
             return;
         }
+        // 워크스페이스 액세스 토큰으로 온 요청(MCP) — 범위를 판정한다 (08-core/18-access-token.md Section 4)
+        Long tokenWorkspaceId = null;
+        Long tokenId = null;
+        String workspaceHeader = request.getHeader(TOKEN_WORKSPACE_HEADER);
+        if (workspaceHeader != null && !workspaceHeader.isBlank()) {
+            try {
+                tokenWorkspaceId = Long.parseLong(workspaceHeader.trim());
+                String tokenHeader = request.getHeader(ACCESS_TOKEN_HEADER);
+                tokenId = tokenHeader == null || tokenHeader.isBlank() ? null : Long.parseLong(tokenHeader.trim());
+            } catch (NumberFormatException ex) {
+                writeUnauthorized(response);
+                return;
+            }
+            TokenScope.Decision decision = TokenScope.decide(request.getMethod(), request.getRequestURI(), tokenWorkspaceId);
+            if (decision != TokenScope.Decision.ALLOW) {
+                writeError(response, decision == TokenScope.Decision.NOT_FOUND
+                        ? ErrorCode.WORKSPACE_NOT_FOUND : ErrorCode.PERMISSION_DENIED);
+                return;
+            }
+        }
         try {
-            CurrentUserHolder.set(new CurrentUser(userId));
+            CurrentUserHolder.set(new CurrentUser(userId, tokenWorkspaceId, tokenId));
             filterChain.doFilter(request, response);
         } finally {
             CurrentUserHolder.clear();
@@ -108,7 +131,10 @@ public class XUserIdFilter extends OncePerRequestFilter {
     }
 
     private void writeUnauthorized(HttpServletResponse response) throws IOException {
-        ErrorCode code = ErrorCode.AUTH_TOKEN_INVALID;
+        writeError(response, ErrorCode.AUTH_TOKEN_INVALID);
+    }
+
+    private void writeError(HttpServletResponse response, ErrorCode code) throws IOException {
         response.setStatus(code.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");

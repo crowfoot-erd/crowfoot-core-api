@@ -52,9 +52,13 @@ public class ConnectionService {
     @Transactional(readOnly = true)
     public java.util.List<ConnectionResponse> list(long userId, long workspaceId) {
         roleChecker.requireMember(userId, workspaceId);
+        // 매니지드 여부 — 워크스페이스의 발급 목록을 한 번 읽어 판정한다(커넥션마다 조회하지 않는다)
+        java.util.Set<Long> managedIds = managedDatabaseRepository.findByWorkspaceIdOrderByCreatedAtAscIdAsc(workspaceId).stream()
+                .map(net.java21.crowfoot.api.managed.domain.ManagedDatabase::getConnectionId)
+                .collect(java.util.stream.Collectors.toSet());
         return connectionRepository.findByWorkspaceIdOrderByCreatedAtAscIdAsc(workspaceId)
                 .stream()
-                .map(this::toResponse)
+                .map(connection -> toResponse(connection, managedIds.contains(connection.getId())))
                 .toList();
     }
 
@@ -68,6 +72,7 @@ public class ConnectionService {
                 workspaceId, request.name().trim(), request.dbmsType().trim(), request.host().trim(),
                 request.port(), request.databaseName().trim(), schemaName, request.username().trim(),
                 crypto.encrypt(request.password()), userId));
+        saved.setMcpApplyAllowed(Boolean.TRUE.equals(request.mcpApplyAllowed()));
         auditRecorder.record(userId, "CONNECTION_CREATED", "CONNECTION",
                 Long.toString(saved.getId()), Map.of(
                         "name", saved.getName(),
@@ -83,9 +88,10 @@ public class ConnectionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
         // 매니지드 발급 커넥션은 이름만 바꿀 수 있다 — 접속 정보를 고치면 발급 스키마와 정합이 깨진다
         if (managedDatabaseRepository.findByConnectionId(connectionId).isPresent()) {
+            // 매니지드는 설정 없이 MCP 반영이 허용이다 — 이 값을 보내면 형식 오류 (Section 2.1)
             boolean touchesCredential = body.has("dbmsType") || body.has("host") || body.has("port")
                     || body.has("databaseName") || body.has("schemaName")
-                    || body.has("username") || body.has("password");
+                    || body.has("username") || body.has("password") || body.has("mcpApplyAllowed");
             if (touchesCredential) {
                 throw new BusinessException(ErrorCode.INVALID_REQUEST,
                         "매니지드 발급 커넥션은 이름만 변경할 수 있습니다 — 정리는 철회로 해야 합니다");
@@ -150,8 +156,17 @@ public class ConnectionService {
             connection.setPassword(crypto.encrypt(password));
         }
 
+        Map<String, Object> detail = null;
+        if (body.has("mcpApplyAllowed") && body.get("mcpApplyAllowed").isBoolean()) {
+            boolean allowed = body.get("mcpApplyAllowed").asBoolean();
+            if (allowed != connection.isMcpApplyAllowed()) {
+                connection.setMcpApplyAllowed(allowed);
+                detail = Map.of("mcpApplyAllowed", allowed);
+            }
+        }
+
         auditRecorder.record(userId, "CONNECTION_UPDATED", "CONNECTION",
-                Long.toString(connection.getId()), null);
+                Long.toString(connection.getId()), detail);
         return toResponse(connection);
     }
 
@@ -228,6 +243,10 @@ public class ConnectionService {
     }
 
     private ConnectionResponse toResponse(DbConnection connection) {
+        return toResponse(connection, managedDatabaseRepository.findByConnectionId(connection.getId()).isPresent());
+    }
+
+    private ConnectionResponse toResponse(DbConnection connection, boolean managed) {
         User creator = userRepository.findById(connection.getCreatedBy()).orElse(null);
         UserRefResponse createdBy = creator == null
                 ? null
@@ -243,6 +262,8 @@ public class ConnectionService {
                 connection.getSchemaName(),
                 connection.getUsername(),
                 createdBy,
-                connection.getCreatedAt());
+                connection.getCreatedAt(),
+                managed,
+                connection.isMcpApplyAllowed());
     }
 }

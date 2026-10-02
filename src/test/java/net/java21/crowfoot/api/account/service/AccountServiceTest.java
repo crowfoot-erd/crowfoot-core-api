@@ -52,6 +52,8 @@ class AccountServiceTest {
     @Mock
     private RefreshTokenQueryRepository refreshTokenQueryRepository;
     @Mock
+    private net.java21.crowfoot.api.accesstoken.repository.WorkspaceAccessTokenRepository accessTokenRepository;
+    @Mock
     private WorkspaceMembershipQueryRepository workspaceMembershipQueryRepository;
     @Mock
     private TeamQueryRepository teamQueryRepository;

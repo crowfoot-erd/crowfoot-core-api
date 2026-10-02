@@ -93,7 +93,7 @@ class ConnectionServiceTest {
         given(databaseTypeRepository.findByCodeAndIsActiveTrue("oracle")).willReturn(Optional.empty());
 
         assertThatThrownBy(() -> connectionService.create(2L, 7L,
-                new CreateConnectionRequest("x", "oracle", "h", 1521, "orcl", null, "u", "p")))
+                new CreateConnectionRequest("x", "oracle", "h", 1521, "orcl", null, "u", "p", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_DBMS_TYPE);
@@ -112,7 +112,7 @@ class ConnectionServiceTest {
 
         ConnectionResponse response = connectionService.create(2L, 7L,
                 new CreateConnectionRequest("개발 PG", "postgresql", "s3.java21.net", 8000,
-                        "crowfoot", "crowfoot_sample", "crowfoot", "crowfoot123!"));
+                        "crowfoot", "crowfoot_sample", "crowfoot", "crowfoot123!", null));
 
         ArgumentCaptor<DbConnection> captor = ArgumentCaptor.forClass(DbConnection.class);
         verify(connectionRepository).save(captor.capture());
@@ -137,7 +137,7 @@ class ConnectionServiceTest {
 
         assertThatThrownBy(() -> connectionService.create(2L, 7L,
                 new CreateConnectionRequest("개발 MySQL", "mysql", "db.dev", 3306,
-                        "orders", "crowfoot_sample", "crowfoot", "pw")))
+                        "orders", "crowfoot_sample", "crowfoot", "pw", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -151,7 +151,7 @@ class ConnectionServiceTest {
 
         assertThatThrownBy(() -> connectionService.create(2L, 7L,
                 new CreateConnectionRequest("개발 PG", "postgresql", "s3.java21.net", 8000,
-                        "crowfoot", "bad schema; --", "crowfoot", "pw")))
+                        "crowfoot", "bad schema; --", "crowfoot", "pw", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);

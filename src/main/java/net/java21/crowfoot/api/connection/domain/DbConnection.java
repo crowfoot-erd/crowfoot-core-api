@@ -52,6 +52,9 @@ public class DbConnection {
     /** AES-256-GCM 암호문(iv ‖ ciphertext‖tag) — ConnectionCrypto로만 해석된다 */
     private byte[] password;
 
+    /** MCP로 온 요청의 배포·변경 반영 허용 — 기본 꺼짐 (08-core/06-connection.md Section 2.1) */
+    private boolean mcpApplyAllowed;
+
     private Long createdBy;
 
     @CreationTimestamp

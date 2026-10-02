@@ -119,6 +119,7 @@ public class ManagedDatabaseService {
             limitSummary.add(new ManagedLimitSummary(
                     Long.toString(instance.getId()),
                     instance.getDisplayName(),
+                    instance.getDbmsType(),
                     instance.isActive(),
                     limit,
                     used,

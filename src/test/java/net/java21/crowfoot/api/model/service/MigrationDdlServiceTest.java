@@ -100,7 +100,8 @@ class MigrationDdlServiceTest {
     @BeforeEach
     void setUp() {
         service = new MigrationDdlService(modelRepository, modelVersionRepository, connectionRepository,
-                schemaIntrospectionService, roleChecker, auditRecorder, MAPPER, statementExecutor);
+                schemaIntrospectionService, roleChecker, auditRecorder, MAPPER, statementExecutor,
+                new net.java21.crowfoot.api.connection.service.McpApplyGuard(org.mockito.Mockito.mock(net.java21.crowfoot.api.managed.repository.ManagedDatabaseRepository.class)));
     }
 
     private Model model(String databaseType, String content) {

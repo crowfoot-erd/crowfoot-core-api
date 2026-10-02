@@ -58,6 +58,12 @@ public enum ErrorCode {
     MODEL_VERSION_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_VERSION_NOT_FOUND", "버전 기록을 찾을 수 없습니다"),
     SQL_IMPORT_NO_TABLES(HttpStatus.BAD_REQUEST, "SQL_IMPORT_NO_TABLES", "CREATE TABLE 문을 찾을 수 없습니다"),
     MODEL_ALREADY_CONNECTED(HttpStatus.CONFLICT, "MODEL_ALREADY_CONNECTED", "이미 커넥션이 연결된 문서입니다"),
+    // 워크스페이스 액세스 토큰 (08-core/18-access-token.md Section 6)
+    ACCESS_TOKEN_NOT_FOUND(HttpStatus.NOT_FOUND, "ACCESS_TOKEN_NOT_FOUND", "토큰을 찾을 수 없습니다"),
+    ACCESS_TOKEN_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "ACCESS_TOKEN_LIMIT_EXCEEDED", "토큰은 한 사람이 워크스페이스당 5개까지 발급할 수 있습니다"),
+    // 문서 편집 API (08-core/17-model-edit.md Section 5.1)
+    CONTENT_UNREADABLE(HttpStatus.CONFLICT, "CONTENT_UNREADABLE", "문서 본체를 읽을 수 없어 고칠 수 없습니다"),
+    REQUIREMENT_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "REQUIREMENT_LIMIT_EXCEEDED", "요구사항은 문서당 500개까지 둘 수 있습니다"),
 
     // Share (08-core/02-model.md Section 1.10)
     SHARE_NOT_FOUND(HttpStatus.NOT_FOUND, "SHARE_NOT_FOUND", "공유 링크를 찾을 수 없습니다"),

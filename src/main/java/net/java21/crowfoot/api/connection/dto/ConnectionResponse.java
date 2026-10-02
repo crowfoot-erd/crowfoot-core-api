@@ -19,6 +19,10 @@ public record ConnectionResponse(
         String schemaName,
         String username,
         UserRefResponse createdBy,
-        Instant createdAt
+        Instant createdAt,
+        /** 매니지드 데이터베이스가 등록한 커넥션인지 */
+        boolean managed,
+        /** MCP로 온 요청의 배포·변경 반영 허용 (Section 2.1) — 매니지드는 이 값과 무관하게 허용이다 */
+        boolean mcpApplyAllowed
 ) {
 }

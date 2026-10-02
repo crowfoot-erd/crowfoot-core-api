@@ -5,6 +5,7 @@ import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.domain.UserIdentity;
 import net.java21.crowfoot.api.account.dto.MeResponse;
 import net.java21.crowfoot.api.account.repository.UserIdentityQueryRepository;
+import net.java21.crowfoot.api.accesstoken.repository.WorkspaceAccessTokenRepository;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.repository.RefreshTokenQueryRepository;
 import net.java21.crowfoot.api.client.AuthBlacklistClient;
@@ -33,6 +34,7 @@ public class AccountService {
     private final UserRepository userRepository;
     private final UserIdentityQueryRepository userIdentityQueryRepository;
     private final RefreshTokenQueryRepository refreshTokenQueryRepository;
+    private final WorkspaceAccessTokenRepository accessTokenRepository;
     private final WorkspaceMembershipQueryRepository workspaceMembershipQueryRepository;
     private final TeamQueryRepository teamQueryRepository;
     private final AuthBlacklistClient authBlacklistClient;
@@ -96,6 +98,8 @@ public class AccountService {
             authBlacklistClient.registerSessionBlacklist(sid.toString());
         }
         refreshTokenQueryRepository.revokeAllByUserId(userId, clock.instant());
+        // 워크스페이스 액세스 토큰도 전부 폐기한다 (08-core/18-access-token.md Section 5)
+        accessTokenRepository.revokeAllByUserId(userId, clock.instant());
         user.setWithdrawnAt(clock.instant());
         auditRecorder.record(userId, "USER_WITHDRAWN", "USER", Long.toString(userId),
                 Map.of("revokedSessions", activeSessionIds.size()));

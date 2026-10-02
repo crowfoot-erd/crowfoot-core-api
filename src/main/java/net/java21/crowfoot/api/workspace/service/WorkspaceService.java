@@ -41,8 +41,8 @@ public class WorkspaceService {
 
     @Transactional(readOnly = true)
     public WorkspaceResponse get(long userId, long workspaceId) {
-        roleChecker.requireMember(userId, workspaceId);
-        return toResponse(requireWorkspace(workspaceId));
+        String role = roleChecker.requireMember(userId, workspaceId).code();
+        return toResponse(requireWorkspace(workspaceId), role);
     }
 
     @Transactional
@@ -53,7 +53,7 @@ public class WorkspaceService {
                 workspace.getId(), GranteeType.USER, userId, null, RoleCode.OWNER, userId));
         auditRecorder.record(userId, "WORKSPACE_CREATED", "WORKSPACE",
                 Long.toString(workspace.getId()), Map.of("name", workspace.getName()));
-        return toResponse(workspace);
+        return toResponse(workspace, "OWNER");
     }
 
     /**
@@ -77,7 +77,7 @@ public class WorkspaceService {
         }
         auditRecorder.record(userId, "WORKSPACE_UPDATED", "WORKSPACE",
                 Long.toString(workspaceId), null);
-        return toResponse(workspace);
+        return toResponse(workspace, "OWNER");
     }
 
     /** 삭제(Owner만) — 멤버십 전량 물리 DELETE 후 Workspace 물리 삭제. models CASCADE는 DB가 처리 */
@@ -96,7 +96,7 @@ public class WorkspaceService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.WORKSPACE_NOT_FOUND));
     }
 
-    private WorkspaceResponse toResponse(Workspace workspace) {
+    private WorkspaceResponse toResponse(Workspace workspace, String myRole) {
         User creator = userRepository.findById(workspace.getCreatedBy()).orElse(null);
         UserRefResponse createdBy = creator == null
                 ? null
@@ -108,6 +108,7 @@ public class WorkspaceService {
                 workspace.isDefault(),
                 (int) workspaceMembershipQueryRepository.countDistinctMembers(workspace.getId()),
                 createdBy,
-                workspace.getCreatedAt());
+                workspace.getCreatedAt(),
+                myRole);
     }
 }

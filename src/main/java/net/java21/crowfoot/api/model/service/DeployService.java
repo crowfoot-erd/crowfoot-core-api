@@ -43,6 +43,7 @@ public class DeployService {
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
     private final DdlStatementExecutor statementExecutor;
+    private final net.java21.crowfoot.api.connection.service.McpApplyGuard mcpApplyGuard;
 
     /** 배포(Editor 이상) — DDL 생성(1.7) 재사용, 결과는 문장별 성공/실패 */
     public ModelDeployResponse deploy(long userId, long workspaceId, long modelId, long connectionId) {
@@ -52,6 +53,8 @@ public class DeployService {
         DbConnection connection = connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
 
+        // 토큰으로 온 요청(MCP)은 허용된 커넥션에만 실행한다 (08-core/06-connection.md Section 2.1)
+        mcpApplyGuard.requireAllowed(connection);
         // 문서 방언과 커넥션 DBMS가 다르면 DDL이 그 데이터베이스에 맞지 않는다
         if (!model.getDatabaseType().trim().equalsIgnoreCase(connection.getDbmsType().trim())) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST,

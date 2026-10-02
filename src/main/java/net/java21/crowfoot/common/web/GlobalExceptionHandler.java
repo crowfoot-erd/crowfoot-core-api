@@ -8,6 +8,7 @@ import net.java21.crowfoot.common.i18n.ServerMessages;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import net.java21.crowfoot.api.model.edit.EditValidationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -34,6 +35,13 @@ public class GlobalExceptionHandler {
         ErrorCode code = ex.getErrorCode();
         return ResponseEntity.status(code.getStatus())
                 .body(ErrorResponse.of(code.getCode(), resolveMessage(ex)));
+    }
+
+    /** 문서 편집 API의 입력 검증 실패 — 항목별 사유를 errors로 돌려준다 (08-core/17-model-edit.md Section 3) */
+    @ExceptionHandler(EditValidationException.class)
+    public ResponseEntity<ErrorResponse> handleEditValidation(EditValidationException ex) {
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of(ErrorCode.INVALID_REQUEST.getCode(), codeMessage(ErrorCode.INVALID_REQUEST), ex.errors()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

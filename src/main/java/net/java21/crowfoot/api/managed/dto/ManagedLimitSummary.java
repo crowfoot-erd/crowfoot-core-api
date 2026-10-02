@@ -8,6 +8,8 @@ package net.java21.crowfoot.api.managed.dto;
 public record ManagedLimitSummary(
         String instanceId,
         String displayName,
+        /** 인스턴스의 DBMS 종류 — 문서의 대상 DBMS와 같은 인스턴스를 고를 때 쓴다 */
+        String dbmsType,
         boolean isActive,
         int limit,
         long used,

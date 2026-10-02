@@ -51,6 +51,7 @@ public class MigrationDdlService {
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
     private final DdlStatementExecutor statementExecutor;
+    private final net.java21.crowfoot.api.connection.service.McpApplyGuard mcpApplyGuard;
 
     /** (a) 버전 A→B 마이그레이션 DDL — Viewer 이상. 스냅샷은 불변이므로 읽기만 한다 */
     public MigrationDdlResponse generateVersionMigration(long userId, long workspaceId, long modelId,
@@ -93,6 +94,8 @@ public class MigrationDdlService {
         roleChecker.requireEditor(userId, workspaceId);
         Model model = requireModel(modelId, workspaceId);
         DbConnection connection = requireConnection(connectionId, workspaceId);
+        // 토큰으로 온 요청(MCP)은 허용된 커넥션에만 실행한다 (08-core/06-connection.md Section 2.1)
+        mcpApplyGuard.requireAllowed(connection);
         MigrationDdlGenerator.Result result = connectionDiff(model, connection);
 
         // 이미 동일(0문장)이면 접속 없이 빈 리포트 — introspection이 도달성을 증명했다(2차 접속 불필요)
