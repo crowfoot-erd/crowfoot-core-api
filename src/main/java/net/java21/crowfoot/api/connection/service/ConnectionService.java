@@ -39,6 +39,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ConnectionService {
 
+    private final ConnectionEndpointResolver endpoints;
     private final DbConnectionRepository connectionRepository;
     private final DatabaseTypeRepository databaseTypeRepository;
     private final UserRepository userRepository;
@@ -199,7 +200,7 @@ public class ConnectionService {
             throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
         }
         long start = System.nanoTime();
-        try (Connection jdbc = introspectors.open(introspector, connection.getHost(), connection.getPort(),
+        try (Connection jdbc = introspectors.open(introspector, endpoints.resolve(connection).host(), endpoints.resolve(connection).port(),
                 connection.getDatabaseName(), connection.getUsername(), crypto.decrypt(connection.getPassword()));
              Statement statement = jdbc.createStatement()) {
             // 스키마 지정 커넥션은 존재 검증까지 마쳐야 진짜 연결 가능 — 오타를 테스트 단계에서 잡는다

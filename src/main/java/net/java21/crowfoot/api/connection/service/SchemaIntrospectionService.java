@@ -37,6 +37,7 @@ public class SchemaIntrospectionService {
     /** 리버스(3.6)와 같은 상한 — 비교 원천도 문서와 같은 크기 한계를 둔다 */
     private static final int MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
+    private final ConnectionEndpointResolver endpoints;
     private final DbConnectionRepository connectionRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
@@ -72,7 +73,7 @@ public class SchemaIntrospectionService {
         }
 
         IntrospectedSchema schema;
-        try (Connection jdbc = introspectors.open(introspector, connection.getHost(), connection.getPort(),
+        try (Connection jdbc = introspectors.open(introspector, endpoints.resolve(connection).host(), endpoints.resolve(connection).port(),
                 connection.getDatabaseName(), connection.getUsername(), crypto.decrypt(connection.getPassword()))) {
             schema = introspector.introspect(jdbc, connection.getSchemaName());
         } catch (SQLException e) {

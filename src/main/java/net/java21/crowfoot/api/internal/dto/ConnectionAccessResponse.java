@@ -23,15 +23,16 @@ public record ConnectionAccessResponse(
         String password
 ) {
 
-    public static ConnectionAccessResponse of(DbConnection connection, String role, String plainPassword) {
+    /** @param host 서버가 접속할 때 쓰는 주소 — 매니지드 커넥션은 내부 주소다(07-managed-database.md Section 3.9) */
+    public static ConnectionAccessResponse of(DbConnection connection, String role, String plainPassword, String host, int port) {
         return new ConnectionAccessResponse(
                 Long.toString(connection.getId()),
                 connection.getName(),
                 Long.toString(connection.getWorkspaceId()),
                 role,
                 connection.getDbmsType(),
-                connection.getHost(),
-                connection.getPort(),
+                host,
+                port,
                 connection.getDatabaseName(),
                 connection.getSchemaName(),
                 connection.getUsername(),

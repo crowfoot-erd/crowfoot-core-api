@@ -94,7 +94,7 @@ class ReverseEngineeringServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ReverseEngineeringService(connectionRepository, modelRepository, modelDiagramRepository,
+        service = new ReverseEngineeringService(net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver.asWritten(), connectionRepository, modelRepository, modelDiagramRepository,
                 modelVersionRepository, modelVersionPruner, userRepository, roleChecker, auditRecorder,
                 new ConnectionCrypto(DEV_KEY), introspectors, new ReverseContentAssembler());
     }

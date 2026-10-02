@@ -1,6 +1,8 @@
 package net.java21.crowfoot.api.internal.service;
 
 import lombok.RequiredArgsConstructor;
+import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
+import net.java21.crowfoot.api.managed.repository.ManagedDatabaseRepository;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
 import net.java21.crowfoot.api.connection.domain.DbConnection;
 import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
@@ -30,13 +32,22 @@ public class InternalConnectionAccessService {
     private final RoleChecker roleChecker;
     private final DbConnectionRepository connectionRepository;
     private final ConnectionCrypto crypto;
+    private final ManagedDatabaseRepository managedDatabaseRepository;
+    private final ConnectionEndpointResolver endpoints;
 
     @Transactional(readOnly = true)
-    public ConnectionAccessResponse access(long connectionId, long userId, long workspaceId) {
+    public ConnectionAccessResponse access(long connectionId, long userId, long workspaceId, boolean mcpWrite) {
         roleChecker.requireMember(userId, workspaceId);                                   // ① 404 WORKSPACE_NOT_FOUND
         DbConnection connection = connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND)); // ② 404
         EffectiveRole role = roleChecker.requireEditor(userId, workspaceId);              // ③ 403 PERMISSION_DENIED
-        return ConnectionAccessResponse.of(connection, role.code(), crypto.decrypt(connection.getPassword()));
+        // ④ MCP로 온 쓰기는 허용한 커넥션과 매니지드 커넥션에만 (06-connection.md Section 2.1)
+        if (mcpWrite && !connection.isMcpApplyAllowed()
+                && managedDatabaseRepository.findByConnectionId(connection.getId()).isEmpty()) {
+            throw BusinessException.of(ErrorCode.PERMISSION_DENIED, "detail.connection.mcp-apply-not-allowed");
+        }
+        ConnectionEndpointResolver.Endpoint endpoint = endpoints.resolve(connection);
+        return ConnectionAccessResponse.of(connection, role.code(), crypto.decrypt(connection.getPassword()),
+                endpoint.host(), endpoint.port());
     }
 }

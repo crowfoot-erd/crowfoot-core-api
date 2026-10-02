@@ -45,8 +45,84 @@ class InternalConnectionAccessServiceTest {
     @Mock
     private ConnectionCrypto crypto;
 
-    @InjectMocks
+    @Mock
+    private net.java21.crowfoot.api.managed.repository.ManagedDatabaseRepository managedDatabaseRepository;
+    @Mock
+    private net.java21.crowfoot.api.managed.repository.ManagedInstanceRepository managedInstanceRepository;
+
     private InternalConnectionAccessService service;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        service = service("public");
+    }
+
+    private InternalConnectionAccessService service(String serverAddress) {
+        return new InternalConnectionAccessService(roleChecker, connectionRepository, crypto, managedDatabaseRepository,
+                new net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver(
+                        managedDatabaseRepository, managedInstanceRepository, serverAddress));
+    }
+
+    private void passEditor() {
+        given(roleChecker.requireMember(USER, WORKSPACE)).willReturn(new EffectiveRole("EDITOR", 50));
+        given(connectionRepository.findByIdAndWorkspaceId(CONNECTION, WORKSPACE)).willReturn(Optional.of(connection()));
+        given(roleChecker.requireEditor(USER, WORKSPACE)).willReturn(new EffectiveRole("EDITOR", 50));
+    }
+
+    private void managed() {
+        net.java21.crowfoot.api.managed.domain.ManagedDatabase database =
+                new net.java21.crowfoot.api.managed.domain.ManagedDatabase(7L, USER, WORKSPACE, "cf_u2_d1", CONNECTION);
+        given(managedDatabaseRepository.findByConnectionId(CONNECTION)).willReturn(Optional.of(database));
+        org.mockito.Mockito.lenient().when(managedInstanceRepository.findById(7L)).thenReturn(Optional.of(
+                new net.java21.crowfoot.api.managed.domain.ManagedInstance("MySQL", "mysql", "10.0.0.14", "db.public.example.com",
+                        13306, null, "root", CIPHER, true, USER)));
+    }
+
+    @Test
+    @DisplayName("매니지드 커넥션 — 운영 설정(internal)에서는 인스턴스의 내부 주소를, 그 밖에는 커넥션에 적힌 주소를 돌려준다")
+    void managedEndpointByEnvironment() {
+        passEditor();
+        managed();
+        given(crypto.decrypt(CIPHER)).willReturn("plain-pw");
+
+        ConnectionAccessResponse production = service("internal").access(CONNECTION, USER, WORKSPACE, false);
+        assertThat(production.host()).isEqualTo("10.0.0.14");
+        assertThat(production.port()).isEqualTo(13306);
+
+        ConnectionAccessResponse local = service("public").access(CONNECTION, USER, WORKSPACE, false);
+        assertThat(local.host()).isEqualTo("db.dev.example.com");
+        assertThat(local.port()).isEqualTo(3306);
+    }
+
+    @Test
+    @DisplayName("사용자가 등록한 커넥션 — 운영 설정에서도 적힌 주소를 그대로 쓴다")
+    void userConnectionKeepsWrittenAddress() {
+        passEditor();
+        given(managedDatabaseRepository.findByConnectionId(CONNECTION)).willReturn(Optional.empty());
+        given(crypto.decrypt(CIPHER)).willReturn("plain-pw");
+
+        assertThat(service("internal").access(CONNECTION, USER, WORKSPACE, false).host()).isEqualTo("db.dev.example.com");
+    }
+
+    @Test
+    @DisplayName("MCP 쓰기 — 허용하지 않은 커넥션은 403, 허용한 커넥션과 매니지드 커넥션은 통과한다")
+    void mcpWriteNeedsAllowedConnection() {
+        passEditor();
+        given(managedDatabaseRepository.findByConnectionId(CONNECTION)).willReturn(Optional.empty());
+        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE, true))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.PERMISSION_DENIED));
+
+        DbConnection allowed = connection();
+        allowed.setMcpApplyAllowed(true);
+        given(connectionRepository.findByIdAndWorkspaceId(CONNECTION, WORKSPACE)).willReturn(Optional.of(allowed));
+        given(crypto.decrypt(CIPHER)).willReturn("plain-pw");
+        assertThat(service.access(CONNECTION, USER, WORKSPACE, true).connectionId()).isEqualTo("302");
+
+        given(connectionRepository.findByIdAndWorkspaceId(CONNECTION, WORKSPACE)).willReturn(Optional.of(connection()));
+        managed();
+        assertThat(service.access(CONNECTION, USER, WORKSPACE, true).connectionId()).isEqualTo("302");
+    }
 
     private static DbConnection connection() {
         DbConnection connection = new DbConnection(WORKSPACE, "개발 MySQL", "mysql", "db.dev.example.com", 3306,
@@ -63,7 +139,7 @@ class InternalConnectionAccessServiceTest {
         given(roleChecker.requireEditor(USER, WORKSPACE)).willReturn(new EffectiveRole("EDITOR", 50));
         given(crypto.decrypt(CIPHER)).willReturn("plain-pw");
 
-        ConnectionAccessResponse response = service.access(CONNECTION, USER, WORKSPACE);
+        ConnectionAccessResponse response = service.access(CONNECTION, USER, WORKSPACE, false);
 
         assertThat(response.connectionId()).isEqualTo("302");
         assertThat(response.workspaceId()).isEqualTo("34");
@@ -84,7 +160,7 @@ class InternalConnectionAccessServiceTest {
     void hidesWorkspaceFromNonMember() {
         given(roleChecker.requireMember(USER, WORKSPACE)).willThrow(new BusinessException(ErrorCode.WORKSPACE_NOT_FOUND));
 
-        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE))
+        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE, false))
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.WORKSPACE_NOT_FOUND));
         verify(connectionRepository, never()).findByIdAndWorkspaceId(CONNECTION, WORKSPACE);
@@ -97,7 +173,7 @@ class InternalConnectionAccessServiceTest {
         given(roleChecker.requireMember(USER, WORKSPACE)).willReturn(new EffectiveRole("OWNER", 100));
         given(connectionRepository.findByIdAndWorkspaceId(CONNECTION, WORKSPACE)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE))
+        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE, false))
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.CONNECTION_NOT_FOUND));
         verify(crypto, never()).decrypt(any());
@@ -110,7 +186,7 @@ class InternalConnectionAccessServiceTest {
         given(connectionRepository.findByIdAndWorkspaceId(CONNECTION, WORKSPACE)).willReturn(Optional.of(connection()));
         given(roleChecker.requireEditor(USER, WORKSPACE)).willThrow(new BusinessException(ErrorCode.PERMISSION_DENIED));
 
-        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE))
+        assertThatThrownBy(() -> service.access(CONNECTION, USER, WORKSPACE, false))
                 .isInstanceOfSatisfying(BusinessException.class,
                         ex -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.PERMISSION_DENIED));
         verify(crypto, never()).decrypt(any());

@@ -72,7 +72,7 @@ class SchemaIntrospectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SchemaIntrospectionService(connectionRepository, roleChecker, auditRecorder,
+        service = new SchemaIntrospectionService(net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver.asWritten(), connectionRepository, roleChecker, auditRecorder,
                 new ConnectionCrypto(DEV_KEY), introspectors, new ReverseContentAssembler());
     }
 

@@ -68,7 +68,7 @@ class ConnectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        connectionService = new ConnectionService(connectionRepository, databaseTypeRepository, userRepository,
+        connectionService = new ConnectionService(net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver.asWritten(), connectionRepository, databaseTypeRepository, userRepository,
                 roleChecker, auditRecorder, new ConnectionCrypto(TestKeys.DEV_KEY), introspectors,
                 managedDatabaseRepository);
     }

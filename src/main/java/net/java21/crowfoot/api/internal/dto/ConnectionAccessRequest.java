@@ -7,9 +7,11 @@ import jakarta.validation.constraints.NotBlank;
  *
  * @param userId      요청한 사용자 — Gateway가 붙인 X-USER-ID 값
  * @param workspaceId 요청 경로의 워크스페이스
+ * @param mcpWrite    MCP로 온 쓰기 요청(샘플 데이터 넣기)이면 true — MCP 반영을 허용한 커넥션에만 통과한다
  */
 public record ConnectionAccessRequest(
         @NotBlank String userId,
-        @NotBlank String workspaceId
+        @NotBlank String workspaceId,
+        Boolean mcpWrite
 ) {
 }

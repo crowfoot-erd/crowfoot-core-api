@@ -52,6 +52,7 @@ public class ReverseEngineeringService {
     private static final String MAIN_DIAGRAM_NAME = "main";
     private static final int MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
+    private final ConnectionEndpointResolver endpoints;
     private final DbConnectionRepository connectionRepository;
     private final ModelRepository modelRepository;
     private final ModelDiagramRepository modelDiagramRepository;
@@ -81,7 +82,7 @@ public class ReverseEngineeringService {
         }
 
         IntrospectedSchema schema;
-        try (Connection jdbc = introspectors.open(introspector, connection.getHost(), connection.getPort(),
+        try (Connection jdbc = introspectors.open(introspector, endpoints.resolve(connection).host(), endpoints.resolve(connection).port(),
                 connection.getDatabaseName(), connection.getUsername(), crypto.decrypt(connection.getPassword()))) {
             schema = introspector.introspect(jdbc, connection.getSchemaName());
         } catch (SQLException e) {

@@ -2,6 +2,7 @@ package net.java21.crowfoot.api.model.service;
 
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
+import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
 import net.java21.crowfoot.api.connection.domain.DbConnection;
 import net.java21.crowfoot.api.connection.introspect.Introspectors;
 import net.java21.crowfoot.api.connection.introspect.JdbcDiagnostics;
@@ -29,6 +30,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DdlStatementExecutor {
 
+    private final ConnectionEndpointResolver endpoints;
     private final Introspectors introspectors;
     private final ConnectionCrypto crypto;
 
@@ -40,7 +42,7 @@ public class DdlStatementExecutor {
         }
 
         List<ModelDeployResponse.Statement> results = new ArrayList<>();
-        try (Connection jdbc = introspectors.open(introspector, connection.getHost(), connection.getPort(),
+        try (Connection jdbc = introspectors.open(introspector, endpoints.resolve(connection).host(), endpoints.resolve(connection).port(),
                 connection.getDatabaseName(), connection.getUsername(), crypto.decrypt(connection.getPassword()))) {
             // 스키마 지정 커넥션(PG)은 세션 search_path로 대상을 고정한다 — 없는 스키마면 여기서 실패한다
             introspector.applySessionSchema(jdbc, connection.getSchemaName());

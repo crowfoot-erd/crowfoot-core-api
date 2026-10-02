@@ -28,7 +28,8 @@ public class InternalConnectionAccessController {
     public ApiResponse<ConnectionAccessResponse> access(@PathVariable("connectionId") long connectionId,
                                                         @Valid @RequestBody ConnectionAccessRequest request) {
         return ApiResponse.success(accessService.access(
-                connectionId, parseId(request.userId()), parseId(request.workspaceId())));
+                connectionId, parseId(request.userId()), parseId(request.workspaceId()),
+                Boolean.TRUE.equals(request.mcpWrite())));
     }
 
     /** ID는 문자열로 오간다(api-design.md) — 숫자가 아니면 형식 오류 */

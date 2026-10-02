@@ -78,7 +78,7 @@ class DeployServiceTest {
         // 실행 골격은 실물 DdlStatementExecutor를 쓴다 — 문장별 루프(부분 실패·접속 분류) 커버리지 유지
         deployService = new DeployService(modelRepository, connectionRepository, roleChecker,
                 auditRecorder, new ObjectMapper(),
-                new DdlStatementExecutor(introspectors, new ConnectionCrypto(TestKeys.DEV_KEY)),
+                new DdlStatementExecutor(net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver.asWritten(), introspectors, new ConnectionCrypto(TestKeys.DEV_KEY)),
                 new net.java21.crowfoot.api.connection.service.McpApplyGuard(org.mockito.Mockito.mock(net.java21.crowfoot.api.managed.repository.ManagedDatabaseRepository.class)));
     }
 

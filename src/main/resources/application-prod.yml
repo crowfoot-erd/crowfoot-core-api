@@ -24,6 +24,10 @@ crowfoot:
   auth:
     # 인증 서버 내부 엔드포인트(블랙리스트 등록) — k8s Service가 80으로 서빙하므로 포트 불필요
     base-url: ${CROWFOOT_AUTH_URI:http://crowfoot-auth}
+  managed:
+    # 운영 클러스터에서는 매니지드 DB의 노출 주소(s3·s4.java21.net)로 가는 길이 없다 — 인스턴스의 내부 주소로 접속한다
+    # (07-managed-database.md Section 3.9). 다른 환경은 기본값(public — 커넥션에 적힌 주소)이다
+    server-address: ${CROWFOOT_MANAGED_SERVER_ADDRESS:internal}
 
 logging:
   level:
