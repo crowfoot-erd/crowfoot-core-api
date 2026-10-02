@@ -13,6 +13,8 @@ public record TermResponse(
         String term,
         String label,
         Map<String, String> types,
+        /** 가리키는 도메인 타입 id(BIGINT 문자열) — 없으면 null (Section 4.6) */
+        String domainTypeId,
         Instant updatedAt
 ) {
 }

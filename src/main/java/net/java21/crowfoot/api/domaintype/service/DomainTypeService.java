@@ -6,6 +6,7 @@ import net.java21.crowfoot.api.domaintype.domain.WorkspaceDomainType;
 import net.java21.crowfoot.api.domaintype.dto.DomainTypeRequest;
 import net.java21.crowfoot.api.domaintype.dto.DomainTypeResponse;
 import net.java21.crowfoot.api.domaintype.repository.WorkspaceDomainTypeRepository;
+import net.java21.crowfoot.api.term.repository.WorkspaceTermRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -31,6 +32,7 @@ public class DomainTypeService {
     static final int MAX_DOMAIN_TYPES_PER_WORKSPACE = 200;
 
     private final WorkspaceDomainTypeRepository domainTypeRepository;
+    private final WorkspaceTermRepository termRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
 
@@ -104,6 +106,8 @@ public class DomainTypeService {
     public void delete(long userId, long workspaceId, long domainTypeId) {
         roleChecker.requireEditor(userId, workspaceId);
         WorkspaceDomainType entity = find(workspaceId, domainTypeId);
+        // 이것을 가리키던 사전 용어는 연결만 푼다(08-core/01-workspace.md Section 4.6) — DB의 ON DELETE SET NULL과 같은 결과
+        termRepository.clearDomainType(workspaceId, domainTypeId);
         domainTypeRepository.delete(entity);
         auditRecorder.record(userId, "WORKSPACE_DOMAIN_TYPE_DELETED", "WORKSPACE",
                 Long.toString(workspaceId), Map.of("name", entity.getName()));

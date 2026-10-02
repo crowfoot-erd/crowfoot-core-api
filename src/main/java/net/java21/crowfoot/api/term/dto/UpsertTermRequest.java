@@ -1,6 +1,7 @@
 package net.java21.crowfoot.api.term.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.Map;
@@ -14,6 +15,8 @@ import java.util.Map;
 public record UpsertTermRequest(
         @NotBlank @Size(max = 100) String term,
         @NotBlank @Size(max = 100) String label,
-        Map<String, String> types
+        Map<String, String> types,
+        /** 가리킬 도메인 타입 id — 같은 워크스페이스의 것이어야 한다. null·생략은 연결을 푼다 (Section 4.6) */
+        @Pattern(regexp = "\\d{1,18}") String domainTypeId
 ) {
 }

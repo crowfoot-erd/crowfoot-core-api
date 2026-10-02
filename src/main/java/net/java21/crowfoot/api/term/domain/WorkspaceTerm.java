@@ -47,6 +47,9 @@ public class WorkspaceTerm {
     @Column(name = "term_types")
     private String termTypes;
 
+    /** 이 용어가 가리키는 도메인 타입 — 타입의 표준 (08-core/01-workspace.md Section 4.6). 없으면 null */
+    private Long domainTypeId;
+
     private Long createdBy;
 
     @CreationTimestamp

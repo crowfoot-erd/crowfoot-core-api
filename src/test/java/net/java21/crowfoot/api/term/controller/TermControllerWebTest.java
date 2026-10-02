@@ -37,8 +37,8 @@ class TermControllerWebTest {
     @DisplayName("목록은 200 — 페이징 메타 없는 목록 형식을 응답한다(DBMS별 types 포함)")
     void listReturnsTerms() throws Exception {
         given(termService.list(eq(7L), eq(77L))).willReturn(List.of(
-                new TermResponse("11", "77", "order", "주문", Map.of("mysql", "DECIMAL(15,2)"), Instant.parse("2026-09-23T00:00:00Z")),
-                new TermResponse("12", "77", "user", "사용자", null, Instant.parse("2026-09-23T00:00:00Z"))));
+                new TermResponse("11", "77", "order", "주문", Map.of("mysql", "DECIMAL(15,2)"), null, Instant.parse("2026-09-23T00:00:00Z")),
+                new TermResponse("12", "77", "user", "사용자", null, null, Instant.parse("2026-09-23T00:00:00Z"))));
 
         mockMvc.perform(get("/core/workspaces/77/terms")
                         .header("X-USER-ID", "7"))
@@ -57,8 +57,8 @@ class TermControllerWebTest {
     @DisplayName("upsert는 항상 200 — 신규·수정 구분이 없다(자연키), DBMS별 types도 함께 받는다")
     void upsertReturns200() throws Exception {
         given(termService.upsert(eq(7L), eq(77L),
-                        eq(new UpsertTermRequest("user", "사용자", Map.of("mysql", "VARCHAR(100)")))))
-                .willReturn(new TermResponse("11", "77", "user", "사용자", Map.of("mysql", "VARCHAR(100)"), Instant.parse("2026-09-23T00:00:00Z")));
+                        eq(new UpsertTermRequest("user", "사용자", Map.of("mysql", "VARCHAR(100)"), null))))
+                .willReturn(new TermResponse("11", "77", "user", "사용자", Map.of("mysql", "VARCHAR(100)"), null, Instant.parse("2026-09-23T00:00:00Z")));
 
         mockMvc.perform(post("/core/workspaces/77/terms")
                         .header("X-USER-ID", "7")

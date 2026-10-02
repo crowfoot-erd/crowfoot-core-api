@@ -5,6 +5,7 @@ import net.java21.crowfoot.api.domaintype.domain.WorkspaceDomainType;
 import net.java21.crowfoot.api.domaintype.dto.DomainTypeRequest;
 import net.java21.crowfoot.api.domaintype.dto.DomainTypeResponse;
 import net.java21.crowfoot.api.domaintype.repository.WorkspaceDomainTypeRepository;
+import net.java21.crowfoot.api.term.repository.WorkspaceTermRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
@@ -41,6 +42,8 @@ class DomainTypeServiceTest {
     @Mock
     private WorkspaceDomainTypeRepository domainTypeRepository;
     @Mock
+    private WorkspaceTermRepository termRepository;
+    @Mock
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
@@ -49,7 +52,7 @@ class DomainTypeServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DomainTypeService(domainTypeRepository, roleChecker, auditRecorder);
+        service = new DomainTypeService(domainTypeRepository, termRepository, roleChecker, auditRecorder);
     }
 
     /** 저장된 것과 같은 형태 — id·타임스탬프는 DB가 채우는 값이라 리플렉션으로 채운다 */
@@ -210,6 +213,8 @@ class DomainTypeServiceTest {
         service.delete(2L, 7L, 11L);
 
         then(domainTypeRepository).should().delete(entity);
+        // 이것을 가리키던 사전 용어는 연결만 풀린다(08-core/01-workspace.md Section 4.6)
+        then(termRepository).should().clearDomainType(7L, 11L);
         then(auditRecorder).should().record(2L, "WORKSPACE_DOMAIN_TYPE_DELETED", "WORKSPACE", "7",
                 Map.of("name", "이메일"));
     }
@@ -225,5 +230,6 @@ class DomainTypeServiceTest {
                 .isInstanceOf(BusinessException.class);
         assertThatThrownBy(() -> service.delete(3L, 7L, 11L)).isInstanceOf(BusinessException.class);
         then(domainTypeRepository).shouldHaveNoInteractions();
+        then(termRepository).shouldHaveNoInteractions();
     }
 }

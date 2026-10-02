@@ -2,6 +2,7 @@ package net.java21.crowfoot.api.term.service;
 
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.domaintype.repository.WorkspaceDomainTypeRepository;
 import net.java21.crowfoot.api.model.domain.DatabaseType;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.WorkspaceTerm;
@@ -39,6 +40,7 @@ public class TermService {
 
     private final WorkspaceTermRepository termRepository;
     private final DatabaseTypeRepository databaseTypeRepository;
+    private final WorkspaceDomainTypeRepository domainTypeRepository;
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
@@ -61,6 +63,7 @@ public class TermService {
         String label = request.label().trim();
         Map<String, String> types = normalizeTypes(request.types());
         String typesJson = types == null ? null : writeMap(types);
+        Long domainTypeId = resolveDomainType(workspaceId, request.domainTypeId());
 
         WorkspaceTerm entity = termRepository.findByWorkspaceIdAndTerm(workspaceId, term).orElse(null);
         if (entity == null) {
@@ -73,12 +76,16 @@ public class TermService {
             entity.setLabel(label);
             entity.setTermTypes(typesJson);
         }
+        entity.setDomainTypeId(domainTypeId);
         WorkspaceTerm saved = termRepository.save(entity);
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("term", term);
         detail.put("label", label);
         if (types != null) {
             detail.put("types", types);
+        }
+        if (domainTypeId != null) {
+            detail.put("domainTypeId", Long.toString(domainTypeId));
         }
         auditRecorder.record(userId, "WORKSPACE_TERM_UPSERTED", "WORKSPACE",
                 Long.toString(workspaceId), detail);
@@ -95,6 +102,18 @@ public class TermService {
         termRepository.delete(term);
         auditRecorder.record(userId, "WORKSPACE_TERM_DELETED", "WORKSPACE",
                 Long.toString(workspaceId), Map.of("term", term.getTerm(), "label", term.getLabel()));
+    }
+
+    /** 가리킬 도메인 타입 확인 — 같은 워크스페이스의 것이어야 한다(Section 4.6). null·빈 값은 연결 없음 */
+    private Long resolveDomainType(long workspaceId, String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        long id = Long.parseLong(raw);
+        return domainTypeRepository.findById(id)
+                .filter((domainType) -> Objects.equals(domainType.getWorkspaceId(), workspaceId))
+                .map((domainType) -> id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.DOMAIN_TYPE_NOT_FOUND));
     }
 
     /** 물리명 토큰 정규화 — trim + 소문자. 토큰에는 공백이 없다(추론이 '_', camelCase로만 분해한다) */
@@ -158,6 +177,7 @@ public class TermService {
                 term.getTerm(),
                 term.getLabel(),
                 term.getTermTypes() == null ? null : readMap(term.getTermTypes()),
+                term.getDomainTypeId() == null ? null : Long.toString(term.getDomainTypeId()),
                 term.getUpdatedAt());
     }
 }

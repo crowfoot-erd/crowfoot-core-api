@@ -1,6 +1,8 @@
 package net.java21.crowfoot.api.term.service;
 
 import net.java21.crowfoot.api.account.service.AuditRecorder;
+import net.java21.crowfoot.api.domaintype.domain.WorkspaceDomainType;
+import net.java21.crowfoot.api.domaintype.repository.WorkspaceDomainTypeRepository;
 import net.java21.crowfoot.api.model.domain.DatabaseType;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.WorkspaceTerm;
@@ -45,6 +47,8 @@ class TermServiceTest {
     @Mock
     private DatabaseTypeRepository databaseTypeRepository;
     @Mock
+    private WorkspaceDomainTypeRepository domainTypeRepository;
+    @Mock
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
@@ -53,7 +57,7 @@ class TermServiceTest {
 
     @BeforeEach
     void setUp() {
-        termService = new TermService(termRepository, databaseTypeRepository, roleChecker,
+        termService = new TermService(termRepository, databaseTypeRepository, domainTypeRepository, roleChecker,
                 auditRecorder, new ObjectMapper());
     }
 
@@ -87,7 +91,7 @@ class TermServiceTest {
         });
 
         TermResponse response = termService.upsert(2L, 7L,
-                new UpsertTermRequest("  User ", "사용자", Map.of("mysql", " VARCHAR(100) ")));
+                new UpsertTermRequest("  User ", "사용자", Map.of("mysql", " VARCHAR(100) "), null));
 
         assertThat(response.termId()).isEqualTo("11");
         assertThat(response.term()).isEqualTo("user");
@@ -113,7 +117,7 @@ class TermServiceTest {
         given(termRepository.save(existing)).willReturn(existing);
 
         TermResponse response = termService.upsert(5L, 7L,
-                new UpsertTermRequest("USER", "사용자", Map.of("mysql", "  ")));
+                new UpsertTermRequest("USER", "사용자", Map.of("mysql", "  "), null));
 
         assertThat(existing.getLabel()).isEqualTo("사용자");
         assertThat(existing.getTermTypes()).isNull();
@@ -131,7 +135,7 @@ class TermServiceTest {
         registeredCodes();
 
         assertThatThrownBy(() -> termService.upsert(2L, 7L,
-                new UpsertTermRequest("user", "사용자", Map.of("oracle", "NUMBER(19)"))))
+                new UpsertTermRequest("user", "사용자", Map.of("oracle", "NUMBER(19)"), null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -149,7 +153,7 @@ class TermServiceTest {
             return entity;
         });
 
-        TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null));
+        TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null, null));
 
         assertThat(response.types()).isNull();
     }
@@ -157,7 +161,7 @@ class TermServiceTest {
     @Test
     @DisplayName("upsert — term에 공백이 있으면 400 INVALID_REQUEST다")
     void upsertRejectsWhitespaceInTerm() {
-        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("us er", "사용자", null)))
+        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("us er", "사용자", null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -170,7 +174,7 @@ class TermServiceTest {
         given(termRepository.findByWorkspaceIdAndTerm(7L, "order")).willReturn(Optional.empty());
         given(termRepository.countByWorkspaceId(7L)).willReturn(1_000L);
 
-        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("order", "주문", null)))
+        assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("order", "주문", null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
@@ -192,7 +196,7 @@ class TermServiceTest {
             ReflectionTestUtils.setField(entity, "id", 11L);
             return entity;
         });
-        termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null));
+        termService.upsert(2L, 7L, new UpsertTermRequest("user", "사용자", null, null));
         verify(roleChecker).requireEditor(2L, 7L);
     }
 
@@ -219,5 +223,57 @@ class TermServiceTest {
         verify(termRepository).delete(existing);
         then(auditRecorder).should().record(2L, "WORKSPACE_TERM_DELETED", "WORKSPACE", "7",
                 Map.of("term", "user", "label", "사용자"));
+    }
+
+    private WorkspaceDomainType domainType(long id, long workspaceId) {
+        WorkspaceDomainType entity = new WorkspaceDomainType(workspaceId, "이메일", 2L);
+        ReflectionTestUtils.setField(entity, "id", id);
+        return entity;
+    }
+
+    @Test
+    @DisplayName("upsert — 같은 워크스페이스의 도메인 타입을 가리키게 한다(Section 4.6). 감사에 id를 남긴다")
+    void upsertLinksDomainType() {
+        given(termRepository.findByWorkspaceIdAndTerm(7L, "user_email")).willReturn(Optional.empty());
+        given(termRepository.countByWorkspaceId(7L)).willReturn(0L);
+        given(domainTypeRepository.findById(11L)).willReturn(Optional.of(domainType(11L, 7L)));
+        given(termRepository.save(any())).willAnswer((invocation) -> {
+            WorkspaceTerm entity = invocation.getArgument(0);
+            ReflectionTestUtils.setField(entity, "id", 21L);
+            return entity;
+        });
+
+        TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("user_email", "회원 이메일", null, "11"));
+
+        assertThat(response.domainTypeId()).isEqualTo("11");
+        then(auditRecorder).should().record(2L, "WORKSPACE_TERM_UPSERTED", "WORKSPACE", "7",
+                Map.of("term", "user_email", "label", "회원 이메일", "domainTypeId", "11"));
+    }
+
+    @Test
+    @DisplayName("upsert — domainTypeId를 생략하면 기존 연결을 푼다")
+    void upsertClearsDomainType() {
+        WorkspaceTerm existing = saved(21L, 7L, "user_email", "회원 이메일", null);
+        existing.setDomainTypeId(11L);
+        given(termRepository.findByWorkspaceIdAndTerm(7L, "user_email")).willReturn(Optional.of(existing));
+        given(termRepository.save(any())).willAnswer((invocation) -> invocation.getArgument(0));
+
+        TermResponse response = termService.upsert(2L, 7L, new UpsertTermRequest("user_email", "회원 이메일", null, null));
+
+        assertThat(response.domainTypeId()).isNull();
+    }
+
+    @Test
+    @DisplayName("upsert — 없는 도메인 타입이나 다른 워크스페이스의 도메인 타입은 DOMAIN_TYPE_NOT_FOUND, 저장하지 않는다")
+    void upsertRejectsForeignDomainType() {
+        given(domainTypeRepository.findById(11L)).willReturn(Optional.of(domainType(11L, 99L)));
+        given(domainTypeRepository.findById(12L)).willReturn(Optional.empty());
+
+        for (String id : new String[] {"11", "12"}) {
+            assertThatThrownBy(() -> termService.upsert(2L, 7L, new UpsertTermRequest("user_email", "회원 이메일", null, id)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            (ex) -> assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.DOMAIN_TYPE_NOT_FOUND));
+        }
+        verify(termRepository, never()).save(any());
     }
 }
