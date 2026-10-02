@@ -19,6 +19,7 @@ import net.java21.crowfoot.api.accesstoken.dto.AccessTokenDtos.IssueRequest;
 import net.java21.crowfoot.api.accesstoken.dto.AccessTokenDtos.TokenResponse;
 import net.java21.crowfoot.api.accesstoken.dto.AccessTokenDtos.VerifyResponse;
 import net.java21.crowfoot.api.accesstoken.repository.WorkspaceAccessTokenRepository;
+import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
 import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
@@ -50,6 +51,7 @@ public class AccessTokenService {
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final Clock clock;
+    private final ConnectionCrypto crypto;
     private final SecureRandom random = new SecureRandom();
 
     /** 목록 — Owner는 워크스페이스의 모든 토큰, 그 밖의 멤버는 자기 토큰만 (3.1) */
@@ -64,10 +66,13 @@ public class AccessTokenService {
         Map<Long, String> names = new HashMap<>();
         userRepository.findAllById(tokens.stream().map(WorkspaceAccessToken::getUserId).distinct().toList())
                 .forEach(user -> names.put(user.getId(), user.getName()));
-        return tokens.stream().map(token -> toResponse(token, names.get(token.getUserId()), null)).toList();
+        // 원문은 발급한 본인에게만 돌려준다 — Owner가 남의 토큰을 볼 때는 앞부분만 보인다
+        return tokens.stream()
+                .map(token -> toResponse(token, names.get(token.getUserId()), token.getUserId() == userId ? reveal(token) : null))
+                .toList();
     }
 
-    /** 발급 — 멤버 누구나. 원문은 이 응답에서만 나온다 (3.2) */
+    /** 발급 — 멤버 누구나. 원문은 암호화해 두고, 발급한 본인의 목록 응답에도 싣는다 (3.2) */
     @Transactional
     public TokenResponse issue(long userId, long workspaceId, IssueRequest request) {
         roleChecker.requireMember(userId, workspaceId);
@@ -81,6 +86,7 @@ public class AccessTokenService {
         Instant expiresAt = request.expiresInDays() == null ? null : now.plus(Duration.ofDays(request.expiresInDays()));
         WorkspaceAccessToken token = tokenRepository.save(new WorkspaceAccessToken(workspaceId, userId, request.name().strip(),
                 raw.substring(0, PREFIX_LENGTH), sha256(raw), expiresAt, now));
+        token.setTokenEncrypted(crypto.encrypt(raw));
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("tokenId", String.valueOf(token.getId()));
         detail.put("name", token.getName());
@@ -123,6 +129,18 @@ public class AccessTokenService {
                 String.valueOf(token.getId()), token.getExpiresAt());
         tokenRepository.touchLastUsed(token.getId(), now, now.minus(LAST_USED_INTERVAL));
         return response;
+    }
+
+    /** 암호화해 둔 원문 — 없거나(예전 토큰) 풀지 못하면 null */
+    private String reveal(WorkspaceAccessToken token) {
+        if (token.getTokenEncrypted() == null) {
+            return null;
+        }
+        try {
+            return crypto.decrypt(token.getTokenEncrypted());
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static TokenResponse toResponse(WorkspaceAccessToken token, String userName, String raw) {

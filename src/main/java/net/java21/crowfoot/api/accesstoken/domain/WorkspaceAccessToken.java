@@ -13,7 +13,8 @@ import lombok.Setter;
 
 /**
  * 워크스페이스 액세스 토큰 (08-core/18-access-token.md Section 2) — MCP 클라이언트가 쓰는 장기 자격.
- * 토큰 하나는 발급한 사용자와 워크스페이스 하나에 묶인다. 원문은 저장하지 않고 SHA-256 해시만 둔다.
+ * 토큰 하나는 발급한 사용자와 워크스페이스 하나에 묶인다. 검증은 SHA-256 해시로 한다.
+ * 원문은 암호화해서 함께 둔다 — 발급한 본인이 등록 명령을 다시 복사할 수 있게 한다(커넥션 비밀번호와 같은 암호화).
  * 폐기한 행은 지우지 않는다 — 감사 기록의 tokenId가 가리키는 대상으로 남는다.
  */
 @Entity
@@ -38,6 +39,9 @@ public class WorkspaceAccessToken {
 
     @Column(columnDefinition = "CHAR(64)")
     private String tokenHash;
+
+    /** 암호화한 원문(AES-256-GCM, ConnectionCrypto) — 발급한 본인에게만 되돌려 준다. 이 컬럼이 생기기 전의 토큰은 null이다 */
+    private byte[] tokenEncrypted;
 
     private Instant expiresAt;
 

@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
 import net.java21.crowfoot.api.accesstoken.domain.WorkspaceAccessToken;
 import net.java21.crowfoot.api.accesstoken.dto.AccessTokenDtos.IssueRequest;
 import net.java21.crowfoot.api.accesstoken.dto.AccessTokenDtos.TokenResponse;
@@ -54,9 +55,11 @@ class AccessTokenServiceTest {
 
     private AccessTokenService service;
 
+    private final ConnectionCrypto crypto = new ConnectionCrypto(java.util.Base64.getEncoder().encodeToString(new byte[32]));
+
     @BeforeEach
     void setUp() {
-        service = new AccessTokenService(tokenRepository, userRepository, roleChecker, auditRecorder, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new AccessTokenService(tokenRepository, userRepository, roleChecker, auditRecorder, Clock.fixed(NOW, ZoneOffset.UTC), crypto);
     }
 
     private static WorkspaceAccessToken token(long id, long userId, Instant expiresAt) {
@@ -74,7 +77,7 @@ class AccessTokenServiceTest {
     }
 
     @Test
-    @DisplayName("발급 — 원문은 cfw_ 접두이고 응답에서만 나온다. 저장하는 것은 해시와 앞 12자다")
+    @DisplayName("발급 — 원문은 cfw_ 접두다. 저장하는 것은 해시, 앞 12자, 암호화한 원문이다")
     void issue() {
         given(roleChecker.requireMember(2L, 77L)).willReturn(new EffectiveRole("VIEWER", 1));
         given(tokenRepository.countActive(77L, 2L, NOW)).willReturn(4L);
@@ -92,6 +95,9 @@ class AccessTokenServiceTest {
         WorkspaceAccessToken saved = captor.getValue();
         assertThat(saved.getTokenHash()).isEqualTo(AccessTokenService.sha256(response.token())).hasSize(64);
         assertThat(saved.getTokenPrefix()).isEqualTo(response.token().substring(0, 12));
+        // 원문은 평문으로 두지 않는다 — 암호문이고, 풀면 원문이다
+        assertThat(new String(saved.getTokenEncrypted(), java.nio.charset.StandardCharsets.ISO_8859_1)).doesNotContain(response.token());
+        assertThat(crypto.decrypt(saved.getTokenEncrypted())).isEqualTo(response.token());
         assertThat(saved.getName()).isEqualTo("Claude Code — 회사 노트북");
         assertThat(saved.getExpiresAt()).isEqualTo(NOW.plusSeconds(30L * 86400));
         assertThat(response.tokenPrefix()).isEqualTo(saved.getTokenPrefix());
@@ -111,9 +117,14 @@ class AccessTokenServiceTest {
     }
 
     @Test
-    @DisplayName("목록 — Owner는 전체를, 그 밖의 멤버는 자기 토큰만 본다. 원문은 나오지 않는다")
+    @DisplayName("목록 — Owner는 전체를, 그 밖의 멤버는 자기 토큰만 본다. 원문은 발급한 본인에게만 나온다")
     void list() {
-        given(tokenRepository.findActiveByWorkspaceId(77L, NOW)).willReturn(List.of(token(1, 2, null), token(2, 5, null)));
+        WorkspaceAccessToken mineWithRaw = token(1, 2, null);
+        mineWithRaw.setTokenEncrypted(crypto.encrypt("cfw_mine"));
+        WorkspaceAccessToken others = token(2, 5, null);
+        others.setTokenEncrypted(crypto.encrypt("cfw_others"));
+        WorkspaceAccessToken legacy = token(3, 2, null);
+        given(tokenRepository.findActiveByWorkspaceId(77L, NOW)).willReturn(List.of(mineWithRaw, others, legacy));
         given(userRepository.findAllById(any())).willAnswer(invocation -> {
             Iterable<Long> ids = invocation.getArgument(0);
             return java.util.stream.StreamSupport.stream(ids.spliterator(), false).map(id -> user(id, false)).toList();
@@ -121,12 +132,17 @@ class AccessTokenServiceTest {
 
         given(roleChecker.requireMember(2L, 77L)).willReturn(new EffectiveRole("EDITOR", 3));
         List<TokenResponse> mine = service.list(2L, 77L);
-        assertThat(mine).extracting(TokenResponse::tokenId).containsExactly("1");
-        assertThat(mine.get(0).token()).isNull();
+        assertThat(mine).extracting(TokenResponse::tokenId).containsExactly("1", "3");
+        assertThat(mine.get(0).token()).isEqualTo("cfw_mine");
+        // 암호화한 원문이 없는 예전 토큰은 앞부분만 나온다
+        assertThat(mine.get(1).token()).isNull();
         assertThat(mine.get(0).createdBy().name()).isEqualTo("사용자2");
 
         given(roleChecker.requireMember(9L, 77L)).willReturn(new EffectiveRole("OWNER", 4));
-        assertThat(service.list(9L, 77L)).extracting(TokenResponse::tokenId).containsExactly("1", "2");
+        List<TokenResponse> all = service.list(9L, 77L);
+        assertThat(all).extracting(TokenResponse::tokenId).containsExactly("1", "2", "3");
+        // Owner라도 남의 토큰의 원문은 보지 못한다
+        assertThat(all).extracting(TokenResponse::token).containsOnlyNulls();
     }
 
     @Test
