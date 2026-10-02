@@ -262,7 +262,7 @@ class ModelControllerWebTest {
         given(migrationDdlService.generateConnectionMigration(7L, 77L, 501L, 9L)).willReturn(
                 new net.java21.crowfoot.api.model.dto.MigrationDdlResponse(
                         "-- MySQL 마이그레이션 DDL (DB → 문서)\n\nALTER TABLE users ADD COLUMN grade VARCHAR(10);",
-                        List.of(), 1, "DB", "문서"));
+                        List.of(), 1, "DB", "문서", List.of()));
 
         // when & then
         mockMvc.perform(get("/core/workspaces/77/models/501/connections/9/migration")
@@ -297,7 +297,7 @@ class ModelControllerWebTest {
     @DisplayName("마이그레이션 DDL 실행은 문장별 결과를 응답한다 (1.15) — 본문 없음")
     void executeConnectionMigrationReturnsStatementResults() throws Exception {
         // given
-        given(migrationDdlService.executeConnectionMigration(7L, 77L, 501L, 9L)).willReturn(
+        given(migrationDdlService.executeConnectionMigration(7L, 77L, 501L, 9L, false)).willReturn(
                 new net.java21.crowfoot.api.model.dto.ModelDeployResponse(1, 0,
                         List.of(new net.java21.crowfoot.api.model.dto.ModelDeployResponse.Statement(
                                 "ALTER TABLE users ADD COLUMN grade VARCHAR(10);", true, null)),
@@ -321,7 +321,7 @@ class ModelControllerWebTest {
         org.mockito.BDDMockito.willThrow(new net.java21.crowfoot.common.error.BusinessException(
                         net.java21.crowfoot.common.error.ErrorCode.INVALID_REQUEST,
                         "문서의 DBMS(postgresql)와 커넥션의 DBMS(mysql)가 다릅니다"))
-                .given(migrationDdlService).executeConnectionMigration(7L, 77L, 501L, 9L);
+                .given(migrationDdlService).executeConnectionMigration(7L, 77L, 501L, 9L, false);
 
         // when & then
         mockMvc.perform(post("/core/workspaces/77/models/501/connections/9/migration/execute")

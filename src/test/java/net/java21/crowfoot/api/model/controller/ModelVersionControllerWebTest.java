@@ -172,7 +172,7 @@ class ModelVersionControllerWebTest {
         given(migrationDdlService.generateVersionMigration(7L, 77L, 501L, 2L, 3L)).willReturn(
                 new MigrationDdlResponse("-- MySQL 마이그레이션 DDL (v2 → v3)\n\n"
                                 + "ALTER TABLE users ADD COLUMN grade VARCHAR(10);",
-                        List.of(new DdlWarningResponse("DESTRUCTIVE", "파괴적 연산이 있습니다")), 1, "v2", "v3"));
+                        List.of(new DdlWarningResponse("DESTRUCTIVE", "파괴적 연산이 있습니다")), 1, "v2", "v3", List.of()));
 
         mockMvc.perform(get("/core/workspaces/77/models/501/versions/2/migration")
                         .header("X-USER-ID", "7")

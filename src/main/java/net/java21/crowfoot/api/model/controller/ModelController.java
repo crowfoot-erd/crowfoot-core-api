@@ -4,6 +4,7 @@ import tools.jackson.databind.JsonNode;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.auth.CurrentUserHolder;
+import net.java21.crowfoot.api.model.dto.ExecuteMigrationRequest;
 import net.java21.crowfoot.api.model.dto.ConnectModelRequest;
 import net.java21.crowfoot.api.model.dto.CreateModelRequest;
 import net.java21.crowfoot.api.model.dto.DeployModelRequest;
@@ -151,9 +152,11 @@ public class ModelController {
     public ApiResponse<ModelDeployResponse> executeConnectionMigration(
             @PathVariable("workspace-id") long workspaceId,
             @PathVariable("model-id") long modelId,
-            @PathVariable("connection-id") long connectionId) {
+            @PathVariable("connection-id") long connectionId,
+            @RequestBody(required = false) ExecuteMigrationRequest request) {
         return ApiResponse.success(migrationDdlService.executeConnectionMigration(
-                CurrentUserHolder.get().userId(), workspaceId, modelId, connectionId));
+                CurrentUserHolder.get().userId(), workspaceId, modelId, connectionId,
+                request != null && Boolean.TRUE.equals(request.includeDestructive())));
     }
 
     /** 검증 실행 기록 — Editor 이상, 에디터 린터가 계산한 건수를 감사로 남긴다(본문 없음, 1.13) */

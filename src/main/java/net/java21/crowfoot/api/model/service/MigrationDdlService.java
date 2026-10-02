@@ -90,7 +90,7 @@ public class MigrationDdlService {
      * 결과 항목으로 보고한다(부분 실패 리포트 — 1.8 배포와 같은 규칙).
      */
     public ModelDeployResponse executeConnectionMigration(long userId, long workspaceId, long modelId,
-                                                          long connectionId) {
+                                                          long connectionId, boolean includeDestructive) {
         roleChecker.requireEditor(userId, workspaceId);
         Model model = requireModel(modelId, workspaceId);
         DbConnection connection = requireConnection(connectionId, workspaceId);
@@ -99,18 +99,23 @@ public class MigrationDdlService {
         MigrationDdlGenerator.Result result = connectionDiff(model, connection);
 
         // 이미 동일(0문장)이면 접속 없이 빈 리포트 — introspection이 도달성을 증명했다(2차 접속 불필요)
-        List<ModelDeployResponse.Statement> statements = result.statements().isEmpty()
+        // 삭제 문장(테이블·컬럼·제약·인덱스 삭제)은 요청이 명시했을 때만 실행한다 — 기본은 추가와 변경만이다
+        List<String> toRun = includeDestructive ? result.statements() : result.safeStatements();
+        int skipped = includeDestructive ? 0 : result.destructive().size();
+        List<ModelDeployResponse.Statement> statements = toRun.isEmpty()
                 ? List.of()
-                : statementExecutor.execute(connection, result.statements());
+                : statementExecutor.execute(connection, toRun);
 
         int failed = (int) statements.stream().filter(statement -> !statement.ok()).count();
         auditRecorder.record(userId, "MODEL_MIGRATION_EXECUTED", "MODEL", Long.toString(modelId), Map.of(
                 "connectionId", Long.toString(connectionId),
                 "connectionName", connection.getName(),
                 "executed", statements.size() - failed,
-                "failed", failed));
+                "failed", failed,
+                "includeDestructive", includeDestructive,
+                "skippedDestructive", skipped));
         return new ModelDeployResponse(statements.size() - failed, failed, statements,
-                result.warnings().stream().map(w -> new DdlWarningResponse(w.code(), w.message())).toList());
+                result.warnings().stream().map(w -> new DdlWarningResponse(w.code(), w.message())).toList(), skipped);
     }
 
     /** (b) 공용 diff — 커넥션 현재 스키마(introspection)를 문서와 비교한다. 생성·실행이 같은 원천을 쓴다 */
@@ -137,7 +142,7 @@ public class MigrationDdlService {
                                             String fromLabel, String toLabel) {
         return new MigrationDdlResponse(result.sql(),
                 result.warnings().stream().map(w -> new DdlWarningResponse(w.code(), w.message())).toList(),
-                result.statementCount(), fromLabel, toLabel);
+                result.statementCount(), fromLabel, toLabel, result.destructive());
     }
 
     private DbConnection requireConnection(long connectionId, long workspaceId) {

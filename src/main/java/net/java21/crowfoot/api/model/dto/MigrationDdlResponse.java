@@ -11,7 +11,8 @@ import java.util.List;
  * @param statementCount 실행 단위 문장 수(헤더·배너 주석 제외)
  * @param fromLabel      이행 원천 — "v2"(버전 비교) 또는 "DB"(문서↔실제 DB 비교)
  * @param toLabel        이행 대상 — "v3" 또는 "문서"
+ * @param destructiveStatements 삭제 문장(테이블·컬럼·제약·인덱스 삭제) — 실행은 기본으로 이 문장을 뺀다(Section 1.15)
  */
 public record MigrationDdlResponse(String sql, List<DdlWarningResponse> warnings, int statementCount,
-                                   String fromLabel, String toLabel) {
+                                   String fromLabel, String toLabel, List<String> destructiveStatements) {
 }

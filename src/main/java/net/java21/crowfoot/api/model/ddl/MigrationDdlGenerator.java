@@ -25,8 +25,16 @@ public final class MigrationDdlGenerator {
     /** 파괴적 연산 블록 배너 — 실행 전 검토 지점 */
     private static final String DESTRUCTIVE_BANNER = "-- ⚠ 파괴적 연산 — 실행 전 데이터 손실 가능성을 확인하세요";
 
-    /** statements: 실행 단위 문장(스크립트 본문과 같은 순서) — sql은 여기에 헤더·배너를 얹은 전문 */
-    public record Result(String sql, List<DdlGenerator.Warning> warnings, List<String> statements) {
+    /**
+     * statements: 실행 단위 문장(스크립트 본문과 같은 순서) — sql은 여기에 헤더·배너를 얹은 전문.
+     * destructive: 그 가운데 삭제 문장(statements의 마지막 블록과 같다) — 실행은 기본으로 이 문장을 뺀다(§1.15)
+     */
+    public record Result(String sql, List<DdlGenerator.Warning> warnings, List<String> statements, List<String> destructive) {
+
+        /** 삭제 문장을 뺀 실행 문장 — 추가와 변경만 */
+        public List<String> safeStatements() {
+            return statements.subList(0, statements.size() - destructive.size());
+        }
 
         /** 문장 수 — statements 파생 */
         public int statementCount() {
@@ -134,7 +142,7 @@ public final class MigrationDdlGenerator {
         List<String> statements = new ArrayList<>(createsAdds);
         statements.addAll(alters);
         statements.addAll(destructive);
-        return new Result(String.join("\n\n", blocks), List.copyOf(warnings), List.copyOf(statements));
+        return new Result(String.join("\n\n", blocks), List.copyOf(warnings), List.copyOf(statements), List.copyOf(destructive));
     }
 
     /* ---------- 연산별 조립 ---------- */

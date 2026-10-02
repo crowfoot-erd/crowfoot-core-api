@@ -247,7 +247,7 @@ class MigrationDdlServiceTest {
                 .willReturn(List.of(new ModelDeployResponse.Statement(
                         "ALTER TABLE users ADD COLUMN grade VARCHAR(10);", true, null)));
 
-        ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L);
+        ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L, false);
 
         verify(roleChecker).requireEditor(7L, 77L);
         // 클라이언트 SQL이 아니라 재계산한 diff 문장이 실행 단위로 내려간다
@@ -260,7 +260,8 @@ class MigrationDdlServiceTest {
         assertThat(response.statements()).hasSize(1);
         assertThat(response.statements().get(0).ok()).isTrue();
         verify(auditRecorder).record(7L, "MODEL_MIGRATION_EXECUTED", "MODEL", "501",
-                Map.of("connectionId", "11", "connectionName", "개발 DB", "executed", 1, "failed", 0));
+                Map.of("connectionId", "11", "connectionName", "개발 DB", "executed", 1, "failed", 0,
+                        "includeDestructive", false, "skippedDestructive", 0));
     }
 
     @Test
@@ -273,7 +274,7 @@ class MigrationDdlServiceTest {
         // DB 스키마가 문서와 동일한 스냅샷 — diff 0문장
         given(schemaIntrospectionService.introspectContent(any())).willReturn(V3);
 
-        ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L);
+        ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L, false);
 
         // introspection이 도달성을 증명했다 — 2차 JDBC 접속은 없다
         verify(statementExecutor, never()).execute(any(), anyList());
@@ -281,7 +282,39 @@ class MigrationDdlServiceTest {
         assertThat(response.failedCount()).isZero();
         assertThat(response.statements()).isEmpty();
         verify(auditRecorder).record(7L, "MODEL_MIGRATION_EXECUTED", "MODEL", "501",
-                Map.of("connectionId", "11", "connectionName", "개발 DB", "executed", 0, "failed", 0));
+                Map.of("connectionId", "11", "connectionName", "개발 DB", "executed", 0, "failed", 0,
+                        "includeDestructive", false, "skippedDestructive", 0));
+    }
+
+    @Test
+    @DisplayName("차분 실행 — 삭제 문장은 기본으로 건너뛰고, 요청이 명시했을 때만 실행한다")
+    void executeMigrationSkipsDestructiveByDefault() {
+        // 데이터베이스(V3 — grade 컬럼 있음)를 문서(DB 스냅샷 — grade 없음)에 맞추면 컬럼 삭제 문장이 나온다
+        given(modelRepository.findByIdAndWorkspaceId(501L, 77L))
+                .willReturn(Optional.of(model("mysql", DB)));
+        given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
+                .willReturn(Optional.of(connection("mysql")));
+        given(schemaIntrospectionService.introspectContent(any())).willReturn(V3);
+
+        // 계획 — 삭제 문장을 따로 알려 준다
+        MigrationDdlResponse plan = service.generateConnectionMigration(7L, 77L, 501L, 11L);
+        assertThat(plan.destructiveStatements()).containsExactly("ALTER TABLE users DROP COLUMN grade;");
+
+        // 기본 — 삭제 문장뿐이면 실행하지 않고 건너뛴 수만 알린다
+        ModelDeployResponse skipped = service.executeConnectionMigration(7L, 77L, 501L, 11L, false);
+        verify(statementExecutor, never()).execute(any(), anyList());
+        assertThat(skipped.executedCount()).isZero();
+        assertThat(skipped.skippedDestructive()).isEqualTo(1);
+
+        // 명시 — 삭제 문장까지 실행한다
+        given(statementExecutor.execute(any(), anyList()))
+                .willReturn(List.of(new ModelDeployResponse.Statement("ALTER TABLE users DROP COLUMN grade;", true, null)));
+        ModelDeployResponse executed = service.executeConnectionMigration(7L, 77L, 501L, 11L, true);
+        ArgumentCaptor<List<String>> statementsCaptor = ArgumentCaptor.captor();
+        verify(statementExecutor).execute(any(), statementsCaptor.capture());
+        assertThat(statementsCaptor.getValue()).containsExactly("ALTER TABLE users DROP COLUMN grade;");
+        assertThat(executed.executedCount()).isEqualTo(1);
+        assertThat(executed.skippedDestructive()).isZero();
     }
 
     @Test
@@ -292,7 +325,7 @@ class MigrationDdlServiceTest {
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
                 .willReturn(Optional.of(connection("mysql")));
 
-        assertThatThrownBy(() -> service.executeConnectionMigration(7L, 77L, 501L, 11L))
+        assertThatThrownBy(() -> service.executeConnectionMigration(7L, 77L, 501L, 11L, false))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST);
                     assertThat(e.getMessageKey()).isEqualTo("detail.migration.dbms-mismatch");
@@ -308,7 +341,7 @@ class MigrationDdlServiceTest {
                 .willReturn(Optional.of(model("mysql", V3)));
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L)).willReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.executeConnectionMigration(7L, 77L, 501L, 11L))
+        assertThatThrownBy(() -> service.executeConnectionMigration(7L, 77L, 501L, 11L, false))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.CONNECTION_NOT_FOUND));
     }

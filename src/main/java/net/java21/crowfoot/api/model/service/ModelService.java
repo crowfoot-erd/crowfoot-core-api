@@ -219,10 +219,10 @@ public class ModelService {
     @Transactional
     public SaveContentResponse saveContent(long userId, long workspaceId, long modelId, SaveContentRequest request) {
         roleChecker.requireEditor(userId, workspaceId);
-        if (modelRepository.findByIdAndWorkspaceId(modelId, workspaceId).isEmpty()) {
-            throw new BusinessException(ErrorCode.MODEL_NOT_FOUND);
-        }
-        String content = request.content();
+        Model stored = modelRepository.findByIdAndWorkspaceId(modelId, workspaceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_NOT_FOUND));
+        // 예전 화면이 모르는 항목(요구사항 등)을 빼고 저장해도 지워지지 않게 저장된 값을 이어 붙인다(1.5.2)
+        String content = ContentCarryOver.apply(objectMapper, stored.getContent(), request.content());
         if (content.getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
             throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.size-exceeded");
         }
