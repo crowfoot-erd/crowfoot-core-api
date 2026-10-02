@@ -37,6 +37,10 @@ public enum ErrorCode {
     // WorkspaceTerm (08-core/01-workspace.md Section 4)
     TERM_NOT_FOUND(HttpStatus.NOT_FOUND, "TERM_NOT_FOUND", "용어 사전 항목을 찾을 수 없습니다"),
 
+    // WorkspaceDomainType (08-core/16-domain-type.md Section 4)
+    DOMAIN_TYPE_NOT_FOUND(HttpStatus.NOT_FOUND, "DOMAIN_TYPE_NOT_FOUND", "도메인 타입을 찾을 수 없습니다"),
+    DOMAIN_TYPE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "DOMAIN_TYPE_LIMIT_EXCEEDED", "도메인 타입은 워크스페이스당 200개까지 만들 수 있습니다"),
+
     // Membership (08-core/03-membership.md Section 2)
     MEMBERSHIP_NOT_FOUND(HttpStatus.NOT_FOUND, "MEMBERSHIP_NOT_FOUND", "멤버십 정보를 찾을 수 없습니다"),
     MEMBERSHIP_DUPLICATED(HttpStatus.CONFLICT, "MEMBERSHIP_DUPLICATED", "이미 부여된 대상입니다"),
