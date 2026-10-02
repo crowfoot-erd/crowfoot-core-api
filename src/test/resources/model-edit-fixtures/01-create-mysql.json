@@ -230,7 +230,7 @@
         "type" : "ONE_TO_MANY",
         "identifying" : false,
         "parentMultiplicity" : "EXACTLY_ONE",
-        "childMultiplicity" : "ZERO_OR_MORE",
+        "childMultiplicity" : "ONE_OR_MORE",
         "fkName" : "fk_orders_users",
         "columnMappings" : [ {
           "parentColumnId" : "C:users.id",

@@ -423,7 +423,7 @@
         "type" : "ONE_TO_MANY",
         "identifying" : true,
         "parentMultiplicity" : "EXACTLY_ONE",
-        "childMultiplicity" : "ZERO_OR_MORE",
+        "childMultiplicity" : "ONE_OR_MORE",
         "fkName" : "fk_order_items_orders",
         "columnMappings" : [ {
           "parentColumnId" : "C:orders.id",
@@ -439,7 +439,7 @@
         "type" : "ONE_TO_MANY",
         "identifying" : true,
         "parentMultiplicity" : "EXACTLY_ONE",
-        "childMultiplicity" : "ZERO_OR_MORE",
+        "childMultiplicity" : "ONE_OR_MORE",
         "fkName" : "fk_order_items_products",
         "columnMappings" : [ {
           "parentColumnId" : "C:products.id",
@@ -455,7 +455,7 @@
         "type" : "ONE_TO_ONE",
         "identifying" : false,
         "parentMultiplicity" : "EXACTLY_ONE",
-        "childMultiplicity" : "ZERO_OR_ONE",
+        "childMultiplicity" : "EXACTLY_ONE",
         "fkName" : "fk_profiles_users",
         "columnMappings" : [ {
           "parentColumnId" : "C:users.id",
@@ -487,7 +487,7 @@
         "type" : "ONE_TO_MANY",
         "identifying" : false,
         "parentMultiplicity" : "EXACTLY_ONE",
-        "childMultiplicity" : "ZERO_OR_MORE",
+        "childMultiplicity" : "ONE_OR_MORE",
         "fkName" : "fk_item_notes_order_items",
         "columnMappings" : [ {
           "parentColumnId" : "C:order_items.orders_id",

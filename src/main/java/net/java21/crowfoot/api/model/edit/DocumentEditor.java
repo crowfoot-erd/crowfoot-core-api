@@ -1078,7 +1078,9 @@ public final class DocumentEditor {
             error(at + ".parentMultiplicity", "부모 기수는 EXACTLY_ONE 또는 ZERO_OR_ONE입니다: " + parentMultiplicity);
             return;
         }
-        String defaultChild = "ONE_TO_ONE".equals(type) ? "ZERO_OR_ONE" : "ZERO_OR_MORE";
+        // 기본값은 에디터의 관계 생성 기본값과 같다(양쪽 모두 필수 — 1:1은 EXACTLY_ONE, 1:N은 ONE_OR_MORE).
+        // 다르면 이 API로 만든 문서만 자식 쪽 표기가 ○로 찍혀 손으로 그린 문서와 달라 보인다(v1.32에서 맞춤)
+        String defaultChild = "ONE_TO_ONE".equals(type) ? "EXACTLY_ONE" : "ONE_OR_MORE";
         String childMultiplicity = item.childMultiplicity() != null ? item.childMultiplicity()
                 : existing != null && item.type() == null ? existing.path("childMultiplicity").asText(defaultChild) : defaultChild;
         if (!CHILD_MULTIPLICITIES.get(type).contains(childMultiplicity)) {

@@ -206,7 +206,9 @@ class DocumentEditorTest {
         assertThat(columnNode("user_profiles", "users_id").path("nullable").asBoolean()).isTrue();
         assertThat(tableNode("user_profiles").path("uniques").get(0).path("name").asText()).isEqualTo("uk_user_profiles_users_id");
         assertThat(tableNode("user_profiles").path("indexes").isEmpty()).isTrue();
-        assertThat(root.path("model").path("relationships").get(1).path("childMultiplicity").asText()).isEqualTo("ZERO_OR_ONE");
+        // 자식 기수의 기본값은 에디터와 같다 — 1:1은 EXACTLY_ONE, 1:N은 ONE_OR_MORE
+        assertThat(root.path("model").path("relationships").get(1).path("childMultiplicity").asText()).isEqualTo("EXACTLY_ONE");
+        assertThat(root.path("model").path("relationships").get(0).path("childMultiplicity").asText()).isEqualTo("ONE_OR_MORE");
     }
 
     @Test
@@ -224,7 +226,7 @@ class DocumentEditorTest {
         toOne.throwIfInvalid();
         assertThat(tableNode("payments").path("indexes").isEmpty()).isTrue();
         assertThat(tableNode("payments").path("uniques").size()).isEqualTo(1);
-        assertThat(root.path("model").path("relationships").get(0).path("childMultiplicity").asText()).isEqualTo("ZERO_OR_ONE");
+        assertThat(root.path("model").path("relationships").get(0).path("childMultiplicity").asText()).isEqualTo("EXACTLY_ONE");
         assertThat(root.path("model").path("relationships").size()).isEqualTo(1);
 
         DocumentEditor identifying = editor("postgresql");
