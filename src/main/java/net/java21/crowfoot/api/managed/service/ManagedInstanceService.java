@@ -7,6 +7,7 @@ import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
+import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
 import net.java21.crowfoot.api.connection.dto.ConnectionTestResponse;
 import net.java21.crowfoot.api.managed.domain.ManagedInstance;
 import net.java21.crowfoot.api.managed.dto.CreateManagedInstanceRequest;
@@ -44,6 +45,8 @@ public class ManagedInstanceService {
     private final AuditRecorder auditRecorder;
     private final ConnectionCrypto crypto;
     private final ManagedProvisioners provisioners;
+    /** 인스턴스 접속 주소 — 운영은 내부 주소, 로컬은 노출 주소 (07-managed-database.md Section 3.9) */
+    private final ConnectionEndpointResolver endpoints;
 
     /** 목록 — 등록순, 발급 수(issuedCount) 포함 */
     @Transactional(readOnly = true)
@@ -152,7 +155,7 @@ public class ManagedInstanceService {
         ManagedInstance instance = instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_INSTANCE_NOT_FOUND));
         return requireProvisioner(instance.getDbmsType()).test(
-                instance.getHost(), instance.getPort(), instance.getDatabaseName(),
+                endpoints.instanceHost(instance), instance.getPort(), instance.getDatabaseName(),
                 instance.getUsername(), crypto.decrypt(instance.getPassword()));
     }
 

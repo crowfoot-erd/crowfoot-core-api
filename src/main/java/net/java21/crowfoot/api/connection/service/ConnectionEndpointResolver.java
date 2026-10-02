@@ -1,6 +1,7 @@
 package net.java21.crowfoot.api.connection.service;
 
 import net.java21.crowfoot.api.connection.domain.DbConnection;
+import net.java21.crowfoot.api.managed.domain.ManagedInstance;
 import net.java21.crowfoot.api.managed.repository.ManagedDatabaseRepository;
 import net.java21.crowfoot.api.managed.repository.ManagedInstanceRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +13,8 @@ import org.springframework.stereotype.Component;
  * <p>매니지드 데이터베이스의 커넥션에는 사용자에게 보여 주는 노출 주소가 적혀 있다. 운영 클러스터에서는 그 주소로
  * 가는 길이 없으므로, <b>운영에서만</b> 서버가 인스턴스의 내부 주소로 접속한다(운영 프로필이 {@code internal}로 켠다).
  * 그 밖의 환경과 사용자가 직접 등록한 커넥션은 적힌 주소를 그대로 쓴다.
+ * 인스턴스에 관리 계정으로 접속하는 자리(발급·철회·인스턴스 접속 테스트)도 같은 규칙을 따른다 —
+ * 운영은 내부 주소, 그 밖의 환경(로컬)은 노출 주소다. 로컬에서는 내부 주소로 가는 길이 없다.
  * 화면과 API 응답에 보이는 주소는 바꾸지 않는다 — 이 클래스는 접속하는 자리에서만 쓴다.</p>
  */
 @Component
@@ -51,5 +54,17 @@ public class ConnectionEndpointResolver {
                 .flatMap(database -> managedInstanceRepository.findById(database.getInstanceId()))
                 .map(instance -> new Endpoint(instance.getHost(), instance.getPort()))
                 .orElse(written);
+    }
+
+    /**
+     * 서버가 인스턴스에 관리 계정으로 접속하는 주소 — 운영은 내부 주소({@code host}),
+     * 그 밖의 환경은 노출 주소({@code publicHost}, 없으면 {@code host}). 포트는 같다
+     */
+    public String instanceHost(ManagedInstance instance) {
+        String publicHost = instance.getPublicHost();
+        if (internal || publicHost == null || publicHost.isBlank()) {
+            return instance.getHost();
+        }
+        return publicHost;
     }
 }

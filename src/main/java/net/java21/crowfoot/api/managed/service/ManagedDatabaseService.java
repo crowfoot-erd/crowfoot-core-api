@@ -7,6 +7,7 @@ import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
+import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
 import net.java21.crowfoot.api.connection.domain.DbConnection;
 import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.managed.domain.ManagedDatabase;
@@ -66,6 +67,8 @@ public class ManagedDatabaseService {
     private final AuditRecorder auditRecorder;
     private final ConnectionCrypto crypto;
     private final ManagedProvisioners provisioners;
+    /** 인스턴스 접속 주소 — 운영은 내부 주소, 로컬은 노출 주소 (07-managed-database.md Section 3.9) */
+    private final ConnectionEndpointResolver endpoints;
 
     /** 지정된 발급 한도(관리자) — 워크스페이스 내 사용자당(모든 인스턴스 합산). 설정이 없으면 기본값 */
     @Transactional(readOnly = true)
@@ -157,7 +160,7 @@ public class ManagedDatabaseService {
         String issuedPassword = IssuedPasswords.generate();
         byte[] issuedSecret = crypto.encrypt(issuedPassword);
 
-        provisioner.provision(instance.getHost(), instance.getPort(), instance.getDatabaseName(),
+        provisioner.provision(endpoints.instanceHost(instance), instance.getPort(), instance.getDatabaseName(),
                 instance.getUsername(), crypto.decrypt(instance.getPassword()),
                 schemaName, issuedUsername, issuedPassword);
 
@@ -166,7 +169,7 @@ public class ManagedDatabaseService {
             // 커넥션 매핑은 전략이 정한다 — PG: database=인스턴스 것·schemaName=발급 스키마(#130 계약),
             // MySQL: database=스키마가 곧 database라 databaseName=발급 이름·schemaName=null.
             // 자격은 전부 발급 계정이다(인스턴스 루트는 내주지 않는다).
-            // 커넥션 주소는 사용자 노출 주소(publicHost 폴백) — 프로비저닝은 내부 host로 수행했다
+            // 커넥션 주소는 사용자 노출 주소(publicHost 폴백) — 프로비저닝은 환경에 맞는 주소로 수행했다(운영은 내부 host)
             DbConnection connection = connectionRepository.save(new DbConnection(
                     workspaceId,
                     instance.getDisplayName() + " #" + schemaSuffix(schemaName),
@@ -189,7 +192,7 @@ public class ManagedDatabaseService {
                             "connectionId", Long.toString(connection.getId())));
             return toResponse(saved);
         } catch (RuntimeException e) {
-            provisioner.withdraw(instance.getHost(), instance.getPort(), instance.getDatabaseName(),
+            provisioner.withdraw(endpoints.instanceHost(instance), instance.getPort(), instance.getDatabaseName(),
                     instance.getUsername(), crypto.decrypt(instance.getPassword()),
                     schemaName, issuedUsername);
             throw e;
@@ -215,7 +218,7 @@ public class ManagedDatabaseService {
                     "이 인스턴스의 DBMS는 프로비저닝을 지원하지 않습니다");
         }
 
-        provisioner.withdraw(instance.getHost(), instance.getPort(), instance.getDatabaseName(),
+        provisioner.withdraw(endpoints.instanceHost(instance), instance.getPort(), instance.getDatabaseName(),
                 instance.getUsername(), crypto.decrypt(instance.getPassword()),
                 managed.getSchemaName(), managed.getUsername());
 

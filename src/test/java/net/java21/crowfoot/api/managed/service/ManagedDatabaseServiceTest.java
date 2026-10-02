@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.managed.service;
 
+import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
@@ -94,10 +95,7 @@ class ManagedDatabaseServiceTest {
                 .thenAnswer(inv -> inv.getArgument(0) != null ? inv.getArgument(0) : inv.getArgument(1));
         lenient().when(provisioner.connectionSchemaName(any()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        databaseService = new ManagedDatabaseService(databaseRepository, instanceRepository,
-                settingRepository, connectionRepository, userRepository, roleChecker, adminGuard,
-                auditRecorder, new ConnectionCrypto(DEV_KEY),
-                new ManagedProvisioners(List.of(provisioner, mysqlProvisioner)));
+        databaseService = service(ConnectionEndpointResolver.asWritten());
         instance = new ManagedInstance("Academy PG", "postgresql", "s3.java21.net", null, 8000,
                 "crowfoot", "crowfoot", new ConnectionCrypto(DEV_KEY).encrypt("crowfoot123!"),
                 true, 2L);
@@ -224,9 +222,18 @@ class ManagedDatabaseServiceTest {
                 eq("31"), any());
     }
 
+    /** 서비스 — 인스턴스 접속 주소 규칙(운영 internal / 그 밖 public)을 골라 만든다 */
+    private ManagedDatabaseService service(ConnectionEndpointResolver endpoints) {
+        return new ManagedDatabaseService(databaseRepository, instanceRepository,
+                settingRepository, connectionRepository, userRepository, roleChecker, adminGuard,
+                auditRecorder, new ConnectionCrypto(DEV_KEY),
+                new ManagedProvisioners(List.of(provisioner, mysqlProvisioner)), endpoints);
+    }
+
     @Test
-    @DisplayName("발급 — 커넥션 주소는 노출 주소(publicHost)를 쓰되 프로비저닝·보상은 내부 host로 수행한다")
+    @DisplayName("발급(운영) — 커넥션 주소는 노출 주소(publicHost)를 쓰되 프로비저닝·보상은 내부 host로 수행한다")
     void issueUsesPublicHostForConnectionButInternalForProvisioning() {
+        databaseService = service(new ConnectionEndpointResolver(null, null, "internal"));
         instance.setPublicHost("db.crowfoot.java21.net");
         given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
         given(databaseRepository.countByWorkspaceIdAndUserId(7L, 2L)).willReturn(0L);
@@ -251,6 +258,29 @@ class ManagedDatabaseServiceTest {
         assertThat(connectionCaptor.getValue().getHost()).isEqualTo("db.crowfoot.java21.net");
     }
 
+
+    @Test
+    @DisplayName("발급(로컬) — 프로비저닝도 노출 주소로 한다. 로컬에서는 내부 주소로 가는 길이 없다")
+    void issueUsesPublicHostForProvisioningOutsideProduction() {
+        instance.setPublicHost("db.crowfoot.java21.net");
+        given(instanceRepository.findById(1L)).willReturn(Optional.of(instance));
+        given(databaseRepository.countByWorkspaceIdAndUserId(7L, 2L)).willReturn(0L);
+        given(databaseRepository.findByInstanceIdAndSchemaName(1L, "cf_u2_d1")).willReturn(Optional.empty());
+        given(connectionRepository.save(any())).willAnswer(inv -> {
+            DbConnection stored = inv.getArgument(0);
+            ReflectionTestUtils.setField(stored, "id", 905L);
+            return stored;
+        });
+        given(databaseRepository.save(any())).willThrow(new IllegalStateException("db down"));
+
+        assertThatThrownBy(() -> databaseService.issue(2L, 7L, new IssueManagedDatabaseRequest(1L)))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(provisioner).provision(eq("db.crowfoot.java21.net"), eq(8000), eq("crowfoot"), eq("crowfoot"),
+                eq("crowfoot123!"), eq("cf_u2_d1"), eq("cf_u2_d1"), anyString());
+        verify(provisioner).withdraw(eq("db.crowfoot.java21.net"), eq(8000), eq("crowfoot"), eq("crowfoot"),
+                eq("crowfoot123!"), eq("cf_u2_d1"), eq("cf_u2_d1"));
+    }
     @Test
     @DisplayName("발급(MySQL) — 발급 이름이 곧 database라 커넥션 databaseName=발급 이름·schemaName=null로 매핑한다")
     void issueMySqlMapsConnectionToIssuedDatabase() {

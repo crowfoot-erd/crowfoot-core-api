@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.managed.service;
 
+import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
@@ -73,7 +74,7 @@ class ManagedInstanceServiceTest {
         given(mysqlProvisioner.dbmsType()).willReturn("mysql");
         instanceService = new ManagedInstanceService(instanceRepository, databaseRepository,
                 userRepository, adminGuard, auditRecorder, new ConnectionCrypto(DEV_KEY),
-                new ManagedProvisioners(List.of(provisioner, mysqlProvisioner)));
+                new ManagedProvisioners(List.of(provisioner, mysqlProvisioner)), ConnectionEndpointResolver.asWritten());
     }
 
     private static ManagedInstance saved(long id) {
