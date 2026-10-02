@@ -46,6 +46,7 @@ public class CommunityPostService {
     /** 최근글 상한 — 대시보드 위젯 용도를 넘지 않도록 */
     private static final int MAX_RECENT_LIMIT = 20;
     private static final int DEFAULT_RECENT_LIMIT = 5;
+    private static final int RELEASE_NOTE_LIST_LIMIT = 300;
 
     /** 제목·본문 언어별 값 상한 — DTO 검증이 커스텀 타입이라 서비스가 검증한다 */
     private static final int TITLE_MAX = 200;
@@ -94,6 +95,16 @@ public class CommunityPostService {
         List<PostRow> rows = communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE,
                 resolveRecentLimit(limit));
         return toRecentResponses(rows, lang);
+    }
+
+    /**
+     * 공개 릴리스 노트 전체 — RELEASE_NOTE만 최신순(공개 목록 화면의 목차, 무인증). 본문은 싣지 않는다.
+     * 릴리스마다 한 건이라 페이지를 나누지 않고 상한({@value RELEASE_NOTE_LIST_LIMIT}건)까지 내려준다
+     */
+    @Transactional(readOnly = true)
+    public ListApiResponse<CommunityRecentPostResponse> allReleaseNotes(String lang) {
+        return toRecentResponses(
+                communityPostQueryRepository.recentByBoard(CommunityBoard.RELEASE_NOTE, RELEASE_NOTE_LIST_LIMIT), lang);
     }
 
     /** 상세 — 마크다운 원문 포함(lang 해석) */

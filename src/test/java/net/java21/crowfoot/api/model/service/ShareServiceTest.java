@@ -351,6 +351,43 @@ class ShareServiceTest {
     }
 
     /** 링크 픽스처 — 조회 수만 링크 고유값(반응·댓글 카운터는 문서 단위 — 2026-09-28 이관) */
+    @Test
+    @DisplayName("공유 문서 목록 — 검색어로 거르고 한 페이지를 내려준다. 기본은 최근 공유순, popular는 반응 수순")
+    void browseFiltersSortsAndPages() {
+        given(shareRepository.findAllByOrderByCreatedAtDescIdDesc()).willReturn(List.of(
+                share(3L, "tok-c", null, null, "2026-09-03T00:00:00Z", 13L, 5),
+                share(2L, "tok-b", null, null, "2026-09-02T00:00:00Z", 12L, 9),
+                share(1L, "tok-a2", null, null, "2026-09-01T12:00:00Z", 15L, 1),
+                share(1L, "tok-a", null, null, "2026-09-01T00:00:00Z", 11L, 1),
+                // 기간이 끝난 링크는 나오지 않는다
+                share(4L, "tok-d", null, Instant.parse("2020-01-01T00:00:00Z"), "2026-09-04T00:00:00Z", 14L, 0)));
+        given(modelRepository.findAllById(any())).willReturn(List.of(
+                model(1L, "쇼핑몰 ERD", "2026-09-01T00:00:00Z", 7),
+                model(2L, "예약 시스템", "2026-09-02T00:00:00Z", 2),
+                model(3L, "Shop Orders", "2026-09-03T00:00:00Z", 2)));
+
+        // 전체 — 최근 공유순, 문서당 최신 링크 하나
+        ShareService.GalleryPage all = shareService.browse(null, "recent", 1, 2);
+        assertThat(all.totalCount()).isEqualTo(3);
+        assertThat(all.items()).extracting(GalleryShareResponse::shareToken).containsExactly("tok-c", "tok-b");
+        assertThat(shareService.browse(null, "recent", 2, 2).items())
+                .extracting(GalleryShareResponse::shareToken).containsExactly("tok-a2");
+        // 범위를 넘는 페이지는 빈 목록이다
+        assertThat(shareService.browse(null, "recent", 9, 2).items()).isEmpty();
+
+        // 검색 — 이름과 설명의 부분 일치, 대소문자 무시
+        assertThat(shareService.browse("shop", "recent", 1, 10).items())
+                .extracting(GalleryShareResponse::modelName).containsExactly("Shop Orders");
+        assertThat(shareService.browse(" ERD ", "recent", 1, 10).items())
+                .extracting(GalleryShareResponse::modelName).containsExactly("쇼핑몰 ERD");
+        assertThat(shareService.browse("설명", "recent", 1, 10).totalCount()).isEqualTo(3);
+        assertThat(shareService.browse("없는 말", "recent", 1, 10).totalCount()).isZero();
+
+        // 인기순 — 반응 수 → 조회 수 → 최근 공유순
+        assertThat(shareService.browse(null, "popular", 1, 10).items())
+                .extracting(GalleryShareResponse::shareToken).containsExactly("tok-a2", "tok-b", "tok-c");
+    }
+
     private static ModelShare share(long modelId, String token, Instant startsAt, Instant endsAt,
                                     String createdAt, long id, long viewCount) {
         ModelShare share = new ModelShare(modelId, token, startsAt, endsAt, 7L);

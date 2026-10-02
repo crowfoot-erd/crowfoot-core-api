@@ -20,6 +20,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import net.java21.crowfoot.common.error.ErrorCode;
+import net.java21.crowfoot.common.error.BusinessException;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -115,6 +118,24 @@ public class ModelShareController {
     /** 사이트맵 원료 — 무인증(1.10.10), 토큰(22자)과 경로가 겹치지 않는 리터럴 경로.
      *  활성 공유 문서 전부(문서당 최신 링크, updated_at desc, 상한 5,000) — 빌드 시
      *  sitemap.xml 생성 스크립트가 소비한다 */
+    /**
+     * 공유 문서 목록 — 무인증. 검색과 페이징이 있다(랜딩의 "더보기"가 여는 목록 화면).
+     * 경로는 한 구간이라 Gateway의 공개 규칙(GET /api/v1/core/shares/*)을 그대로 탄다
+     */
+    @GetMapping("/core/shares/list")
+    public ListApiResponse<GalleryShareResponse> browse(
+            @RequestParam(name = "q", required = false) String query,
+            @RequestParam(name = "sort", defaultValue = "recent") String sort,
+            @RequestParam(name = "page", defaultValue = "1") int page,
+            @RequestParam(name = "size", defaultValue = "12") int size) {
+        if (page < 1 || size < 1 || size > 50 || !(sort.equals("recent") || sort.equals("popular"))
+                || (query != null && query.length() > 100)) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+        }
+        ShareService.GalleryPage result = shareService.browse(query, sort, page, size);
+        return ListApiResponse.paged(result.items(), page, size, result.totalCount());
+    }
+
     @GetMapping("/core/shares/sitemap")
     public ListApiResponse<SitemapShareResponse> sitemap() {
         return ListApiResponse.of(shareService.sitemap());

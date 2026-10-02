@@ -33,6 +33,13 @@ public class CommunityReleaseNoteController {
         return communityPostService.recentReleaseNotes(limit, lang);
     }
 
+    /** 공개 릴리스 노트 전체 — 공개 목록 화면의 목차(최신순, 본문 없음) */
+    @GetMapping("/core/community/release-notes/list")
+    public ListApiResponse<CommunityRecentPostResponse> list(
+            @RequestParam(name = "lang", required = false) String lang) {
+        return communityPostService.allReleaseNotes(lang);
+    }
+
     /** 공개 릴리스 노트 상세 — 마크다운 원문 포함(lang 해석), RELEASE_NOTE가 아니면 404(존재 은닉) */
     @GetMapping("/core/community/release-notes/{post-id}")
     public ApiResponse<CommunityPostDetailResponse> detail(

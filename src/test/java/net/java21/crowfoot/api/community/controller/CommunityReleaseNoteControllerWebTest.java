@@ -51,6 +51,19 @@ class CommunityReleaseNoteControllerWebTest {
     }
 
     @Test
+    @DisplayName("릴리스 노트 전체 목록은 X-USER-ID 없이도 200 — 공개 목록 화면의 목차")
+    void listIsPublicWithoutUserId() throws Exception {
+        given(communityPostService.allReleaseNotes("en")).willReturn(ListApiResponse.of(List.of(
+                new CommunityRecentPostResponse("9", "RELEASE_NOTE", "v1.08", List.of("ko", "en"),
+                        new UserRefResponse("1", "관리자"), 0, Instant.parse("2026-09-18T00:00:00Z")))));
+
+        mockMvc.perform(get("/core/community/release-notes/list").param("lang", "en"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalCount").value(1))
+                .andExpect(jsonPath("$.responses[0].postId").value("9"));
+    }
+
+    @Test
     @DisplayName("limit을 생략하면 서비스에 null이 전달되어 기본값으로 조회된다")
     void recentDefaultsLimitToNull() throws Exception {
         // given

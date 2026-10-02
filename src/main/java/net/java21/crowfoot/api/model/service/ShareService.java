@@ -183,6 +183,57 @@ public class ShareService {
                 .toList();
     }
 
+    /** 공유 문서 목록 한 페이지 (08-core/12-share-feedback.md Section 1.5.1) */
+    public record GalleryPage(List<GalleryShareResponse> items, long totalCount) {
+    }
+
+    /**
+     * 공유 문서 목록(무인증) — 갤러리와 같은 후보(활성 링크, 문서당 최신 1건)를 검색어로 거르고 정렬해 한 페이지를 내려준다.
+     * 랜딩의 "더보기"가 여는 목록 화면이 쓴다. 검색은 문서 이름과 설명의 부분 일치(대소문자 무시)다.
+     *
+     * @param query 검색어 — null·빈 문자열이면 전체
+     * @param sort  recent(최근 공유순, 기본) 또는 popular(반응 수 → 조회 수 → 최근 공유순)
+     */
+    @Transactional(readOnly = true)
+    public GalleryPage browse(String query, String sort, int page, int size) {
+        Instant now = Instant.now();
+        Map<Long, ModelShare> latestByModel = new LinkedHashMap<>();
+        for (ModelShare share : shareRepository.findAllByOrderByCreatedAtDescIdDesc()) {
+            if (isActive(share, now)) {
+                latestByModel.putIfAbsent(share.getModelId(), share);
+            }
+        }
+        if (latestByModel.isEmpty()) {
+            return new GalleryPage(List.of(), 0);
+        }
+        Map<Long, Model> models = modelRepository.findAllById(latestByModel.keySet()).stream()
+                .collect(Collectors.toMap(Model::getId, Function.identity()));
+        String needle = query == null ? "" : query.strip().toLowerCase(java.util.Locale.ROOT);
+        List<GalleryShareResponse> matched = new ArrayList<>();
+        for (Map.Entry<Long, ModelShare> entry : latestByModel.entrySet()) {
+            Model model = models.get(entry.getKey());
+            if (model == null) {
+                continue;
+            }
+            String haystack = (model.getName() + "\n" + (model.getDescription() == null ? "" : model.getDescription()))
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (!needle.isEmpty() && !haystack.contains(needle)) {
+                continue;
+            }
+            ModelShare share = entry.getValue();
+            matched.add(new GalleryShareResponse(share.getShareToken(), model.getName(), model.getDescription(),
+                    model.getDatabaseType(), model.getUpdatedAt(), share.getCreatedAt(), model.getReactionCount(), share.getViewCount()));
+        }
+        // 후보는 이미 최근 공유순이다 — 인기순일 때만 다시 정렬한다(안정 정렬이라 동률은 최근 공유순으로 남는다)
+        if ("popular".equals(sort)) {
+            matched.sort(Comparator.comparingLong(GalleryShareResponse::reactionCount).reversed()
+                    .thenComparing(GalleryShareResponse::viewCount, Comparator.reverseOrder()));
+        }
+        int from = Math.min((page - 1) * size, matched.size());
+        int to = Math.min(from + size, matched.size());
+        return new GalleryPage(List.copyOf(matched.subList(from, to)), matched.size());
+    }
+
     /**
      * 사이트맵 원료(무인증, 08-core/02-model.md Section 1.10.10) — 활성 공유 문서 전부를
      * 문서당 최신 링크 토큰 + 문서 갱신시각(lastmod)으로 내려준다(빌드 시 sitemap.xml 생성이

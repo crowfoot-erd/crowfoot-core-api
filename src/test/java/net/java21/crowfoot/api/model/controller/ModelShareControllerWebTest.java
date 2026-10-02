@@ -165,6 +165,30 @@ class ModelShareControllerWebTest {
     }
 
     @Test
+    @DisplayName("공유 문서 목록은 X-USER-ID 없이도 200 — 검색어·정렬·페이지를 넘기고 페이징 메타를 내려준다")
+    void browseIsPublicAndPaged() throws Exception {
+        given(shareService.browse("주문", "popular", 2, 12)).willReturn(new ShareService.GalleryPage(
+                List.of(new GalleryShareResponse("Ab3xYz0123456789QrStUv", "주문 ERD", "설명", "postgresql",
+                        Instant.parse("2026-09-16T09:00:00Z"), Instant.parse("2026-09-15T07:30:00Z"), 7L, 42L)), 13));
+
+        mockMvc.perform(get("/core/shares/list").param("q", "주문").param("sort", "popular").param("page", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(2))
+                .andExpect(jsonPath("$.size").value(12))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.totalCount").value(13))
+                .andExpect(jsonPath("$.responses[0].modelName").value("주문 ERD"));
+    }
+
+    @Test
+    @DisplayName("공유 문서 목록 — 페이지·크기·정렬이 범위를 벗어나면 400")
+    void browseRejectsBadParams() throws Exception {
+        mockMvc.perform(get("/core/shares/list").param("page", "0")).andExpect(status().isBadRequest());
+        mockMvc.perform(get("/core/shares/list").param("size", "51")).andExpect(status().isBadRequest());
+        mockMvc.perform(get("/core/shares/list").param("sort", "name")).andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("공개 DDL 생성은 X-USER-ID 없이도 200 — 응답 형식은 워크스페이스 경로(1.7)와 같다")
     void ddlIsPublicWithoutUserId() throws Exception {
         given(ddlService.generateShared("tok123")).willReturn(new ModelDdlResponse(
