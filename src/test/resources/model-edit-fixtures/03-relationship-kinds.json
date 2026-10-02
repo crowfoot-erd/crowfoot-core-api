@@ -1,0 +1,511 @@
+{
+  "name" : "식별 관계, 선택 관계(부모 0..1), 1:1 관계, 복합 기본 키의 부모",
+  "databaseType" : "postgresql",
+  "editorComparable" : true,
+  "before" : null,
+  "steps" : [ {
+    "operation" : "schema",
+    "request" : {
+      "tables" : [ {
+        "physicalName" : "orders",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "memo",
+          "dataType" : "TEXT"
+        } ],
+        "primaryKey" : [ "id" ]
+      }, {
+        "physicalName" : "products",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "name",
+          "dataType" : "VARCHAR",
+          "length" : 100,
+          "nullable" : false
+        } ],
+        "primaryKey" : [ "id" ]
+      }, {
+        "physicalName" : "order_items",
+        "columns" : [ {
+          "physicalName" : "quantity",
+          "dataType" : "INT",
+          "nullable" : false
+        } ]
+      }, {
+        "physicalName" : "users",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        } ],
+        "primaryKey" : [ "id" ]
+      }, {
+        "physicalName" : "profiles",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "bio",
+          "dataType" : "TEXT"
+        } ],
+        "primaryKey" : [ "id" ]
+      }, {
+        "physicalName" : "shipments",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        } ],
+        "primaryKey" : [ "id" ]
+      }, {
+        "physicalName" : "item_notes",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "note",
+          "dataType" : "VARCHAR",
+          "length" : 200
+        } ],
+        "primaryKey" : [ "id" ]
+      } ],
+      "relationships" : [ {
+        "parent" : "orders",
+        "child" : "order_items",
+        "identifying" : true
+      }, {
+        "parent" : "products",
+        "child" : "order_items",
+        "identifying" : true
+      }, {
+        "parent" : "users",
+        "child" : "profiles",
+        "type" : "ONE_TO_ONE"
+      }, {
+        "parent" : "users",
+        "child" : "shipments",
+        "parentMultiplicity" : "ZERO_OR_ONE",
+        "childMultiplicity" : "ONE_OR_MORE",
+        "onDelete" : "SET_NULL"
+      }, {
+        "parent" : "order_items",
+        "child" : "item_notes",
+        "onDelete" : "CASCADE"
+      } ]
+    }
+  } ],
+  "expected" : {
+    "schemaVersion" : 1,
+    "model" : {
+      "tables" : [ {
+        "id" : "T:orders",
+        "logicalName" : "",
+        "physicalName" : "orders",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:orders.id",
+          "logicalName" : "",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:orders.memo",
+          "logicalName" : "",
+          "physicalName" : "memo",
+          "dataType" : "TEXT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "orders_pk",
+          "columnIds" : [ "C:orders.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:products",
+        "logicalName" : "",
+        "physicalName" : "products",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:products.id",
+          "logicalName" : "",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:products.name",
+          "logicalName" : "",
+          "physicalName" : "name",
+          "dataType" : "VARCHAR",
+          "length" : 100,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "products_pk",
+          "columnIds" : [ "C:products.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:order_items",
+        "logicalName" : "",
+        "physicalName" : "order_items",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:order_items.orders_id",
+          "logicalName" : "",
+          "physicalName" : "orders_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:order_items.products_id",
+          "logicalName" : "",
+          "physicalName" : "products_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:order_items.quantity",
+          "logicalName" : "",
+          "physicalName" : "quantity",
+          "dataType" : "INT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "order_items_pk",
+          "columnIds" : [ "C:order_items.orders_id", "C:order_items.products_id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:users",
+        "logicalName" : "",
+        "physicalName" : "users",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:users.id",
+          "logicalName" : "",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "users_pk",
+          "columnIds" : [ "C:users.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:profiles",
+        "logicalName" : "",
+        "physicalName" : "profiles",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:profiles.id",
+          "logicalName" : "",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:profiles.users_id",
+          "logicalName" : "",
+          "physicalName" : "users_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:profiles.bio",
+          "logicalName" : "",
+          "physicalName" : "bio",
+          "dataType" : "TEXT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "profiles_pk",
+          "columnIds" : [ "C:profiles.id" ]
+        },
+        "uniques" : [ {
+          "id" : "U:uk_profiles_users_id",
+          "name" : "uk_profiles_users_id",
+          "columnIds" : [ "C:profiles.users_id" ]
+        } ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:shipments",
+        "logicalName" : "",
+        "physicalName" : "shipments",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:shipments.id",
+          "logicalName" : "",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:shipments.users_id",
+          "logicalName" : "",
+          "physicalName" : "users_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "shipments_pk",
+          "columnIds" : [ "C:shipments.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ {
+          "id" : "I:idx_shipments_users_id",
+          "name" : "idx_shipments_users_id",
+          "columns" : [ {
+            "columnId" : "C:shipments.users_id",
+            "order" : "ASC"
+          } ]
+        } ]
+      }, {
+        "id" : "T:item_notes",
+        "logicalName" : "",
+        "physicalName" : "item_notes",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:item_notes.id",
+          "logicalName" : "",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:item_notes.order_items_orders_id",
+          "logicalName" : "",
+          "physicalName" : "order_items_orders_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:item_notes.order_items_products_id",
+          "logicalName" : "",
+          "physicalName" : "order_items_products_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:item_notes.note",
+          "logicalName" : "",
+          "physicalName" : "note",
+          "dataType" : "VARCHAR",
+          "length" : 200,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "item_notes_pk",
+          "columnIds" : [ "C:item_notes.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ {
+          "id" : "I:idx_item_notes_order_items_orders_id_order_items_products_id",
+          "name" : "idx_item_notes_order_items_orders_id_order_items_products_id",
+          "columns" : [ {
+            "columnId" : "C:item_notes.order_items_orders_id",
+            "order" : "ASC"
+          }, {
+            "columnId" : "C:item_notes.order_items_products_id",
+            "order" : "ASC"
+          } ]
+        } ]
+      } ],
+      "relationships" : [ {
+        "id" : "R:fk_order_items_orders",
+        "name" : "fk_order_items_orders",
+        "parentTableId" : "T:orders",
+        "childTableId" : "T:order_items",
+        "type" : "ONE_TO_MANY",
+        "identifying" : true,
+        "parentMultiplicity" : "EXACTLY_ONE",
+        "childMultiplicity" : "ZERO_OR_MORE",
+        "fkName" : "fk_order_items_orders",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:orders.id",
+          "childColumnId" : "C:order_items.orders_id"
+        } ],
+        "onDelete" : "NO_ACTION",
+        "onUpdate" : "NO_ACTION"
+      }, {
+        "id" : "R:fk_order_items_products",
+        "name" : "fk_order_items_products",
+        "parentTableId" : "T:products",
+        "childTableId" : "T:order_items",
+        "type" : "ONE_TO_MANY",
+        "identifying" : true,
+        "parentMultiplicity" : "EXACTLY_ONE",
+        "childMultiplicity" : "ZERO_OR_MORE",
+        "fkName" : "fk_order_items_products",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:products.id",
+          "childColumnId" : "C:order_items.products_id"
+        } ],
+        "onDelete" : "NO_ACTION",
+        "onUpdate" : "NO_ACTION"
+      }, {
+        "id" : "R:fk_profiles_users",
+        "name" : "fk_profiles_users",
+        "parentTableId" : "T:users",
+        "childTableId" : "T:profiles",
+        "type" : "ONE_TO_ONE",
+        "identifying" : false,
+        "parentMultiplicity" : "EXACTLY_ONE",
+        "childMultiplicity" : "ZERO_OR_ONE",
+        "fkName" : "fk_profiles_users",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:users.id",
+          "childColumnId" : "C:profiles.users_id"
+        } ],
+        "onDelete" : "NO_ACTION",
+        "onUpdate" : "NO_ACTION"
+      }, {
+        "id" : "R:fk_shipments_users",
+        "name" : "fk_shipments_users",
+        "parentTableId" : "T:users",
+        "childTableId" : "T:shipments",
+        "type" : "ONE_TO_MANY",
+        "identifying" : false,
+        "parentMultiplicity" : "ZERO_OR_ONE",
+        "childMultiplicity" : "ONE_OR_MORE",
+        "fkName" : "fk_shipments_users",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:users.id",
+          "childColumnId" : "C:shipments.users_id"
+        } ],
+        "onDelete" : "SET_NULL",
+        "onUpdate" : "NO_ACTION"
+      }, {
+        "id" : "R:fk_item_notes_order_items",
+        "name" : "fk_item_notes_order_items",
+        "parentTableId" : "T:order_items",
+        "childTableId" : "T:item_notes",
+        "type" : "ONE_TO_MANY",
+        "identifying" : false,
+        "parentMultiplicity" : "EXACTLY_ONE",
+        "childMultiplicity" : "ZERO_OR_MORE",
+        "fkName" : "fk_item_notes_order_items",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:order_items.orders_id",
+          "childColumnId" : "C:item_notes.order_items_orders_id"
+        }, {
+          "parentColumnId" : "C:order_items.products_id",
+          "childColumnId" : "C:item_notes.order_items_products_id"
+        } ],
+        "onDelete" : "CASCADE",
+        "onUpdate" : "NO_ACTION"
+      } ]
+    },
+    "diagram" : {
+      "nodes" : { },
+      "notes" : [ ],
+      "areas" : [ ],
+      "requirements" : [ ],
+      "viewport" : null
+    }
+  }
+}

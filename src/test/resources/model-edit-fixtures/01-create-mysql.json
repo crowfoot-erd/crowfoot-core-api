@@ -1,0 +1,263 @@
+{
+  "name" : "새 문서에 테이블, 키, 인덱스, 관계, 그룹을 만든다 — MySQL(외래 키 인덱스를 만들지 않는다)",
+  "databaseType" : "mysql",
+  "editorComparable" : true,
+  "before" : null,
+  "steps" : [ {
+    "operation" : "schema",
+    "request" : {
+      "tables" : [ {
+        "physicalName" : "users",
+        "logicalName" : "회원",
+        "description" : "서비스에 가입한 사람",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "logicalName" : "회원 ID",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "email",
+          "dataType" : "VARCHAR",
+          "logicalName" : "이메일",
+          "length" : 191,
+          "nullable" : false
+        }, {
+          "physicalName" : "name",
+          "dataType" : "VARCHAR",
+          "logicalName" : "이름",
+          "length" : 50
+        } ],
+        "primaryKey" : [ "id" ],
+        "uniques" : [ {
+          "columns" : [ "email" ]
+        } ]
+      }, {
+        "physicalName" : "orders",
+        "logicalName" : "주문",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "logicalName" : "주문 ID",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "status",
+          "dataType" : "VARCHAR",
+          "logicalName" : "상태",
+          "length" : 20,
+          "nullable" : false,
+          "defaultValue" : "'PENDING'"
+        }, {
+          "physicalName" : "total_amount",
+          "dataType" : "DECIMAL",
+          "logicalName" : "주문 금액",
+          "precision" : 15,
+          "scale" : 2,
+          "nullable" : false
+        }, {
+          "physicalName" : "ordered_at",
+          "dataType" : "DATETIME",
+          "logicalName" : "주문 일시",
+          "nullable" : false
+        } ],
+        "primaryKey" : [ "id" ],
+        "indexes" : [ {
+          "columns" : [ {
+            "name" : "status"
+          }, {
+            "name" : "ordered_at",
+            "order" : "DESC"
+          } ]
+        } ]
+      } ],
+      "relationships" : [ {
+        "parent" : "users",
+        "child" : "orders"
+      } ],
+      "areas" : [ {
+        "name" : "회원",
+        "color" : "blue",
+        "tables" : [ "users" ]
+      }, {
+        "name" : "주문",
+        "color" : "orange",
+        "tables" : [ "orders" ]
+      } ]
+    }
+  } ],
+  "expected" : {
+    "schemaVersion" : 1,
+    "model" : {
+      "tables" : [ {
+        "id" : "T:users",
+        "logicalName" : "회원-----서비스에 가입한 사람",
+        "physicalName" : "users",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:users.id",
+          "logicalName" : "회원 ID",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:users.email",
+          "logicalName" : "이메일",
+          "physicalName" : "email",
+          "dataType" : "VARCHAR",
+          "length" : 191,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:users.name",
+          "logicalName" : "이름",
+          "physicalName" : "name",
+          "dataType" : "VARCHAR",
+          "length" : 50,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "users_pk",
+          "columnIds" : [ "C:users.id" ]
+        },
+        "uniques" : [ {
+          "id" : "U:uk_users_email",
+          "name" : "uk_users_email",
+          "columnIds" : [ "C:users.email" ]
+        } ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:orders",
+        "logicalName" : "주문",
+        "physicalName" : "orders",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:orders.id",
+          "logicalName" : "주문 ID",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:orders.users_id",
+          "logicalName" : "회원 ID",
+          "physicalName" : "users_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:orders.status",
+          "logicalName" : "상태",
+          "physicalName" : "status",
+          "dataType" : "VARCHAR",
+          "length" : 20,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : "'PENDING'",
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:orders.total_amount",
+          "logicalName" : "주문 금액",
+          "physicalName" : "total_amount",
+          "dataType" : "DECIMAL",
+          "length" : null,
+          "precision" : 15,
+          "scale" : 2,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:orders.ordered_at",
+          "logicalName" : "주문 일시",
+          "physicalName" : "ordered_at",
+          "dataType" : "DATETIME",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "orders_pk",
+          "columnIds" : [ "C:orders.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ {
+          "id" : "I:idx_orders_status_ordered_at",
+          "name" : "idx_orders_status_ordered_at",
+          "columns" : [ {
+            "columnId" : "C:orders.status",
+            "order" : "ASC"
+          }, {
+            "columnId" : "C:orders.ordered_at",
+            "order" : "DESC"
+          } ]
+        } ]
+      } ],
+      "relationships" : [ {
+        "id" : "R:fk_orders_users",
+        "name" : "fk_orders_users",
+        "parentTableId" : "T:users",
+        "childTableId" : "T:orders",
+        "type" : "ONE_TO_MANY",
+        "identifying" : false,
+        "parentMultiplicity" : "EXACTLY_ONE",
+        "childMultiplicity" : "ZERO_OR_MORE",
+        "fkName" : "fk_orders_users",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:users.id",
+          "childColumnId" : "C:orders.users_id"
+        } ],
+        "onDelete" : "NO_ACTION",
+        "onUpdate" : "NO_ACTION"
+      } ]
+    },
+    "diagram" : {
+      "nodes" : { },
+      "notes" : [ ],
+      "areas" : [ {
+        "id" : "A:회원",
+        "name" : "회원",
+        "description" : "",
+        "color" : "blue",
+        "tableIds" : [ "T:users" ]
+      }, {
+        "id" : "A:주문",
+        "name" : "주문",
+        "description" : "",
+        "color" : "orange",
+        "tableIds" : [ "T:orders" ]
+      } ],
+      "requirements" : [ ],
+      "viewport" : null
+    }
+  }
+}

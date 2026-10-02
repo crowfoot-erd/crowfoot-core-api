@@ -1,0 +1,372 @@
+{
+  "name" : "있는 문서를 고친다 — 이름 바꾸기, 컬럼 추가, 요구사항 개정, 테이블 삭제의 연쇄",
+  "databaseType" : "mysql",
+  "editorComparable" : false,
+  "before" : null,
+  "domainTypes" : [ {
+    "id" : "12",
+    "name" : "금액",
+    "version" : 3,
+    "dataType" : "DECIMAL",
+    "length" : null,
+    "precision" : 15,
+    "scale" : 2,
+    "nullable" : false,
+    "defaultValue" : "0"
+  } ],
+  "steps" : [ {
+    "operation" : "schema",
+    "request" : {
+      "tables" : [ {
+        "physicalName" : "users",
+        "logicalName" : "회원",
+        "description" : "서비스에 가입한 사람",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "logicalName" : "회원 ID",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "email",
+          "dataType" : "VARCHAR",
+          "logicalName" : "이메일",
+          "length" : 191,
+          "nullable" : false
+        }, {
+          "physicalName" : "name",
+          "dataType" : "VARCHAR",
+          "logicalName" : "이름",
+          "length" : 50
+        } ],
+        "primaryKey" : [ "id" ],
+        "uniques" : [ {
+          "columns" : [ "email" ]
+        } ]
+      }, {
+        "physicalName" : "orders",
+        "logicalName" : "주문",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "logicalName" : "주문 ID",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "status",
+          "dataType" : "VARCHAR",
+          "logicalName" : "상태",
+          "length" : 20,
+          "nullable" : false,
+          "defaultValue" : "'PENDING'"
+        }, {
+          "physicalName" : "total_amount",
+          "dataType" : "DECIMAL",
+          "logicalName" : "주문 금액",
+          "precision" : 15,
+          "scale" : 2,
+          "nullable" : false
+        }, {
+          "physicalName" : "ordered_at",
+          "dataType" : "DATETIME",
+          "logicalName" : "주문 일시",
+          "nullable" : false
+        } ],
+        "primaryKey" : [ "id" ],
+        "indexes" : [ {
+          "columns" : [ {
+            "name" : "status"
+          }, {
+            "name" : "ordered_at",
+            "order" : "DESC"
+          } ]
+        } ]
+      }, {
+        "physicalName" : "payments",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "method",
+          "dataType" : "VARCHAR",
+          "length" : 20
+        } ],
+        "primaryKey" : [ "id" ]
+      } ],
+      "relationships" : [ {
+        "parent" : "users",
+        "child" : "orders"
+      }, {
+        "parent" : "orders",
+        "child" : "payments"
+      } ],
+      "areas" : [ {
+        "name" : "회원",
+        "color" : "blue",
+        "tables" : [ "users" ]
+      }, {
+        "name" : "주문",
+        "color" : "orange",
+        "tables" : [ "orders" ]
+      } ]
+    }
+  }, {
+    "operation" : "requirements",
+    "request" : {
+      "items" : [ {
+        "title" : "주문을 만든다",
+        "status" : "confirmed",
+        "domain" : "주문",
+        "tables" : [ "orders" ]
+      }, {
+        "title" : "결제한다",
+        "status" : "confirmed",
+        "domain" : "주문",
+        "tables" : [ "payments" ]
+      } ]
+    }
+  }, {
+    "operation" : "schema",
+    "request" : {
+      "tables" : [ {
+        "physicalName" : "orders",
+        "rename" : "purchase_orders",
+        "logicalName" : "구매 주문",
+        "columns" : [ {
+          "physicalName" : "status",
+          "rename" : "order_status"
+        }, {
+          "physicalName" : "discount_amount",
+          "domainType" : "금액",
+          "logicalName" : "할인 금액"
+        } ],
+        "requirementCodes" : [ "REQ-001" ]
+      } ],
+      "areas" : [ {
+        "name" : "주문",
+        "rename" : "주문·결제",
+        "tables" : [ "purchase_orders", "payments" ]
+      } ]
+    }
+  }, {
+    "operation" : "requirements",
+    "request" : {
+      "items" : [ {
+        "code" : "REQ-002",
+        "title" : "여러 수단으로 나누어 결제한다"
+      } ]
+    }
+  }, {
+    "operation" : "remove",
+    "request" : {
+      "tables" : [ "payments" ],
+      "columns" : [ {
+        "table" : "users",
+        "column" : "name"
+      } ]
+    }
+  } ],
+  "expected" : {
+    "schemaVersion" : 1,
+    "model" : {
+      "tables" : [ {
+        "id" : "T:users",
+        "logicalName" : "회원-----서비스에 가입한 사람",
+        "physicalName" : "users",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:users.id",
+          "logicalName" : "회원 ID",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:users.email",
+          "logicalName" : "이메일",
+          "physicalName" : "email",
+          "dataType" : "VARCHAR",
+          "length" : 191,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        } ],
+        "primaryKey" : {
+          "name" : "users_pk",
+          "columnIds" : [ "C:users.id" ]
+        },
+        "uniques" : [ {
+          "id" : "U:uk_users_email",
+          "name" : "uk_users_email",
+          "columnIds" : [ "C:users.email" ]
+        } ],
+        "indexes" : [ ]
+      }, {
+        "id" : "T:purchase_orders",
+        "logicalName" : "구매 주문",
+        "physicalName" : "purchase_orders",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:purchase_orders.id",
+          "logicalName" : "주문 ID",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null
+        }, {
+          "id" : "C:purchase_orders.users_id",
+          "logicalName" : "회원 ID",
+          "physicalName" : "users_id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:purchase_orders.order_status",
+          "logicalName" : "상태",
+          "physicalName" : "order_status",
+          "dataType" : "VARCHAR",
+          "length" : 20,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : "'PENDING'",
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:purchase_orders.total_amount",
+          "logicalName" : "주문 금액",
+          "physicalName" : "total_amount",
+          "dataType" : "DECIMAL",
+          "length" : null,
+          "precision" : 15,
+          "scale" : 2,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:purchase_orders.ordered_at",
+          "logicalName" : "주문 일시",
+          "physicalName" : "ordered_at",
+          "dataType" : "DATETIME",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null
+        }, {
+          "id" : "C:purchase_orders.discount_amount",
+          "logicalName" : "할인 금액",
+          "physicalName" : "discount_amount",
+          "dataType" : "DECIMAL",
+          "length" : null,
+          "precision" : 15,
+          "scale" : 2,
+          "nullable" : false,
+          "defaultValue" : "0",
+          "autoIncrement" : false,
+          "comment" : null,
+          "domain" : {
+            "id" : "12",
+            "name" : "금액",
+            "version" : 3,
+            "overrides" : [ ]
+          }
+        } ],
+        "primaryKey" : {
+          "name" : "orders_pk",
+          "columnIds" : [ "C:purchase_orders.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ {
+          "id" : "I:idx_orders_status_ordered_at",
+          "name" : "idx_orders_status_ordered_at",
+          "columns" : [ {
+            "columnId" : "C:purchase_orders.order_status",
+            "order" : "ASC"
+          }, {
+            "columnId" : "C:purchase_orders.ordered_at",
+            "order" : "DESC"
+          } ]
+        } ]
+      } ],
+      "relationships" : [ {
+        "id" : "R:fk_orders_users",
+        "name" : "fk_orders_users",
+        "parentTableId" : "T:users",
+        "childTableId" : "T:purchase_orders",
+        "type" : "ONE_TO_MANY",
+        "identifying" : false,
+        "parentMultiplicity" : "EXACTLY_ONE",
+        "childMultiplicity" : "ZERO_OR_MORE",
+        "fkName" : "fk_orders_users",
+        "columnMappings" : [ {
+          "parentColumnId" : "C:users.id",
+          "childColumnId" : "C:purchase_orders.users_id"
+        } ],
+        "onDelete" : "NO_ACTION",
+        "onUpdate" : "NO_ACTION"
+      } ]
+    },
+    "diagram" : {
+      "nodes" : { },
+      "notes" : [ ],
+      "areas" : [ {
+        "id" : "A:회원",
+        "name" : "회원",
+        "description" : "",
+        "color" : "blue",
+        "tableIds" : [ "T:users" ]
+      }, {
+        "id" : "A:주문·결제",
+        "name" : "주문·결제",
+        "description" : "",
+        "color" : "orange",
+        "tableIds" : [ "T:purchase_orders" ]
+      } ],
+      "requirements" : [ {
+        "id" : "Q:REQ-001",
+        "code" : "REQ-001",
+        "areaId" : "A:주문·결제",
+        "scope" : "tables",
+        "title" : "주문을 만든다",
+        "description" : "",
+        "status" : "confirmed",
+        "revision" : 1,
+        "appliedRevision" : 1,
+        "tableIds" : [ "T:purchase_orders" ]
+      }, {
+        "id" : "Q:REQ-002",
+        "code" : "REQ-002",
+        "areaId" : "A:주문·결제",
+        "scope" : "tables",
+        "title" : "여러 수단으로 나누어 결제한다",
+        "description" : "",
+        "status" : "confirmed",
+        "revision" : 2,
+        "appliedRevision" : 1,
+        "tableIds" : [ ]
+      } ],
+      "viewport" : null
+    }
+  }
+}
