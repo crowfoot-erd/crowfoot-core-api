@@ -30,7 +30,7 @@ import tools.jackson.databind.node.StringNode;
 
 /**
  * 규칙 일치 시험 — 문서 편집 API가 만드는 본체가 시험 자료의 기대 본체와 같은지 본다
- * (08-core/17-model-edit.md Section 7). 같은 자료로 web의 Vitest가 에디터 코드의 결과를 견준다.
+ * (08-core/17-model-edit.md Section 6). 같은 자료로 web의 Vitest가 에디터 코드의 결과를 견준다.
  *
  * <p>자료의 원천은 docs 리포의 {@code assets/model-edit-fixtures/}이고 이 리포에는 사본을 둔다
  * (CI에는 docs 리포가 없다). 로컬에 docs 리포가 있으면 사본이 원천과 같은지도 본다.
