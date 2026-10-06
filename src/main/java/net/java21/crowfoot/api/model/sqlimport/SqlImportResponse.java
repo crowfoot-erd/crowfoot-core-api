@@ -11,11 +11,13 @@ import java.util.List;
  * @param tableCount        만들어진 테이블 수
  * @param relationshipCount 만들어진 관계(FK) 수
  * @param skipped           읽지 못한 문장·제약 요약 — 문서 생성은 가능한 만큼 진행된 결과다
+ * @param warnings          읽었지만 줄이거나 버린 것 — 미리보기와 같은 목록(v1.34)
  */
 public record SqlImportResponse(
         ModelResponse model,
         int tableCount,
         int relationshipCount,
-        List<String> skipped
+        List<String> skipped,
+        List<String> warnings
 ) {
 }

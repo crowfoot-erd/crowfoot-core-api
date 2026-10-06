@@ -76,8 +76,34 @@ public final class Dialects {
 
         @Override
         public String createIndex(DdlContent.Table table, DdlContent.Index index) {
+            if (!index.btree()) {
+                return null; // FULLTEXT·SPATIAL은 MySQL만 — 생성기가 경고한다
+            }
             return "CREATE INDEX " + index.name() + " ON " + table.physicalName()
-                    + " (" + indexColumns(table, index) + ")";
+                    + " (" + indexColumns(table, index, true) + ")";
+        }
+
+        /** 표준형 — {@code GENERATED ALWAYS AS (식) STORED|VIRTUAL} (MySQL·PostgreSQL) */
+        @Override
+        public String generatedColumnDefinition(DdlContent.Column column) {
+            StringBuilder definition = new StringBuilder(column.physicalName())
+                    .append(' ').append(columnType(column))
+                    .append(" GENERATED ALWAYS AS (").append(column.generated().expression()).append(") ")
+                    .append(generatedStorage(column));
+            if (!column.nullable()) {
+                definition.append(" NOT NULL");
+            }
+            return definition.toString();
+        }
+
+        /** 저장 방식 키워드 — 방언이 한쪽만 지원하면 덮어쓴다 */
+        protected String generatedStorage(DdlContent.Column column) {
+            return column.generated().stored() ? "STORED" : "VIRTUAL";
+        }
+
+        @Override
+        public String onUpdateClause(DdlContent.Column column) {
+            return null;
         }
 
         /* ---------- 마이그레이션 ALTER — ANSI 기본형. 방언이 문법 차이만 덮어쓴다 ---------- */
@@ -133,6 +159,25 @@ public final class Dialects {
         @Override
         public String autoIncrementInline(DdlContent.Column column) {
             return column.autoIncrement() ? "AUTO_INCREMENT" : null;
+        }
+
+        @Override
+        public String onUpdateClause(DdlContent.Column column) {
+            return column.onUpdate() == null ? null : "ON UPDATE " + column.onUpdate();
+        }
+
+        @Override
+        public String createIndex(DdlContent.Table table, DdlContent.Index index) {
+            if (index.btree()) {
+                return super.createIndex(table, index);
+            }
+            // FULLTEXT·SPATIAL — 컬럼 정렬을 받지 않는다. 전문 검색 파서는 FULLTEXT에만 붙는다
+            String statement = "CREATE " + index.type() + " INDEX " + index.name() + " ON " + table.physicalName()
+                    + " (" + indexColumns(table, index, false) + ")";
+            if (DdlContent.Index.FULLTEXT.equals(index.type()) && index.parser() != null) {
+                statement += " WITH PARSER " + index.parser();
+            }
+            return statement;
         }
 
         @Override
@@ -193,6 +238,12 @@ public final class Dialects {
 
     private static final class PostgresDialect extends BaseDialect {
 
+        /** PostgreSQL 생성 컬럼은 STORED만 — 가상형은 STORED로 내고 생성기가 경고한다 */
+        @Override
+        protected String generatedStorage(DdlContent.Column column) {
+            return "STORED";
+        }
+
         private PostgresDialect() {
             super("postgres");
         }
@@ -219,9 +270,8 @@ public final class Dialects {
             if (before.nullable() != after.nullable()) {
                 clauses.add("ALTER COLUMN " + name + (after.nullable() ? " DROP NOT NULL" : " SET NOT NULL"));
             }
-            String beforeDefault = DdlGenerator.normalizedDefault(before);
-            String afterDefault = DdlGenerator.normalizedDefault(after);
-            if (!java.util.Objects.equals(beforeDefault, afterDefault)) {
+            String afterDefault = DefaultLiterals.render(after, id());
+            if (!DefaultLiterals.sameDefault(before, after)) {
                 clauses.add(afterDefault == null
                         ? "ALTER COLUMN " + name + " DROP DEFAULT"
                         : "ALTER COLUMN " + name + " SET DEFAULT " + afterDefault);
@@ -248,6 +298,12 @@ public final class Dialects {
 
         private OracleDialect() {
             super("oracle");
+        }
+
+        /** Oracle 생성 컬럼은 VIRTUAL만 — 저장형은 VIRTUAL로 내고 생성기가 경고한다 */
+        @Override
+        protected String generatedStorage(DdlContent.Column column) {
+            return "VIRTUAL";
         }
 
         @Override
@@ -280,6 +336,20 @@ public final class Dialects {
 
         private MssqlDialect() {
             super("mssql");
+        }
+
+        /** SQL Server 계산 컬럼 — 타입 없이 {@code AS (식) [PERSISTED]}. NOT NULL은 PERSISTED에서만 쓸 수 있다 */
+        @Override
+        public String generatedColumnDefinition(DdlContent.Column column) {
+            StringBuilder definition = new StringBuilder(column.physicalName())
+                    .append(" AS (").append(column.generated().expression()).append(")");
+            if (column.generated().stored()) {
+                definition.append(" PERSISTED");
+                if (!column.nullable()) {
+                    definition.append(" NOT NULL");
+                }
+            }
+            return definition.toString();
         }
 
         @Override
@@ -338,10 +408,14 @@ public final class Dialects {
 
     /** Oracle 컬럼 속성 — DEFAULT가 NOT NULL 앞에 오는 Oracle 문법 순서 */
     private static String oracleColumnAttributes(DdlContent.Column column, SqlDialect dialect) {
+        if (column.generated() != null) {
+            return dialect.generatedColumnDefinition(column);
+        }
         StringBuilder attributes = new StringBuilder(column.physicalName())
                 .append(' ').append(dialect.columnType(column));
-        if (column.defaultValue() != null) {
-            attributes.append(" DEFAULT ").append(column.defaultValue());
+        String defaultLiteral = DefaultLiterals.render(column, dialect.id());
+        if (defaultLiteral != null) {
+            attributes.append(" DEFAULT ").append(defaultLiteral);
         }
         if (!column.nullable()) {
             attributes.append(" NOT NULL");
@@ -379,12 +453,12 @@ public final class Dialects {
     }
 
     /** 인덱스 컬럼 목록 표기 — 존재하는 컬럼만, 컬럼별 정렬 포함 */
-    private static String indexColumns(DdlContent.Table table, DdlContent.Index index) {
+    private static String indexColumns(DdlContent.Table table, DdlContent.Index index, boolean withOrder) {
         List<String> parts = new ArrayList<>();
         for (DdlContent.IndexColumn indexColumn : index.columns()) {
             DdlContent.Column column = columnById(table, indexColumn.columnId());
             if (column != null) {
-                parts.add(column.physicalName() + " " + indexColumn.order());
+                parts.add(withOrder ? column.physicalName() + " " + indexColumn.order() : column.physicalName());
             }
         }
         return String.join(", ", parts);

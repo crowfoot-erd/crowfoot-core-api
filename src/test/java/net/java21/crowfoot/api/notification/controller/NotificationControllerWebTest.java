@@ -41,7 +41,7 @@ class NotificationControllerWebTest {
     void listReturnsPagedNotifications() throws Exception {
         given(notificationService.list(7L, null, null)).willReturn(ListApiResponse.paged(List.of(
                 new NotificationResponse("41", "COMMENT_CREATED", null, "지나가던 DBA",
-                        "501", "주문 ERD", "77", false, Instant.parse("2026-09-28T10:00:00Z"))), 1, 20, 1));
+                        "501", "주문 ERD", "77", null, null, null, false, Instant.parse("2026-09-28T10:00:00Z"))), 1, 20, 1));
 
         mockMvc.perform(get("/core/notifications").header("X-USER-ID", "7"))
                 .andExpect(status().isOk())

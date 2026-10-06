@@ -39,7 +39,8 @@ public final class ErdContentParser {
                     columns,
                     keyConstraint(table.path("primaryKey")),
                     items(table.path("uniques"), ErdContentParser::keyConstraint),
-                    items(table.path("indexes"), ErdContentParser::index));
+                    items(table.path("indexes"), ErdContentParser::index),
+                    items(table.path("checks"), ErdContentParser::check));
         });
     }
 
@@ -59,7 +60,26 @@ public final class ErdContentParser {
                 node.path("nullable").asBoolean(true),
                 text(node, "defaultValue"),
                 node.path("autoIncrement").asBoolean(false),
-                text(node, "logicalName"));
+                text(node, "logicalName"),
+                generated(node.path("generated")),
+                text(node, "onUpdate"));
+    }
+
+    /** 생성 컬럼 — 식이 있어야 의미가 있다 */
+    private static DdlContent.Generated generated(JsonNode node) {
+        if (!node.isObject()) {
+            return null;
+        }
+        String expression = text(node, "expression");
+        return expression == null ? null
+                : new DdlContent.Generated(expression, node.path("stored").asBoolean(true));
+    }
+
+    /** CHECK 제약 — 이름·식이 둘 다 있어야 의미가 있다 */
+    private static DdlContent.Check check(JsonNode node) {
+        String name = text(node, "name");
+        String expression = text(node, "expression");
+        return name == null || expression == null ? null : new DdlContent.Check(name, expression);
     }
 
     /** PK·UK — 이름·컬럼 목록이 둘 다 있어야 의미가 있다 */
@@ -85,7 +105,10 @@ public final class ErdContentParser {
         if (name == null || columns.isEmpty()) {
             return null;
         }
-        return new DdlContent.Index(name, columns);
+        String type = text(node, "type");
+        return new DdlContent.Index(name, columns,
+                type == null ? DdlContent.Index.BTREE : type.toUpperCase(java.util.Locale.ROOT),
+                text(node, "parser"));
     }
 
     private static List<DdlContent.Relationship> relationships(JsonNode array) {

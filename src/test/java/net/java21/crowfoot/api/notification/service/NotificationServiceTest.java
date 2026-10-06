@@ -53,9 +53,9 @@ class NotificationServiceTest {
         given(queryRepository.countByUserId(2L)).willReturn(21L);
         given(queryRepository.findByUserIdOrderByIdDesc(2L, 20L, 20)).willReturn(List.of(
                 new NotificationRow(41L, "COMMENT_CREATED", 8L, "다른회원", null, 501L, "주문 ERD",
-                        77L, null, CREATED),
+                        77L, null, null, null, null, CREATED),
                 new NotificationRow(40L, "COMMENT_CREATED", null, null, "지나가던 DBA", 501L, "주문 ERD",
-                        77L, CREATED, CREATED.minusSeconds(60))));
+                        77L, null, null, null, CREATED, CREATED.minusSeconds(60))));
 
         ListApiResponse<NotificationResponse> response = notificationService.list(2L, 2, 20);
 

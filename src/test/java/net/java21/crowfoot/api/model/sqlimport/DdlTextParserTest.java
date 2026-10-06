@@ -54,12 +54,14 @@ class DdlTextParserTest {
         assertThat(email.comment()).isEqualTo("로그인 이메일");
         IntrospectedSchema.IntrospectedColumn grade = member.columns().get(2);
         assertThat(grade.defaultValue()).isEqualTo("basic"); // 문자열 리터럴은 따옴표 제거 값
-        assertThat(member.columns().get(3).defaultValue()).isEqualTo("current_timestamp");
+        assertThat(member.columns().get(3).defaultValue()).isEqualTo("CURRENT_TIMESTAMP"); // 단어는 원문 대소문자
 
         // 일반 인덱스(KEY …)는 v1 읽기 범위 밖 — skipped에 남는다
+        // 일반 인덱스(KEY …)는 인덱스로 읽는다(v1.34)
         assertThat(parser.parse("""
                 CREATE TABLE t (a INT, KEY idx_a (a));
-                """).skipped()).anyMatch(s -> s.contains("idx_a"));
+                """).schema().tables().get(0).indexes()).extracting(IntrospectedSchema.IntrospectedIndex::name)
+                .containsExactly("idx_a");
     }
 
     @Test
@@ -188,7 +190,8 @@ class DdlTextParserTest {
                 );
                 """);
 
-        assertThat(schema.tables().get(0).columns().get(1).defaultValue()).isEqualTo("current_timestamp");
+        assertThat(schema.tables().get(0).columns().get(1).defaultValue()).isEqualTo("CURRENT_TIMESTAMP");
+        assertThat(schema.tables().get(0).columns().get(1).onUpdate()).isEqualTo("CURRENT_TIMESTAMP");
         assertThat(schema.foreignKeys()).isEmpty();
     }
 
@@ -221,5 +224,51 @@ class DdlTextParserTest {
         assertThat(orders.primaryKeyColumns()).containsExactly("order_id", "user_id");
         assertThat(orders.columns()).allSatisfy(c -> assertThat(c.nullable()).isFalse());
         assertThat(schema.tables().get(1).primaryKeyColumns()).containsExactly("id");
+    }
+
+    @Test
+    @DisplayName("v1.34 — 인덱스·FULLTEXT 파서·CHECK·생성 컬럼·ON UPDATE·소수 초·VARBINARY 길이·경고")
+    void readsV134Scope() {
+        DdlTextParser.DdlParseResult result = parser.parse("""
+                SET FOREIGN_KEY_CHECKS = 0;
+                CREATE TABLE posts (
+                  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                  title VARCHAR(200) NOT NULL,
+                  body MEDIUMTEXT NULL,
+                  email_enc VARBINARY(512) NOT NULL,
+                  status VARCHAR(15) NOT NULL DEFAULT 'DRAFT',
+                  hash CHAR(64) AS (CASE WHEN status = 'PUBLISHED' THEN sha2(title, 256) ELSE NULL END) STORED,
+                  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+                  qty INT CHECK (qty >= 0),
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_posts_hash (hash),
+                  KEY idx_posts_status (status, updated_at DESC),
+                  KEY idx_posts_title_prefix (title(20)),
+                  FULLTEXT KEY ft_posts_title (title, body) WITH PARSER ngram,
+                  CONSTRAINT ck_posts_status CHECK (status IN ('DRAFT', 'PUBLISHED'))
+                );
+                CREATE INDEX idx_posts_qty ON posts (qty);
+                """);
+        IntrospectedSchema.IntrospectedTable posts = result.schema().tables().get(0);
+        assertThat(posts.primaryKeyName()).isEqualTo("posts_pk");
+        assertThat(posts.columns().get(3).length()).isEqualTo(512);
+        assertThat(posts.columns().get(4).defaultValue()).isEqualTo("DRAFT");
+        IntrospectedSchema.IntrospectedColumn hash = posts.columns().get(5);
+        assertThat(hash.generatedExpression()).isEqualTo("CASE WHEN status = 'PUBLISHED' THEN sha2(title, 256) ELSE NULL END");
+        assertThat(hash.generatedStored()).isTrue();
+        IntrospectedSchema.IntrospectedColumn updatedAt = posts.columns().get(6);
+        assertThat(updatedAt.precision()).isEqualTo(6);
+        assertThat(updatedAt.defaultValue()).isEqualTo("CURRENT_TIMESTAMP(6)");
+        assertThat(updatedAt.onUpdate()).isEqualTo("CURRENT_TIMESTAMP(6)");
+        assertThat(posts.checks()).extracting(IntrospectedSchema.IntrospectedCheck::name, IntrospectedSchema.IntrospectedCheck::expression)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("posts_qty_check", "qty >= 0"),
+                        org.assertj.core.groups.Tuple.tuple("ck_posts_status", "status IN ('DRAFT', 'PUBLISHED')"));
+        assertThat(posts.indexes()).extracting(IntrospectedSchema.IntrospectedIndex::name)
+                .containsExactly("idx_posts_status", "idx_posts_title_prefix", "ft_posts_title", "idx_posts_qty");
+        assertThat(posts.indexes().get(0).columns().get(1).order()).isEqualTo("DESC");
+        assertThat(posts.indexes().get(2).type()).isEqualTo("FULLTEXT");
+        assertThat(posts.indexes().get(2).parser()).isEqualTo("ngram");
+        assertThat(result.warnings()).anyMatch(w -> w.contains("UNSIGNED")).anyMatch(w -> w.contains("접두 길이(20)"));
+        assertThat(result.skipped()).anyMatch(s -> s.contains("세션 문장"));
     }
 }

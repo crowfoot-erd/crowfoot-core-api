@@ -35,9 +35,74 @@ class NotificationRecorderTest {
     private NotificationRepository notificationRepository;
     @Mock
     private NotificationWriter notificationWriter;
+    @Mock
+    private net.java21.crowfoot.api.account.repository.UserRepository userRepository;
 
     @InjectMocks
     private NotificationRecorder recorder;
+
+    @Test
+    @DisplayName("제안 및 신고 글에 남이 댓글을 달면 글쓴이에게 COMMUNITY_COMMENT_CREATED — 게시글 id·제목 스냅샷, 문서 없음")
+    void communityCommentNotifiesPostAuthor() {
+        recorder.notifyCommunityCommentCreated(41L, 2L, "배포 SQL 문법 오류", 7L, 61L);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        then(notificationWriter).should().insert(captor.capture());
+        Notification saved = captor.getValue();
+        assertThat(saved.getUserId()).isEqualTo(2L);          // 수신자 = 글쓴이
+        assertThat(saved.getType()).isEqualTo("COMMUNITY_COMMENT_CREATED");
+        assertThat(saved.getActorUserId()).isEqualTo(7L);
+        assertThat(saved.getPostId()).isEqualTo(41L);
+        assertThat(saved.getPostTitle()).isEqualTo("배포 SQL 문법 오류");
+        assertThat(saved.getCommentId()).isEqualTo(61L);
+        assertThat(saved.getModelId()).isNull();
+        assertThat(saved.getModelName()).isNull();
+    }
+
+    @Test
+    @DisplayName("관리자가 일반 사용자 글에 댓글을 달면 그 사용자에게 알림이 간다")
+    void adminCommentNotifiesPostAuthor() {
+        recorder.notifyCommunityCommentCreated(41L, 9L, "검색 필터 개선 제안", 2L, 63L); // 2 = 관리자, 9 = 글쓴이
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        then(notificationWriter).should().insert(captor.capture());
+        assertThat(captor.getValue().getUserId()).isEqualTo(9L);
+        assertThat(captor.getValue().getActorUserId()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("제안 및 신고 새 글은 관리자 전원에게 FEEDBACK_POST_CREATED — 작성자인 관리자 본인은 빠진다")
+    void feedbackPostNotifiesAdminsExceptAuthor() {
+        org.mockito.BDDMockito.given(userRepository.findActiveAdminIds()).willReturn(java.util.List.of(2L, 5L));
+
+        recorder.notifyFeedbackPostCreated(41L, "검색 필터 개선 제안", 7L); // 일반 사용자 글
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        then(notificationWriter).should(org.mockito.Mockito.times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues()).extracting(Notification::getUserId).containsExactly(2L, 5L);
+        assertThat(captor.getAllValues()).allSatisfy(n -> {
+            assertThat(n.getType()).isEqualTo("FEEDBACK_POST_CREATED");
+            assertThat(n.getPostId()).isEqualTo(41L);
+            assertThat(n.getActorUserId()).isEqualTo(7L);
+        });
+    }
+
+    @Test
+    @DisplayName("관리자가 직접 쓴 제안 및 신고 글은 본인에게 알림이 없다")
+    void feedbackPostByAdminSkipsSelf() {
+        org.mockito.BDDMockito.given(userRepository.findActiveAdminIds()).willReturn(java.util.List.of(2L));
+
+        recorder.notifyFeedbackPostCreated(42L, "운영 공지 초안", 2L);
+
+        then(notificationWriter).shouldHaveNoInteractions();
+    }
+
+    @Test
+    @DisplayName("글쓴이가 자기 글에 댓글을 달면 알림이 없다")
+    void ownCommunityCommentIsSkipped() {
+        recorder.notifyCommunityCommentCreated(41L, 2L, "배포 SQL 문법 오류", 2L, 62L);
+
+        then(notificationWriter).shouldHaveNoInteractions();
+    }
 
     @Test
     @DisplayName("타인의 회원 원댓글은 오너에게 COMMENT_CREATED — actor=회원 id, 별명 없음")

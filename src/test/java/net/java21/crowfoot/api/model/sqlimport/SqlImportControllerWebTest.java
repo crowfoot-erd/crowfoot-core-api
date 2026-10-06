@@ -37,7 +37,7 @@ class SqlImportControllerWebTest {
                 .willReturn(new SqlImportPreviewResponse("mysql", 1, 0,
                         List.of(new SqlImportPreviewResponse.PreviewTable(
                                 "t", "테이블", 1, List.of("a"), 0)),
-                        List.of("CREATE INDEX idx_t_a ON t (a)")));
+                        List.of("VIEW v"), List.of("t.a: UNSIGNED — 문서에 담지 않음")));
 
         mockMvc.perform(post("/core/workspaces/77/models/sql-import/preview")
                         .header("X-USER-ID", "7")
@@ -49,7 +49,8 @@ class SqlImportControllerWebTest {
                 .andExpect(jsonPath("$.response.relationshipCount").value(0))
                 .andExpect(jsonPath("$.response.tables[0].name").value("t"))
                 .andExpect(jsonPath("$.response.tables[0].primaryKeyColumns[0]").value("a"))
-                .andExpect(jsonPath("$.response.skipped[0]").value("CREATE INDEX idx_t_a ON t (a)"));
+                .andExpect(jsonPath("$.response.skipped[0]").value("VIEW v"))
+                .andExpect(jsonPath("$.response.warnings[0]").value("t.a: UNSIGNED — 문서에 담지 않음"));
     }
 
     @Test
@@ -62,7 +63,7 @@ class SqlImportControllerWebTest {
                         "{\"schemaVersion\":1,\"tables\":[],\"relationships\":[]}", 0,
                         new UserRefResponse("7", "marco"),
                         Instant.parse("2026-09-17T00:00:00Z"), Instant.parse("2026-09-17T00:00:00Z")),
-                        1, 0, List.of()));
+                        1, 0, List.of(), List.of()));
 
         mockMvc.perform(post("/core/workspaces/77/models/sql-import")
                         .header("X-USER-ID", "7")

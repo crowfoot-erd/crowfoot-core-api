@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.community.service;
 
+import net.java21.crowfoot.api.notification.service.NotificationRecorder;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
@@ -58,6 +59,7 @@ public class CommunityPostService {
     private final UserRepository userRepository;
     private final AdminGuard adminGuard;
     private final AuditRecorder auditRecorder;
+    private final NotificationRecorder notificationRecorder;
 
     /** 목록 — 게시판 내 최신순(id desc), keyword는 제목 부분 일치, title은 lang 해석 */
     @Transactional(readOnly = true)
@@ -137,6 +139,11 @@ public class CommunityPostService {
         CommunityPost post = communityPostRepository.save(new CommunityPost(board, title, content, userId));
         auditRecorder.record(userId, "COMMUNITY_POST_CREATED", "COMMUNITY_POST", post.getId().toString(),
                 Map.of("board", board.name()));
+        if (board == CommunityBoard.FEEDBACK) {
+            // 관리자에게 새 글 알림(08-core/11-notification.md Section 2.2) — MCP 버그 신고도 이 경로를 지난다
+            notificationRecorder.notifyFeedbackPostCreated(post.getId(),
+                    LocalizedTexts.resolve(post.getTitleI18n(), "ko"), userId);
+        }
         return toDetail(post, "ko");
     }
 

@@ -1,0 +1,220 @@
+{
+  "name" : "CHECK 제약, 생성 컬럼, ON UPDATE, 소수 초, 전문 검색 인덱스를 만들고 고친다 — MySQL (v1.34)",
+  "databaseType" : "mysql",
+  "editorComparable" : false,
+  "before" : null,
+  "steps" : [ {
+    "operation" : "schema",
+    "request" : {
+      "tables" : [ {
+        "physicalName" : "posts",
+        "logicalName" : "글",
+        "columns" : [ {
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "logicalName" : "글 ID",
+          "autoIncrement" : true
+        }, {
+          "physicalName" : "title",
+          "dataType" : "VARCHAR",
+          "length" : 200,
+          "nullable" : false,
+          "logicalName" : "제목"
+        }, {
+          "physicalName" : "body",
+          "dataType" : "MEDIUMTEXT",
+          "logicalName" : "본문"
+        }, {
+          "physicalName" : "status",
+          "dataType" : "VARCHAR",
+          "length" : 15,
+          "nullable" : false,
+          "defaultValue" : "DRAFT",
+          "logicalName" : "상태"
+        }, {
+          "physicalName" : "status_rank",
+          "dataType" : "INT",
+          "logicalName" : "상태 순서",
+          "generated" : {
+            "expression" : "(case when status = 'PUBLISHED' then 1 else 0 end)",
+            "stored" : true
+          }
+        }, {
+          "physicalName" : "updated_at",
+          "dataType" : "DATETIME",
+          "precision" : 6,
+          "nullable" : false,
+          "defaultValue" : "CURRENT_TIMESTAMP(6)",
+          "onUpdate" : "CURRENT_TIMESTAMP(6)",
+          "logicalName" : "수정 시각"
+        } ],
+        "primaryKey" : [ "id" ],
+        "indexes" : [ {
+          "name" : "ft_posts_title",
+          "columns" : [ {
+            "name" : "title"
+          }, {
+            "name" : "body"
+          } ],
+          "type" : "FULLTEXT",
+          "parser" : "ngram"
+        } ],
+        "checks" : [ {
+          "name" : "ck_posts_status",
+          "expression" : "(status IN ('DRAFT', 'PUBLISHED'))"
+        }, {
+          "expression" : "char_length(title) > 0"
+        } ]
+      } ]
+    }
+  }, {
+    "operation" : "schema",
+    "request" : {
+      "tables" : [ {
+        "physicalName" : "posts",
+        "columns" : [ {
+          "physicalName" : "status_rank",
+          "generated" : {
+            "expression" : ""
+          }
+        } ],
+        "checks" : [ {
+          "name" : "ck_posts_status",
+          "expression" : "status IN ('DRAFT', 'PUBLISHED', 'HIDDEN')"
+        } ]
+      } ]
+    }
+  } ],
+  "expected" : {
+    "schemaVersion" : 1,
+    "model" : {
+      "tables" : [ {
+        "id" : "T:posts",
+        "logicalName" : "글",
+        "physicalName" : "posts",
+        "comment" : null,
+        "columns" : [ {
+          "id" : "C:posts.id",
+          "logicalName" : "글 ID",
+          "physicalName" : "id",
+          "dataType" : "BIGINT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : true,
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
+        }, {
+          "id" : "C:posts.title",
+          "logicalName" : "제목",
+          "physicalName" : "title",
+          "dataType" : "VARCHAR",
+          "length" : 200,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
+        }, {
+          "id" : "C:posts.body",
+          "logicalName" : "본문",
+          "physicalName" : "body",
+          "dataType" : "MEDIUMTEXT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
+        }, {
+          "id" : "C:posts.status",
+          "logicalName" : "상태",
+          "physicalName" : "status",
+          "dataType" : "VARCHAR",
+          "length" : 15,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : "DRAFT",
+          "autoIncrement" : false,
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
+        }, {
+          "id" : "C:posts.status_rank",
+          "logicalName" : "상태 순서",
+          "physicalName" : "status_rank",
+          "dataType" : "INT",
+          "length" : null,
+          "precision" : null,
+          "scale" : null,
+          "nullable" : true,
+          "defaultValue" : null,
+          "autoIncrement" : false,
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
+        }, {
+          "id" : "C:posts.updated_at",
+          "logicalName" : "수정 시각",
+          "physicalName" : "updated_at",
+          "dataType" : "DATETIME",
+          "length" : null,
+          "precision" : 6,
+          "scale" : null,
+          "nullable" : false,
+          "defaultValue" : "CURRENT_TIMESTAMP(6)",
+          "autoIncrement" : false,
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : "CURRENT_TIMESTAMP(6)"
+        } ],
+        "primaryKey" : {
+          "name" : "posts_pk",
+          "columnIds" : [ "C:posts.id" ]
+        },
+        "uniques" : [ ],
+        "indexes" : [ {
+          "id" : "I:ft_posts_title",
+          "name" : "ft_posts_title",
+          "columns" : [ {
+            "columnId" : "C:posts.title",
+            "order" : "ASC"
+          }, {
+            "columnId" : "C:posts.body",
+            "order" : "ASC"
+          } ],
+          "type" : "FULLTEXT",
+          "parser" : "ngram"
+        } ],
+        "checks" : [ {
+          "id" : "id-9",
+          "name" : "ck_posts_status",
+          "expression" : "status IN ('DRAFT', 'PUBLISHED', 'HIDDEN')"
+        }, {
+          "id" : "id-10",
+          "name" : "ck_posts_1",
+          "expression" : "char_length(title) > 0"
+        } ]
+      } ],
+      "relationships" : [ ]
+    },
+    "diagram" : {
+      "nodes" : { },
+      "notes" : [ ],
+      "areas" : [ ],
+      "requirements" : [ ],
+      "viewport" : null,
+      "validationExceptions" : [ ]
+    }
+  }
+}

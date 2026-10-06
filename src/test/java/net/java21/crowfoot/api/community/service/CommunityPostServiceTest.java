@@ -63,6 +63,8 @@ class CommunityPostServiceTest {
     private AdminGuard adminGuard;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private net.java21.crowfoot.api.notification.service.NotificationRecorder notificationRecorder;
 
     @InjectMocks
     private CommunityPostService communityPostService;
@@ -104,6 +106,8 @@ class CommunityPostServiceTest {
         assertThat(response.author().name()).isEqualTo("marco");
         verify(adminGuard, never()).requireAdmin(anyLong());
         then(auditRecorder).should().record(7L, "COMMUNITY_POST_CREATED", "COMMUNITY_POST", "41", Map.of("board", "FEEDBACK"));
+        // 관리자에게 새 글 알림 — 수신자 선정·작성자 제외는 Recorder가 한다
+        then(notificationRecorder).should().notifyFeedbackPostCreated(41L, "검색 필터 개선 제안", 7L);
     }
 
     @Test

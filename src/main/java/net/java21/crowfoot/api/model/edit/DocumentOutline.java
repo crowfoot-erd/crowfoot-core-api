@@ -165,6 +165,15 @@ public final class DocumentOutline {
                 item.put("nullable", column.path("nullable").asBoolean(true));
                 item.put("defaultValue", column.path("defaultValue").isTextual() ? column.path("defaultValue").asText() : null);
                 item.put("autoIncrement", column.path("autoIncrement").asBoolean(false));
+                if (column.path("generated").isObject()) {
+                    Map<String, Object> generated = new LinkedHashMap<>();
+                    generated.put("expression", column.path("generated").path("expression").asText(""));
+                    generated.put("stored", column.path("generated").path("stored").asBoolean(true));
+                    item.put("generated", generated);
+                } else {
+                    item.put("generated", null);
+                }
+                item.put("onUpdate", column.path("onUpdate").isTextual() ? column.path("onUpdate").asText() : null);
                 item.put("primaryKey", pk.contains(columnId));
                 item.put("foreignKey", fk.contains(columnId));
                 item.put("domainType", column.path("domain").path("name").isTextual() ? column.path("domain").path("name").asText() : null);
@@ -189,7 +198,16 @@ public final class DocumentOutline {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("name", index.path("name").asText(""));
                 item.put("columns", indexColumns);
+                item.put("type", index.path("type").asText("BTREE"));
+                item.put("parser", index.path("parser").isTextual() ? index.path("parser").asText() : null);
                 indexes.add(item);
+            }
+            List<Map<String, Object>> checks = new ArrayList<>();
+            for (JsonNode check : table.path("checks")) {
+                Map<String, Object> checkItem = new LinkedHashMap<>();
+                checkItem.put("name", check.path("name").asText(""));
+                checkItem.put("expression", check.path("expression").asText(""));
+                checks.add(checkItem);
             }
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("physicalName", table.path("physicalName").asText());
@@ -200,6 +218,7 @@ public final class DocumentOutline {
             item.put("primaryKey", pkNames);
             item.put("uniques", uniques);
             item.put("indexes", indexes);
+            item.put("checks", checks);
             item.put("areas", areasOfTable.getOrDefault(tableId, List.of()));
             item.put("requirementCodes", codesOfTable.getOrDefault(tableId, List.of()));
             tables.add(item);
@@ -215,6 +234,18 @@ public final class DocumentOutline {
         out.put("areas", areas);
         out.put("untracedTables", untraced);
         out.put("requirementSummary", requirementSummary(root));
+        // 검증 예외 — 사용자가 의도된 예외로 둔 경고(05-editor/05-validation.md Section 4.4)
+        List<Map<String, Object>> exceptions = new ArrayList<>();
+        for (JsonNode exception : diagram.path("validationExceptions")) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("ruleId", exception.path("ruleId").asText(""));
+            item.put("target", exception.path("target").asText(""));
+            item.put("reason", exception.path("reason").asText(""));
+            item.put("createdBy", exception.path("createdBy").isTextual() ? exception.path("createdBy").asText() : null);
+            item.put("createdAt", exception.path("createdAt").isTextual() ? exception.path("createdAt").asText() : null);
+            exceptions.add(item);
+        }
+        out.put("validationExceptions", exceptions);
         return out;
     }
 

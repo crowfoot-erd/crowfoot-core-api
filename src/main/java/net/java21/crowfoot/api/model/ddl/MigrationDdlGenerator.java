@@ -53,7 +53,8 @@ public final class MigrationDdlGenerator {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.COMMON_DIALECT,
                     ddl("ddl.common-dialect", null, "이 문서의 DBMS는 SQL 방언이 등록되지 않아 공용(논리) 표기로 생성했습니다")));
         }
-        warnings.addAll(DdlGenerator.validationWarnings(to));
+        warnings.addAll(DdlGenerator.validationWarnings(to, !"postgres".equals(dialect.id())));
+        warnings.addAll(DdlGenerator.capabilityWarnings(to, dialect));
 
         List<String> createsAdds = new ArrayList<>();
         List<String> alters = new ArrayList<>();
@@ -83,8 +84,16 @@ public final class MigrationDdlGenerator {
                         }
                     }
                 }
-                case SchemaDiffer.IndexAdded added -> createsAdds.add(
-                        dialect.createIndex(added.table(), added.index()) + ";");
+                case SchemaDiffer.IndexAdded added -> {
+                    String statement = dialect.createIndex(added.table(), added.index());
+                    if (statement != null) {
+                        createsAdds.add(statement + ";");
+                    }
+                }
+                case SchemaDiffer.CheckAdded added -> createsAdds.add("ALTER TABLE " + added.table().physicalName()
+                        + " ADD " + DdlGenerator.checkDefinition(added.check()) + ";");
+                case SchemaDiffer.CheckDropped dropped -> constraintDrops.add(
+                        dialect.dropConstraint(dropped.table(), dropped.check().name(), SqlDialect.KIND_CHECK));
                 case SchemaDiffer.CommentRefresh refresh -> {
                     // commentRefresh는 세미콜론 없이 돌려준다(commentStatements 관례) — 문장으로 조립해 붙인다
                     for (String statement : dialect.commentRefresh(refresh.table(),
@@ -102,8 +111,12 @@ public final class MigrationDdlGenerator {
                 }
                 case SchemaDiffer.ColumnDropped dropped -> columnDrops.add(
                         dialect.dropColumn(dropped.table(), dropped.column()));
-                case SchemaDiffer.IndexDropped dropped -> indexDrops.add(
-                        dialect.dropIndex(dropped.table(), dropped.index()));
+                case SchemaDiffer.IndexDropped dropped -> {
+                    // 이 방언이 만들지 못하는 종류는 DB에도 없다 — 삭제 문장도 내지 않는다
+                    if (dialect.createIndex(dropped.table(), dropped.index()) != null) {
+                        indexDrops.add(dialect.dropIndex(dropped.table(), dropped.index()));
+                    }
+                }
                 case SchemaDiffer.TableDropped dropped -> tableDrops.add(
                         "DROP TABLE " + dropped.table().physicalName() + ";");
             }
@@ -157,7 +170,7 @@ public final class MigrationDdlGenerator {
         }
         if (change.after() != null) {
             String definitionKind = SqlDialect.KIND_PRIMARY.equals(change.kind()) ? "PRIMARY KEY" : "UNIQUE";
-            String definition = DdlGenerator.constraintDefinition(definitionKind, change.table(), change.after());
+            String definition = DdlGenerator.constraintDefinition(definitionKind, change.table(), change.after(), dialect);
             if (definition != null) {
                 if (sameName) {
                     createsAdds.add(dialect.dropConstraint(change.table(), change.before().name(), change.kind()));
@@ -189,6 +202,12 @@ public final class MigrationDdlGenerator {
                     ddl("ddl.default-mssql", new Object[]{target},
                             "SQL Server는 ALTER COLUMN으로 기본값을 바꿀 수 없습니다 — DEFAULT 제약을 별도로 관리하세요: "
                                     + target)));
+        }
+        // 생성식 변경은 MySQL MODIFY만 문장으로 담는다 — 나머지 방언은 컬럼을 다시 만들어야 한다
+        if (fields.contains(SchemaDiffer.FIELD_GENERATED) && !mysql) {
+            warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.VALIDATION,
+                    ddl("ddl.generated-alter-unsupported", new Object[]{target},
+                            "생성 컬럼 변경은 이 DBMS의 ALTER 문으로 반영하지 않습니다: " + target)));
         }
         if (fields.contains(SchemaDiffer.FIELD_AUTO_INCREMENT) && !mysql) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.VALIDATION,

@@ -116,7 +116,8 @@ public class PostgresIntrospector implements SchemaIntrospector {
 
         String columnSql = """
                 SELECT table_name, column_name, udt_name, character_maximum_length,
-                       numeric_precision, numeric_scale, is_nullable, column_default, is_identity
+                       numeric_precision, numeric_scale, is_nullable, column_default, is_identity,
+                       datetime_precision, is_generated, generation_expression
                 FROM information_schema.columns
                 WHERE table_schema = ?
                 ORDER BY table_name, ordinal_position
@@ -134,15 +135,26 @@ public class PostgresIntrospector implements SchemaIntrospector {
                             || (rawDefault != null && rawDefault.startsWith("nextval("));
                     // serial의 nextval 기본값은 자동 증가로 흡수 — DEFAULT로 남기면 DDL 재생성 시 identity와 충돌
                     String defaultValue = autoIncrement ? null : stripCastSuffix(rawDefault);
+                    String udtName = rs.getString(3);
+                    // 날짜시간의 소수 초는 precision에 — PostgreSQL 기본값 6은 null로 둔다
+                    Integer precision = getInteger(rs, 5);
+                    if (FRACTIONAL_TYPES.contains(udtName)) {
+                        Integer fsp = getInteger(rs, 10);
+                        precision = fsp == null || fsp == DEFAULT_FRACTION ? null : fsp;
+                    }
+                    boolean generated = "ALWAYS".equals(rs.getString(11)) && rs.getString(12) != null;
                     builder.columns.add(new IntrospectedSchema.IntrospectedColumn(
                             rs.getString(2),
-                            rs.getString(3),
+                            udtName,
                             getInteger(rs, 4),
-                            getInteger(rs, 5),
+                            precision,
                             getInteger(rs, 6),
                             "YES".equals(rs.getString(7)),
-                            defaultValue,
+                            generated ? null : defaultValue,
                             autoIncrement,
+                            null,
+                            generated ? stripOuterParens(rs.getString(12)) : null,
+                            true, // PostgreSQL 생성 컬럼은 STORED만 있다
                             null));
                 }
             }
@@ -250,9 +262,137 @@ public class PostgresIntrospector implements SchemaIntrospector {
             }
         }
 
+        readChecks(connection, schema, builders);
+        readIndexes(connection, schema, builders);
+
         return new IntrospectedSchema(
                 builders.values().stream().map(TableBuilder::build).toList(),
                 List.copyOf(foreignKeys));
+    }
+
+    /** 소수 초를 갖는 udt_name */
+    private static final java.util.Set<String> FRACTIONAL_TYPES = java.util.Set.of("time", "timetz", "timestamp", "timestamptz");
+
+    /** PostgreSQL의 소수 초 기본값 — 정밀도를 적지 않은 TIMESTAMP는 6이다 */
+    private static final int DEFAULT_FRACTION = 6;
+
+    /** CHECK 제약 — pg_get_constraintdef의 "CHECK ((식))"에서 식만. NOT VALID 표시는 버린다 */
+    private static void readChecks(Connection connection, String schema, Map<String, TableBuilder> builders)
+            throws SQLException {
+        String sql = """
+                SELECT c.relname, con.conname, pg_get_constraintdef(con.oid)
+                FROM pg_constraint con
+                JOIN pg_class c ON c.oid = con.conrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE con.contype = 'c' AND n.nspname = ?
+                ORDER BY c.relname, con.conname
+                """;
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    TableBuilder builder = builders.get(rs.getString(1));
+                    String definition = rs.getString(3);
+                    if (builder == null || definition == null) {
+                        continue;
+                    }
+                    String expression = definition.replaceFirst("(?i)^CHECK\\s*", "")
+                            .replaceFirst("(?i)\\s+NOT VALID$", "");
+                    builder.checks.add(new IntrospectedSchema.IntrospectedCheck(
+                            rs.getString(2), stripOuterParens(expression)));
+                }
+            }
+        }
+    }
+
+    /** 일반 인덱스 — 제약이 만든 인덱스(PK·UK)·식 인덱스·btree 외 방식은 뺀다. 제약 없는 유니크 인덱스는 유니크 키로.
+     *  indoption 비트 1이 DESC다 */
+    private static void readIndexes(Connection connection, String schema, Map<String, TableBuilder> builders)
+            throws SQLException {
+        String sql = """
+                SELECT t.relname, i.relname, a.attname, (ix.indoption[k.ord - 1] & 1) AS descending, ix.indisunique
+                FROM pg_index ix
+                JOIN pg_class t ON t.oid = ix.indrelid
+                JOIN pg_class i ON i.oid = ix.indexrelid
+                JOIN pg_namespace n ON n.oid = t.relnamespace
+                JOIN pg_am am ON am.oid = i.relam
+                JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
+                LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+                WHERE n.nspname = ? AND NOT ix.indisprimary AND am.amname = 'btree'
+                  AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = ix.indexrelid)
+                ORDER BY t.relname, i.relname, k.ord
+                """;
+        Map<String, List<IntrospectedSchema.IndexColumn>> columnsByIndex = new LinkedHashMap<>();
+        Map<String, String> tableByIndex = new java.util.HashMap<>();
+        java.util.Set<String> uniqueIndexes = new java.util.HashSet<>();
+        java.util.Set<String> expressionIndexes = new java.util.HashSet<>();
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String table = rs.getString(1);
+                    String index = rs.getString(2);
+                    if (!builders.containsKey(table)) {
+                        continue;
+                    }
+                    tableByIndex.put(index, table);
+                    if (rs.getBoolean(5)) {
+                        uniqueIndexes.add(index); // 제약 없는 유니크 인덱스(CREATE UNIQUE INDEX) — 유니크 키로 읽는다
+                    }
+                    List<IntrospectedSchema.IndexColumn> columns = columnsByIndex.computeIfAbsent(index, k -> new ArrayList<>());
+                    String column = rs.getString(3);
+                    if (column == null) {
+                        expressionIndexes.add(index); // attnum 0 — 식 인덱스
+                        continue;
+                    }
+                    columns.add(new IntrospectedSchema.IndexColumn(column, rs.getInt(4) == 1 ? "DESC" : "ASC"));
+                }
+            }
+        }
+        for (Map.Entry<String, List<IntrospectedSchema.IndexColumn>> entry : columnsByIndex.entrySet()) {
+            if (expressionIndexes.contains(entry.getKey()) || entry.getValue().isEmpty()) {
+                continue;
+            }
+            TableBuilder builder = builders.get(tableByIndex.get(entry.getKey()));
+            if (uniqueIndexes.contains(entry.getKey())) {
+                builder.uniques.add(new IntrospectedSchema.IntrospectedUnique(entry.getKey(),
+                        entry.getValue().stream().map(IntrospectedSchema.IndexColumn::name).toList()));
+                continue;
+            }
+            builder.indexes.add(new IntrospectedSchema.IntrospectedIndex(
+                    entry.getKey(), List.copyOf(entry.getValue()), "BTREE", null));
+        }
+    }
+
+    /** 바깥 괄호 한 겹씩 벗기기 — "((a > 0))" → "a > 0". (a) OR (b)처럼 앞뒤 괄호가 짝이 아니면 멈춘다 */
+    static String stripOuterParens(String expression) {
+        if (expression == null) {
+            return null;
+        }
+        String text = expression.strip();
+        while (text.startsWith("(") && text.endsWith(")") && wrapsAll(text)) {
+            text = text.substring(1, text.length() - 1).strip();
+        }
+        return text;
+    }
+
+    private static boolean wrapsAll(String text) {
+        int depth = 0;
+        boolean quoted = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\'') {
+                quoted = !quoted;
+            } else if (!quoted && c == '(') {
+                depth++;
+            } else if (!quoted && c == ')') {
+                depth--;
+                if (depth == 0 && i < text.length() - 1) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /** 기본 스키마 — JDBC getSchema()는 search_path와 다를 수 있어 서버에 직접 묻는다 */
@@ -317,6 +457,8 @@ public class PostgresIntrospector implements SchemaIntrospector {
         private final String comment;
         private final List<IntrospectedSchema.IntrospectedColumn> columns = new ArrayList<>();
         private final List<IntrospectedSchema.IntrospectedUnique> uniques = new ArrayList<>();
+        private final List<IntrospectedSchema.IntrospectedIndex> indexes = new ArrayList<>();
+        private final List<IntrospectedSchema.IntrospectedCheck> checks = new ArrayList<>();
         private String primaryKeyName;
         private List<String> primaryKeyColumns = List.of();
 
@@ -331,7 +473,8 @@ public class PostgresIntrospector implements SchemaIntrospector {
                 if (column.name().equals(columnName)) {
                     columns.set(i, new IntrospectedSchema.IntrospectedColumn(
                             column.name(), column.typeName(), column.length(), column.precision(), column.scale(),
-                            column.nullable(), column.defaultValue(), column.autoIncrement(), comment));
+                            column.nullable(), column.defaultValue(), column.autoIncrement(), comment,
+                            column.generatedExpression(), column.generatedStored(), column.onUpdate()));
                     return;
                 }
             }
@@ -339,7 +482,8 @@ public class PostgresIntrospector implements SchemaIntrospector {
 
         private IntrospectedSchema.IntrospectedTable build() {
             return new IntrospectedSchema.IntrospectedTable(
-                    name, comment, List.copyOf(columns), primaryKeyName, primaryKeyColumns, List.copyOf(uniques));
+                    name, comment, List.copyOf(columns), primaryKeyName, primaryKeyColumns, List.copyOf(uniques),
+                    List.copyOf(indexes), List.copyOf(checks));
         }
     }
 

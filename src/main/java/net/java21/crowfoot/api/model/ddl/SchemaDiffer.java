@@ -35,6 +35,8 @@ public final class SchemaDiffer {
     public static final String FIELD_NULLABLE = "NULLABLE";
     public static final String FIELD_DEFAULT = "DEFAULT";
     public static final String FIELD_AUTO_INCREMENT = "AUTO_INCREMENT";
+    public static final String FIELD_GENERATED = "GENERATED";
+    public static final String FIELD_ON_UPDATE = "ON_UPDATE";
 
     private SchemaDiffer() {
     }
@@ -44,7 +46,8 @@ public final class SchemaDiffer {
     }
 
     public sealed interface Change permits TableAdded, TableDropped, ColumnAdded, ColumnDropped, ColumnAltered,
-            KeyAltered, ForeignKeyAdded, ForeignKeyDropped, IndexAdded, IndexDropped, CommentRefresh {
+            KeyAltered, ForeignKeyAdded, ForeignKeyDropped, IndexAdded, IndexDropped, CheckAdded, CheckDropped,
+            CommentRefresh {
     }
 
     public record TableAdded(DdlContent.Table table) implements Change {
@@ -82,6 +85,13 @@ public final class SchemaDiffer {
     }
 
     public record IndexDropped(DdlContent.Table table, DdlContent.Index index) implements Change {
+    }
+
+    /** CHECK 제약 — 이름이 정체성이다. 식이 다르면 삭제 후 추가. table은 항상 to 쪽 */
+    public record CheckAdded(DdlContent.Table table, DdlContent.Check check) implements Change {
+    }
+
+    public record CheckDropped(DdlContent.Table table, DdlContent.Check check) implements Change {
     }
 
     /** 코멘트(논리명) 갱신 — columnPhysicalName이 null이면 테이블 코멘트. table은 to 쪽 */
@@ -168,6 +178,21 @@ public final class SchemaDiffer {
             changes.addAll(indexChanges);
         }
 
+        for (DdlContent.Check toCheck : toTable.checks()) {
+            DdlContent.Check fromCheck = findFirstByName(fromTable.checks(), toCheck.name(), DdlContent.Check::name);
+            if (fromCheck == null) {
+                changes.add(new CheckAdded(toTable, toCheck));
+            } else if (!Objects.equals(expressionKey(fromCheck.expression()), expressionKey(toCheck.expression()))) {
+                changes.add(new CheckDropped(toTable, fromCheck));
+                changes.add(new CheckAdded(toTable, toCheck));
+            }
+        }
+        for (DdlContent.Check fromCheck : fromTable.checks()) {
+            if (findFirstByName(toTable.checks(), fromCheck.name(), DdlContent.Check::name) == null) {
+                changes.add(new CheckDropped(toTable, fromCheck));
+            }
+        }
+
         if (!Objects.equals(fromTable.logicalName(), toTable.logicalName())) {
             changes.add(new CommentRefresh(toTable, null));
         }
@@ -182,13 +207,36 @@ public final class SchemaDiffer {
         if (before.nullable() != after.nullable()) {
             fields.add(FIELD_NULLABLE);
         }
-        if (!Objects.equals(DdlGenerator.normalizedDefault(before), DdlGenerator.normalizedDefault(after))) {
+        if (!DefaultLiterals.sameDefault(before, after)) {
             fields.add(FIELD_DEFAULT);
         }
         if (before.autoIncrement() != after.autoIncrement()) {
             fields.add(FIELD_AUTO_INCREMENT);
         }
+        if (!sameGenerated(before.generated(), after.generated())) {
+            fields.add(FIELD_GENERATED);
+        }
+        if (!Objects.equals(expressionKey(before.onUpdate()), expressionKey(after.onUpdate()))) {
+            fields.add(FIELD_ON_UPDATE);
+        }
         return List.copyOf(fields);
+    }
+
+    private static boolean sameGenerated(DdlContent.Generated before, DdlContent.Generated after) {
+        if (before == null || after == null) {
+            return before == after;
+        }
+        return before.stored() == after.stored()
+                && Objects.equals(expressionKey(before.expression()), expressionKey(after.expression()));
+    }
+
+    /** 식 비교 키 — DBMS가 돌려줄 때 덧붙이는 괄호·백틱·큰따옴표·공백과 대소문자를 무시한다
+     *  (MySQL은 {@code (a >= 0)}을 {@code (`a` >= 0)}로 돌려준다). null·빈값은 같다 */
+    static String expressionKey(String expression) {
+        if (expression == null || expression.isBlank()) {
+            return null;
+        }
+        return expression.replaceAll("[()`\"\\s]", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     private static List<Change> indexChanges(DdlContent.Table fromTable, DdlContent.Table toTable) {
@@ -197,7 +245,9 @@ public final class SchemaDiffer {
             DdlContent.Index fromIndex = findIndexByName(fromTable.indexes(), toIndex.name());
             if (fromIndex == null) {
                 changes.add(new IndexAdded(toTable, toIndex));
-            } else if (!sameIndexColumns(fromTable, fromIndex, toTable, toIndex)) {
+            } else if (!sameIndexColumns(fromTable, fromIndex, toTable, toIndex)
+                    || !Objects.equals(indexType(fromIndex), indexType(toIndex))
+                    || !Objects.equals(key(String.valueOf(fromIndex.parser())), key(String.valueOf(toIndex.parser())))) {
                 changes.add(new IndexDropped(toTable, fromIndex));
                 changes.add(new IndexAdded(toTable, toIndex));
             }
@@ -390,6 +440,10 @@ public final class SchemaDiffer {
     private static boolean sameIndexColumns(DdlContent.Table fromTable, DdlContent.Index fromIndex,
                                             DdlContent.Table toTable, DdlContent.Index toIndex) {
         return Objects.equals(indexColumnRefs(fromTable, fromIndex), indexColumnRefs(toTable, toIndex));
+    }
+
+    private static String indexType(DdlContent.Index index) {
+        return index.btree() ? DdlContent.Index.BTREE : index.type();
     }
 
     /** 인덱스 컬럼 동등 — "물리명 정렬방향" 목록(정렬 미지정은 ASC로 본다) */

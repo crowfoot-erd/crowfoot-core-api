@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.java21.crowfoot.api.model.edit.EditRequests.AreaItem;
+import net.java21.crowfoot.api.model.edit.EditRequests.CheckItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnMappingItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnRef;
@@ -47,9 +48,14 @@ public final class DocumentEditor {
     static final Pattern REQUIREMENT_CODE = Pattern.compile("^REQ-(\\d{3,})$");
     static final String SEPARATOR = "-----";
     static final int REQUIREMENT_LIMIT = 500;
-    static final Set<String> DATA_TYPES = Set.of("INT", "BIGINT", "SMALLINT", "TINYINT", "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE",
-            "CHAR", "VARCHAR", "TEXT", "BOOLEAN", "DATE", "TIME", "DATETIME", "TIMESTAMP", "JSON", "UUID", "BLOB");
-    static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR");
+    /** 공용 타입 코드 — DDL 생성기와 같은 카탈로그(05-editor/01-core.md §17) */
+    static final Set<String> DATA_TYPES = net.java21.crowfoot.api.model.ddl.DbmsTemplates.COMMON_TYPES;
+    static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "BINARY", "VARBINARY");
+
+    /** 소수 초 자릿수(0~6)를 precision에 두는 타입 */
+    static final Set<String> FRACTIONAL_TYPES = Set.of("TIME", "DATETIME", "TIMESTAMP");
+
+    static final Set<String> INDEX_TYPES = Set.of("BTREE", "FULLTEXT", "SPATIAL");
     static final Set<String> PRECISION_TYPES = Set.of("DECIMAL", "NUMERIC");
     static final Set<String> INTEGER_TYPES = Set.of("INT", "BIGINT", "SMALLINT", "TINYINT");
     static final Set<String> STATUSES = Set.of("draft", "confirmed", "dropped");
@@ -103,6 +109,10 @@ public final class DocumentEditor {
         this.diagram = (ObjectNode) root.get("diagram");
         this.areas = diagram.get("areas") instanceof ArrayNode array ? array : diagram.putArray("areas");
         this.requirements = diagram.get("requirements") instanceof ArrayNode array ? array : diagram.putArray("requirements");
+        // 검증 예외(v1.34) — 편집 API는 다루지 않지만, 에디터가 여는 본체와 같게 빈 목록을 둔다
+        if (!(diagram.get("validationExceptions") instanceof ArrayNode)) {
+            diagram.putArray("validationExceptions");
+        }
         this.databaseType = databaseType == null ? "" : databaseType;
         this.domainTypes = domainTypes;
         this.ids = ids;
@@ -501,6 +511,7 @@ public final class DocumentEditor {
             table.putNull("primaryKey");
             table.putArray("uniques");
             table.putArray("indexes");
+            table.putArray("checks");
         } else if (item.rename() != null && !item.rename().equalsIgnoreCase(table.path("physicalName").asText())) {
             if (!PHYSICAL_NAME.matcher(item.rename()).matches()) {
                 error(at + ".rename", "물리명은 소문자로 시작하고 소문자·숫자·밑줄만 씁니다(63자 이하): " + item.rename());
@@ -544,6 +555,11 @@ public final class DocumentEditor {
         if (item.indexes() != null) {
             for (int i = 0; i < item.indexes().size(); i++) {
                 applyIndex(at + ".indexes[" + i + "]", table, item.indexes().get(i));
+            }
+        }
+        if (item.checks() != null) {
+            for (int i = 0; i < item.checks().size(); i++) {
+                applyCheck(at + ".checks[" + i + "]", table, item.checks().get(i));
             }
         }
         boolean linked = false;
@@ -660,8 +676,10 @@ public final class DocumentEditor {
                 if (!LENGTH_TYPES.contains(item.dataType())) {
                     column.putNull("length");
                 }
-                if (!PRECISION_TYPES.contains(item.dataType())) {
+                if (!PRECISION_TYPES.contains(item.dataType()) && !FRACTIONAL_TYPES.contains(item.dataType())) {
                     column.putNull("precision");
+                }
+                if (!PRECISION_TYPES.contains(item.dataType())) {
                     column.putNull("scale");
                 }
             }
@@ -669,12 +687,18 @@ public final class DocumentEditor {
         String dataType = column.path("dataType").asText("");
         if (item.length() != null) {
             if (!LENGTH_TYPES.contains(dataType) || item.length() < 1) {
-                error(at + ".length", "length는 CHAR·VARCHAR에만 넣고 1 이상이어야 합니다(" + dataType + ")");
+                error(at + ".length", "length는 CHAR·VARCHAR·BINARY·VARBINARY에만 넣고 1 이상이어야 합니다(" + dataType + ")");
                 return;
             }
             column.put("length", item.length());
         }
-        if (item.precision() != null || item.scale() != null) {
+        if (FRACTIONAL_TYPES.contains(dataType) && (item.precision() != null || item.scale() != null)) {
+            if (item.scale() != null || item.precision() == null || item.precision() < 0 || item.precision() > 6) {
+                error(at + ".precision", "TIME·DATETIME·TIMESTAMP의 precision은 소수 초 자릿수(0~6)이고 scale은 넣지 않습니다");
+                return;
+            }
+            column.put("precision", item.precision());
+        } else if (item.precision() != null || item.scale() != null) {
             if (!PRECISION_TYPES.contains(dataType)) {
                 error(at + ".precision", "precision·scale은 DECIMAL·NUMERIC에만 넣습니다(" + dataType + ")");
                 return;
@@ -698,6 +722,32 @@ public final class DocumentEditor {
         }
         if (item.autoIncrement() != null) {
             column.put("autoIncrement", item.autoIncrement());
+        }
+        if (item.onUpdate() != null) {
+            if (item.onUpdate().length() > 255) {
+                error(at + ".onUpdate", "onUpdate는 255자 이하여야 합니다");
+                return;
+            }
+            putText(column, "onUpdate", item.onUpdate().isBlank() ? null : item.onUpdate().strip());
+        }
+        if (item.generated() != null) {
+            String expression = item.generated().expression();
+            if (expression == null || expression.isBlank()) {
+                column.putNull("generated");
+            } else if (expression.length() > 2000) {
+                error(at + ".generated.expression", "생성식은 2000자 이하여야 합니다");
+                return;
+            } else {
+                column.putObject("generated")
+                        .put("expression", stripOuterParens(expression))
+                        .put("stored", item.generated().stored() == null || item.generated().stored());
+            }
+        }
+        if (column.path("generated").isObject()) {
+            // 생성 컬럼에는 기본값·자동 증가·ON UPDATE가 없다(에디터의 컬럼 정보와 같다)
+            column.putNull("defaultValue");
+            column.put("autoIncrement", false);
+            column.putNull("onUpdate");
         }
         // 도메인 타입 연결
         if (item.domainType() != null && item.domainType().isBlank()) {
@@ -751,7 +801,80 @@ public final class DocumentEditor {
         column.putNull("defaultValue");
         column.put("autoIncrement", false);
         column.putNull("comment");
+        column.putNull("generated");
+        column.putNull("onUpdate");
         return column;
+    }
+
+    /** 식의 바깥 괄호 한 겹씩 — content는 괄호 없는 식을 둔다 */
+    static String stripOuterParens(String expression) {
+        String text = expression.strip();
+        while (text.startsWith("(") && text.endsWith(")")) {
+            int depth = 0;
+            boolean wraps = true;
+            for (int i = 0; i < text.length() && wraps; i++) {
+                char c = text.charAt(i);
+                if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    depth--;
+                    wraps = depth > 0 || i == text.length() - 1;
+                }
+            }
+            if (!wraps) {
+                break;
+            }
+            text = text.substring(1, text.length() - 1).strip();
+        }
+        return text;
+    }
+
+    /** CHECK 제약 — 이름이 같으면 식을 바꾸고, 없으면 더한다. 이름은 문서 전체 키 이름과 겹치면 안 된다 */
+    private void applyCheck(String at, ObjectNode table, CheckItem item) {
+        if (item == null || item.expression() == null || item.expression().isBlank()) {
+            error(at + ".expression", "CHECK 식이 있어야 합니다");
+            return;
+        }
+        if (item.expression().length() > 2000) {
+            error(at + ".expression", "CHECK 식은 2000자 이하여야 합니다");
+            return;
+        }
+        String expression = stripOuterParens(item.expression());
+        String tableName = table.path("physicalName").asText();
+        if (!table.path("checks").isArray()) {
+            table.putArray("checks");
+        }
+        if (item.name() != null) {
+            for (JsonNode check : table.path("checks")) {
+                if (check.path("name").asText("").equalsIgnoreCase(item.name())) {
+                    if (!expression.equals(check.path("expression").asText())) {
+                        ((ObjectNode) check).put("expression", expression);
+                        changes.add(new Change("check", "update", tableName, check.path("name").asText()));
+                    }
+                    return;
+                }
+            }
+        }
+        String name;
+        if (item.name() != null && !item.name().isBlank()) {
+            name = keyName(at, table, item.name(), "ck", List.of());
+            if (name == null) {
+                return;
+            }
+        } else {
+            Set<String> names = documentKeyNames();
+            String base = "ck_" + lower(tableName);
+            int n = 1;
+            while (names.contains(base + "_" + n)) {
+                n++;
+            }
+            name = base + "_" + n;
+        }
+        ObjectNode check = ((ArrayNode) table.get("checks")).addObject();
+        check.put("id", ids.get());
+        check.put("name", name);
+        check.put("expression", expression);
+        changes.add(new Change("check", "add", tableName, name));
     }
 
     private static void putInt(ObjectNode node, String field, Integer value) {
@@ -889,6 +1012,20 @@ public final class DocumentEditor {
             error(at + ".columns", "인덱스의 컬럼이 있어야 합니다");
             return;
         }
+        String indexType = item.type() == null ? "BTREE" : item.type().toUpperCase(Locale.ROOT);
+        if (!INDEX_TYPES.contains(indexType)) {
+            error(at + ".type", "인덱스 종류는 BTREE·FULLTEXT·SPATIAL입니다: " + item.type());
+            return;
+        }
+        String parser = item.parser() == null || item.parser().isBlank() ? null : item.parser().strip();
+        if (parser != null && !"FULLTEXT".equals(indexType)) {
+            error(at + ".parser", "parser는 FULLTEXT 인덱스에만 넣습니다");
+            return;
+        }
+        if (parser != null && !parser.matches("[A-Za-z_][A-Za-z0-9_]{0,63}")) {
+            error(at + ".parser", "parser는 파서 이름(영문·숫자·밑줄)입니다: " + parser);
+            return;
+        }
         List<String> names = new ArrayList<>();
         List<String> orders = new ArrayList<>();
         for (int i = 0; i < item.columns().size(); i++) {
@@ -924,6 +1061,14 @@ public final class DocumentEditor {
                     }
                     i++;
                 }
+                if (!indexType.equals(index.path("type").asText("BTREE"))) {
+                    ((ObjectNode) index).put("type", indexType);
+                    changed = true;
+                }
+                if (!java.util.Objects.equals(parser, index.path("parser").isTextual() ? index.path("parser").asText() : null)) {
+                    putText((ObjectNode) index, "parser", parser);
+                    changed = true;
+                }
                 if (changed) {
                     changes.add(new Change("index", "update", tableName, index.path("name").asText()));
                 }
@@ -934,11 +1079,13 @@ public final class DocumentEditor {
         if (name == null) {
             return;
         }
-        addIndex(table, name, columnIds, orders);
+        ObjectNode added = addIndex(table, name, columnIds, orders);
+        added.put("type", indexType);
+        putText(added, "parser", parser);
         changes.add(new Change("index", "add", tableName, name));
     }
 
-    private void addIndex(ObjectNode table, String name, List<String> columnIds, List<String> orders) {
+    private ObjectNode addIndex(ObjectNode table, String name, List<String> columnIds, List<String> orders) {
         ObjectNode index = ((ArrayNode) table.get("indexes")).addObject();
         index.put("id", ids.get());
         index.put("name", name);
@@ -948,6 +1095,9 @@ public final class DocumentEditor {
             column.put("columnId", columnIds.get(i));
             column.put("order", orders == null ? "ASC" : orders.get(i));
         }
+        index.put("type", "BTREE");
+        index.putNull("parser");
+        return index;
     }
 
     /** 키 이름 — 준 이름은 문서 전체에서 유일해야 하고, 생략하면 기본 이름을 만든다(겹치면 _1, _2…) */
@@ -986,6 +1136,7 @@ public final class DocumentEditor {
             }
             table.path("uniques").forEach(unique -> names.add(lower(unique.path("name").asText(""))));
             table.path("indexes").forEach(index -> names.add(lower(index.path("name").asText(""))));
+            table.path("checks").forEach(check -> names.add(lower(check.path("name").asText(""))));
         }
         relationships.forEach(relationship -> names.add(lower(relationship.path("fkName").asText(""))));
         return names;

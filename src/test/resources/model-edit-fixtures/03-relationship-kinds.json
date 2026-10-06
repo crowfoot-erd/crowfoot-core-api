@@ -121,7 +121,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:orders.memo",
           "logicalName" : "",
@@ -133,14 +135,17 @@
           "nullable" : true,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "orders_pk",
           "columnIds" : [ "C:orders.id" ]
         },
         "uniques" : [ ],
-        "indexes" : [ ]
+        "indexes" : [ ],
+        "checks" : [ ]
       }, {
         "id" : "T:products",
         "logicalName" : "",
@@ -157,7 +162,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:products.name",
           "logicalName" : "",
@@ -169,14 +176,17 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "products_pk",
           "columnIds" : [ "C:products.id" ]
         },
         "uniques" : [ ],
-        "indexes" : [ ]
+        "indexes" : [ ],
+        "checks" : [ ]
       }, {
         "id" : "T:order_items",
         "logicalName" : "",
@@ -193,7 +203,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:order_items.products_id",
           "logicalName" : "",
@@ -205,7 +217,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:order_items.quantity",
           "logicalName" : "",
@@ -217,14 +231,17 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "order_items_pk",
           "columnIds" : [ "C:order_items.orders_id", "C:order_items.products_id" ]
         },
         "uniques" : [ ],
-        "indexes" : [ ]
+        "indexes" : [ ],
+        "checks" : [ ]
       }, {
         "id" : "T:users",
         "logicalName" : "",
@@ -241,14 +258,17 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "users_pk",
           "columnIds" : [ "C:users.id" ]
         },
         "uniques" : [ ],
-        "indexes" : [ ]
+        "indexes" : [ ],
+        "checks" : [ ]
       }, {
         "id" : "T:profiles",
         "logicalName" : "",
@@ -265,7 +285,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:profiles.users_id",
           "logicalName" : "",
@@ -277,7 +299,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:profiles.bio",
           "logicalName" : "",
@@ -289,7 +313,9 @@
           "nullable" : true,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "profiles_pk",
@@ -300,7 +326,8 @@
           "name" : "uk_profiles_users_id",
           "columnIds" : [ "C:profiles.users_id" ]
         } ],
-        "indexes" : [ ]
+        "indexes" : [ ],
+        "checks" : [ ]
       }, {
         "id" : "T:shipments",
         "logicalName" : "",
@@ -317,7 +344,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:shipments.users_id",
           "logicalName" : "",
@@ -329,7 +358,9 @@
           "nullable" : true,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "shipments_pk",
@@ -342,8 +373,11 @@
           "columns" : [ {
             "columnId" : "C:shipments.users_id",
             "order" : "ASC"
-          } ]
-        } ]
+          } ],
+          "type" : "BTREE",
+          "parser" : null
+        } ],
+        "checks" : [ ]
       }, {
         "id" : "T:item_notes",
         "logicalName" : "",
@@ -360,7 +394,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:item_notes.order_items_orders_id",
           "logicalName" : "",
@@ -372,7 +408,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:item_notes.order_items_products_id",
           "logicalName" : "",
@@ -384,7 +422,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:item_notes.note",
           "logicalName" : "",
@@ -396,7 +436,9 @@
           "nullable" : true,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "item_notes_pk",
@@ -412,8 +454,11 @@
           }, {
             "columnId" : "C:item_notes.order_items_products_id",
             "order" : "ASC"
-          } ]
-        } ]
+          } ],
+          "type" : "BTREE",
+          "parser" : null
+        } ],
+        "checks" : [ ]
       } ],
       "relationships" : [ {
         "id" : "R:fk_order_items_orders",
@@ -505,7 +550,8 @@
       "notes" : [ ],
       "areas" : [ ],
       "requirements" : [ ],
-      "viewport" : null
+      "viewport" : null,
+      "validationExceptions" : [ ]
     }
   }
 }

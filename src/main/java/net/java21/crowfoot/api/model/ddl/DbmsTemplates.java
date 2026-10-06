@@ -21,8 +21,29 @@ public final class DbmsTemplates {
     public record DbmsTemplate(String id, String label, Map<String, String> types) {
     }
 
+    /** 공용 타입 코드 카탈로그 — 웹 dbms.ts COMMON_TYPES와 같은 목록(05-editor/01-core.md §17) */
+    public static final Set<String> COMMON_TYPES = Set.of(
+            "INT", "BIGINT", "SMALLINT", "TINYINT", "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE",
+            "CHAR", "VARCHAR", "TEXT", "MEDIUMTEXT", "LONGTEXT", "BOOLEAN",
+            "DATE", "TIME", "DATETIME", "TIMESTAMP", "JSON", "UUID",
+            "BLOB", "BINARY", "VARBINARY");
+
     /** 길이(n) 지정 가능 타입 — 매핑값이 이미 괄호를 포함하면 사용자 지정 크기는 무시된다 */
-    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR");
+    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "BINARY", "VARBINARY");
+
+    /** 길이 없이는 DDL이 실패하는 타입(MySQL VARCHAR·VARBINARY) — 생성 경고 대상 */
+    public static final Set<String> LENGTH_REQUIRED_TYPES = Set.of("VARCHAR", "VARBINARY");
+
+    /** 물리 표기가 길이를 받는 타입 — PostgreSQL BYTEA처럼 길이를 받지 않는 매핑에는 붙이지 않는다 */
+    private static final Set<String> LENGTH_PHYSICAL = Set.of(
+            "CHAR", "VARCHAR", "VARCHAR2", "BINARY", "VARBINARY", "RAW");
+
+    /** 소수 초 자릿수(precision 0~6)를 받는 날짜시간 코드 */
+    private static final Set<String> FRACTIONAL_TYPES = Set.of("TIME", "DATETIME", "TIMESTAMP");
+
+    /** 소수 초를 받는 물리 표기. SQL Server DATETIME은 받지 않는다(DATETIME2만) */
+    private static final Set<String> FRACTIONAL_PHYSICAL = Set.of(
+            "TIME", "TIMESTAMP", "TIMESTAMPTZ", "DATETIME2");
 
     /** 정밀도+스케일(p,s) 지정 가능 타입 */
     private static final Set<String> PRECISION_TYPES = Set.of("DECIMAL", "NUMERIC");
@@ -32,14 +53,18 @@ public final class DbmsTemplates {
             new DbmsTemplate("mysql", "MySQL", Map.of(
                     "BOOLEAN", "TINYINT(1)",
                     "UUID", "CHAR(36)")),
-            new DbmsTemplate("postgres", "PostgreSQL", Map.of(
-                    "INT", "INTEGER",
-                    "TINYINT", "SMALLINT",
-                    "DATETIME", "TIMESTAMP",
-                    "TIMESTAMP", "TIMESTAMPTZ",
-                    "DOUBLE", "DOUBLE PRECISION",
-                    "FLOAT", "REAL",
-                    "BLOB", "BYTEA")),
+            new DbmsTemplate("postgres", "PostgreSQL", Map.ofEntries(
+                    Map.entry("INT", "INTEGER"),
+                    Map.entry("TINYINT", "SMALLINT"),
+                    Map.entry("DATETIME", "TIMESTAMP"),
+                    Map.entry("TIMESTAMP", "TIMESTAMPTZ"),
+                    Map.entry("DOUBLE", "DOUBLE PRECISION"),
+                    Map.entry("FLOAT", "REAL"),
+                    Map.entry("BLOB", "BYTEA"),
+                    Map.entry("BINARY", "BYTEA"),
+                    Map.entry("VARBINARY", "BYTEA"),
+                    Map.entry("MEDIUMTEXT", "TEXT"),
+                    Map.entry("LONGTEXT", "TEXT"))),
             new DbmsTemplate("oracle", "Oracle", Map.ofEntries(
                     Map.entry("BIGINT", "NUMBER(19)"),
                     Map.entry("SMALLINT", "NUMBER(5)"),
@@ -48,6 +73,10 @@ public final class DbmsTemplates {
                     Map.entry("NUMERIC", "NUMBER"),
                     Map.entry("VARCHAR", "VARCHAR2"),
                     Map.entry("TEXT", "CLOB"),
+                    Map.entry("MEDIUMTEXT", "CLOB"),
+                    Map.entry("LONGTEXT", "CLOB"),
+                    Map.entry("BINARY", "RAW"),
+                    Map.entry("VARBINARY", "RAW"),
                     Map.entry("BOOLEAN", "NUMBER(1)"),
                     Map.entry("TIME", "TIMESTAMP"),
                     Map.entry("DATETIME", "TIMESTAMP"),
@@ -55,14 +84,16 @@ public final class DbmsTemplates {
                     Map.entry("UUID", "RAW(16)"),
                     Map.entry("FLOAT", "BINARY_FLOAT"),
                     Map.entry("DOUBLE", "BINARY_DOUBLE"))),
-            new DbmsTemplate("mssql", "SQL Server", Map.of(
-                    "TEXT", "VARCHAR(MAX)",
-                    "BOOLEAN", "BIT",
-                    "TIMESTAMP", "DATETIME2",
-                    "JSON", "NVARCHAR(MAX)",
-                    "UUID", "UNIQUEIDENTIFIER",
-                    "BLOB", "VARBINARY(MAX)",
-                    "DOUBLE", "FLOAT")));
+            new DbmsTemplate("mssql", "SQL Server", Map.ofEntries(
+                    Map.entry("TEXT", "VARCHAR(MAX)"),
+                    Map.entry("MEDIUMTEXT", "VARCHAR(MAX)"),
+                    Map.entry("LONGTEXT", "VARCHAR(MAX)"),
+                    Map.entry("BOOLEAN", "BIT"),
+                    Map.entry("TIMESTAMP", "DATETIME2"),
+                    Map.entry("JSON", "NVARCHAR(MAX)"),
+                    Map.entry("UUID", "UNIQUEIDENTIFIER"),
+                    Map.entry("BLOB", "VARBINARY(MAX)"),
+                    Map.entry("DOUBLE", "FLOAT"))));
 
     private DbmsTemplates() {
     }
@@ -103,9 +134,19 @@ public final class DbmsTemplates {
             int scale = column.scale() == null ? 0 : column.scale();
             return mapped + "(" + column.precision() + "," + scale + ")";
         }
-        if (LENGTH_TYPES.contains(column.dataType()) && column.length() != null) {
+        if (LENGTH_TYPES.contains(column.dataType()) && column.length() != null
+                && LENGTH_PHYSICAL.contains(mapped)) {
             return mapped + "(" + column.length() + ")";
         }
+        if (FRACTIONAL_TYPES.contains(column.dataType()) && column.precision() != null
+                && column.precision() > 0 && acceptsFraction(mapped, templateId)) {
+            return mapped + "(" + column.precision() + ")";
+        }
         return mapped;
+    }
+
+    /** 소수 초 표기 가능 여부 — MySQL만 DATETIME(n)을 받는다 */
+    private static boolean acceptsFraction(String mapped, String templateId) {
+        return FRACTIONAL_PHYSICAL.contains(mapped) || ("DATETIME".equals(mapped) && "mysql".equals(templateId));
     }
 }

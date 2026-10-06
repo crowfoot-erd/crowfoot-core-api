@@ -30,9 +30,11 @@ public class ValidationRunService {
         if (modelRepository.findByIdAndWorkspaceId(modelId, workspaceId).isEmpty()) {
             throw new BusinessException(ErrorCode.MODEL_NOT_FOUND);
         }
+        // 세 건수는 의도된 예외를 뺀 값이다. 예외 건수는 v1.34 화면부터 온다(05-editor/05-validation.md Section 4.4)
         auditRecorder.record(userId, "MODEL_VALIDATED", "MODEL", Long.toString(modelId), Map.of(
                 "errors", request.errorCount(),
                 "warnings", request.warningCount(),
-                "infos", request.infoCount()));
+                "infos", request.infoCount(),
+                "exceptions", request.exceptionCount() == null ? 0 : request.exceptionCount()));
     }
 }

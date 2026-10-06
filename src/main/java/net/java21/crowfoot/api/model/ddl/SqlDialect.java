@@ -16,6 +16,7 @@ public interface SqlDialect {
     String KIND_PRIMARY = "PRIMARY";
     String KIND_UNIQUE = "UNIQUE";
     String KIND_FOREIGN_KEY = "FOREIGN KEY";
+    String KIND_CHECK = "CHECK";
 
     String id();
 
@@ -38,8 +39,15 @@ public interface SqlDialect {
     /** CREATE 이후 별도 코멘트 문장들(PG·Oracle COMMENT ON). 없으면 빈 목록 */
     List<String> commentStatements(DdlContent.Table table);
 
-    /** 인덱스 생성문(세미콜론 없이) */
+    /** 인덱스 생성문(세미콜론 없이). 이 방언이 표현하지 못하는 종류(FULLTEXT·SPATIAL)면 null —
+     *  생성기가 문장을 빼고 경고(ddl.index-type-unsupported)를 낸다 */
     String createIndex(DdlContent.Table table, DdlContent.Index index);
+
+    /** 생성 컬럼 정의(이름·타입·생성식·NOT NULL, 코멘트 제외) — 생성 컬럼에는 DEFAULT·AI·ON UPDATE가 없다 */
+    String generatedColumnDefinition(DdlContent.Column column);
+
+    /** 컬럼의 {@code ON UPDATE} 절(MySQL만). 표현하지 못하는 방언은 null — 생성기가 경고한다 */
+    String onUpdateClause(DdlContent.Column column);
 
     /* ---------- 마이그레이션 DDL(§3.3) — ALTER 계열 훅. 세미콜론 포함 ---------- */
 
@@ -53,7 +61,7 @@ public interface SqlDialect {
     /** 컬럼 삭제 */
     String dropColumn(DdlContent.Table table, DdlContent.Column column);
 
-    /** 제약(PK·UK·FK) 삭제 — kind는 {@link #KIND_PRIMARY}·{@link #KIND_UNIQUE}·{@link #KIND_FOREIGN_KEY}.
+    /** 제약(PK·UK·FK·CHECK) 삭제 — kind는 {@link #KIND_PRIMARY}·{@link #KIND_UNIQUE}·{@link #KIND_FOREIGN_KEY}·{@link #KIND_CHECK}.
      *  MySQL은 UK를 인덱스로, PK를 이름 없는 상수 제약으로 실현한다 */
     String dropConstraint(DdlContent.Table table, String name, String kind);
 

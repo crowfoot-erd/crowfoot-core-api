@@ -54,7 +54,8 @@ public final class DdlGenerator {
             warnings.add(new Warning(Warning.COMMON_DIALECT,
                     ddl("ddl.common-dialect", null, "이 문서의 DBMS는 SQL 방언이 등록되지 않아 공용(논리) 표기로 생성했습니다")));
         }
-        warnings.addAll(validationWarnings(content));
+        warnings.addAll(validationWarnings(content, !"postgres".equals(dialect.id())));
+        warnings.addAll(capabilityWarnings(content, dialect));
 
         List<String> creates = new ArrayList<>();
         for (DdlContent.Table table : content.tables()) {
@@ -70,7 +71,10 @@ public final class DdlGenerator {
         List<String> indexes = new ArrayList<>();
         for (DdlContent.Table table : content.tables()) {
             for (DdlContent.Index index : table.indexes()) {
-                indexes.add(dialect.createIndex(table, index) + ";");
+                String statement = dialect.createIndex(table, index);
+                if (statement != null) {
+                    indexes.add(statement + ";");
+                }
             }
         }
         List<String> comments = new ArrayList<>();
@@ -98,9 +102,44 @@ public final class DdlGenerator {
         return new Result(String.join("\n\n", blocks), List.copyOf(warnings), List.copyOf(statements));
     }
 
+    /* ---------- 방언 표현력 경고 — 문서에는 있지만 이 DBMS의 DDL에 싣지 못하는 것 ---------- */
+
+    /** ON UPDATE(MySQL만)·FULLTEXT·SPATIAL 인덱스(MySQL만)·생성 컬럼 저장 방식(PostgreSQL STORED만,
+     *  Oracle VIRTUAL만). 마이그레이션 생성기도 같은 경고를 쓴다 */
+    static List<Warning> capabilityWarnings(DdlContent content, SqlDialect dialect) {
+        List<Warning> warnings = new ArrayList<>();
+        String id = dialect.id();
+        for (DdlContent.Table table : content.tables()) {
+            for (DdlContent.Column column : table.columns()) {
+                String target = table.physicalName() + "." + column.physicalName();
+                if (column.generated() == null && column.onUpdate() != null && dialect.onUpdateClause(column) == null) {
+                    warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.on-update-unsupported",
+                            new Object[]{target}, "이 DBMS는 ON UPDATE를 지원하지 않아 뺐습니다: " + target)));
+                }
+                if (column.generated() != null && "postgres".equals(id) && !column.generated().stored()) {
+                    warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.generated-stored-only",
+                            new Object[]{target}, "이 DBMS는 저장형 생성 컬럼만 지원해 STORED로 냈습니다: " + target)));
+                }
+                if (column.generated() != null && "oracle".equals(id) && column.generated().stored()) {
+                    warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.generated-virtual-only",
+                            new Object[]{target}, "이 DBMS는 가상 생성 컬럼만 지원해 VIRTUAL로 냈습니다: " + target)));
+                }
+            }
+            for (DdlContent.Index index : table.indexes()) {
+                if (dialect.createIndex(table, index) == null) {
+                    warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.index-type-unsupported",
+                            new Object[]{index.name(), index.type()},
+                            "이 DBMS는 이 인덱스 종류를 지원하지 않아 뺐습니다: " + index.name() + " (" + index.type() + ")")));
+                }
+            }
+        }
+        return warnings;
+    }
+
     /* ---------- 검증 경고 — 에디터 validateModel error 규칙과 같은 기준 ---------- */
 
-    static List<Warning> validationWarnings(DdlContent content) {
+    /** @param lengthRequired 길이 없는 VARCHAR·VARBINARY가 실패하는 방언인가(PostgreSQL은 아니다) */
+    static List<Warning> validationWarnings(DdlContent content, boolean lengthRequired) {
         List<Warning> warnings = new ArrayList<>();
 
         // 키 이름 네임스페이스 — PK·UK·인덱스·FK 제약 이름을 모은다(공백 없음·대소문자 무시)
@@ -115,6 +154,9 @@ public final class DdlGenerator {
             }
             for (DdlContent.Index index : table.indexes()) {
                 bump(keyCounts, index.name());
+            }
+            for (DdlContent.Check check : table.checks()) {
+                bump(keyCounts, check.name());
             }
         }
         for (DdlContent.Relationship relationship : content.relationships()) {
@@ -142,6 +184,23 @@ public final class DdlGenerator {
                             ddl("ddl.column-duplicated",
                                     new Object[]{table.physicalName(), column.physicalName()},
                                     "컬럼 물리명이 중복입니다: " + table.physicalName() + "." + column.physicalName())));
+                }
+            }
+            for (DdlContent.Column column : table.columns()) {
+                String type = typeKey(column.dataType());
+                if (type == null || type.isEmpty() || !DbmsTemplates.COMMON_TYPES.contains(type)) {
+                    warnings.add(new Warning(Warning.VALIDATION,
+                            ddl("ddl.unknown-type",
+                                    new Object[]{table.physicalName(), column.physicalName(), column.dataType()},
+                                    "공용 타입 목록에 없는 타입입니다: " + table.physicalName() + "."
+                                            + column.physicalName() + " " + column.dataType())));
+                } else if (lengthRequired && DbmsTemplates.LENGTH_REQUIRED_TYPES.contains(type)
+                        && column.length() == null) {
+                    warnings.add(new Warning(Warning.VALIDATION,
+                            ddl("ddl.length-required",
+                                    new Object[]{table.physicalName(), column.physicalName(), type},
+                                    "길이가 필요한 타입에 길이가 없습니다: " + table.physicalName() + "."
+                                            + column.physicalName() + " " + type)));
                 }
             }
             for (DdlContent.KeyConstraint unique : table.uniques()) {
@@ -178,15 +237,23 @@ public final class DdlGenerator {
     /* ---------- CREATE TABLE ---------- */
 
     /** 컬럼 속성 정의(들여쓰기 없음) — CREATE 정의와 마이그레이션 ADD/MODIFY가 공유.
-     *  NOT NULL → DEFAULT(원문) → AI 순서. 기본값은 리터럴/표현식 구분이 스키마에 없어 원문을 신뢰한다 */
+     *  NOT NULL → DEFAULT → AI 순서. 기본값 표기는 {@link DefaultLiterals}가 컬럼 타입으로 정한다 */
     static String columnAttributes(DdlContent.Column column, SqlDialect dialect) {
+        if (column.generated() != null) {
+            return dialect.generatedColumnDefinition(column);
+        }
         StringBuilder attributes = new StringBuilder(column.physicalName())
                 .append(' ').append(dialect.columnType(column));
         if (!column.nullable()) {
             attributes.append(" NOT NULL");
         }
-        if (column.defaultValue() != null) {
-            attributes.append(" DEFAULT ").append(column.defaultValue());
+        String defaultLiteral = DefaultLiterals.render(column, dialect.id());
+        if (defaultLiteral != null) {
+            attributes.append(" DEFAULT ").append(defaultLiteral);
+        }
+        String onUpdate = dialect.onUpdateClause(column);
+        if (onUpdate != null) {
+            attributes.append(' ').append(onUpdate);
         }
         String autoIncrement = dialect.autoIncrementInline(column);
         if (autoIncrement != null) {
@@ -201,30 +268,42 @@ public final class DdlGenerator {
     }
 
     /** PK·UK 제약 정의 몸통({@code CONSTRAINT name KIND (cols)}) — CREATE 인라인과
-     *  마이그레이션 ADD CONSTRAINT가 공유. kind는 "PRIMARY KEY"·"UNIQUE". 컬럼이 없으면 null */
+     *  마이그레이션 ADD CONSTRAINT가 공유. kind는 "PRIMARY KEY"·"UNIQUE". 컬럼이 없으면 null.
+     *  MySQL은 PK 이름을 PRIMARY로 고정하고 적은 이름을 버리므로 PK 이름을 내지 않는다 */
     public static String constraintDefinition(String kind, DdlContent.Table table,
-                                              DdlContent.KeyConstraint constraint) {
+                                              DdlContent.KeyConstraint constraint, SqlDialect dialect) {
         String columns = columnNames(table, constraint.columnIds());
         if (columns.isEmpty()) {
             return null;
         }
+        if ("PRIMARY KEY".equals(kind) && "mysql".equals(dialect.id())) {
+            return kind + " (" + columns + ")";
+        }
         return "CONSTRAINT " + constraint.name() + " " + kind + " (" + columns + ")";
+    }
+
+    /** CHECK 제약 정의 몸통 — CREATE 인라인과 마이그레이션 ADD CONSTRAINT가 공유 */
+    public static String checkDefinition(DdlContent.Check check) {
+        return "CONSTRAINT " + check.name() + " CHECK (" + check.expression() + ")";
     }
 
     /** CREATE TABLE 문(마이그레이션의 테이블 추가가 재사용) */
     public static String createTableStatement(DdlContent.Table table, SqlDialect dialect) {
         List<String> constraints = new ArrayList<>();
         if (table.primaryKey() != null) {
-            String definition = constraintDefinition("PRIMARY KEY", table, table.primaryKey());
+            String definition = constraintDefinition("PRIMARY KEY", table, table.primaryKey(), dialect);
             if (definition != null) {
                 constraints.add("    " + definition);
             }
         }
         for (DdlContent.KeyConstraint unique : table.uniques()) {
-            String definition = constraintDefinition("UNIQUE", table, unique);
+            String definition = constraintDefinition("UNIQUE", table, unique, dialect);
             if (definition != null) {
                 constraints.add("    " + definition);
             }
+        }
+        for (DdlContent.Check check : table.checks()) {
+            constraints.add("    " + checkDefinition(check));
         }
 
         // 컬럼 정의 + 제약 — 마지막 줄만 쉼표로 닫지 않는다. 줄 주석(`--`)은 쉼표 뒤에 붙여
@@ -357,12 +436,6 @@ public final class DdlGenerator {
         }
         String upper = dataType.trim().toUpperCase(Locale.ROOT);
         return TYPE_SYNONYMS.getOrDefault(upper, upper);
-    }
-
-    /** 기본값 정규화 — 빈 문자열과 null은 같은 것으로 본다(스키마 조회가 ''를 null로 돌리는 계열) */
-    static String normalizedDefault(DdlContent.Column column) {
-        String value = column.defaultValue();
-        return value == null || value.isEmpty() ? null : value;
     }
 
     /** 컬럼 물리명 목록 — 없는 id(삭제 cascade 잔여 등)는 건너뛴다 */

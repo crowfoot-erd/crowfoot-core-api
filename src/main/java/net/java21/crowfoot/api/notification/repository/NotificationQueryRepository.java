@@ -27,10 +27,12 @@ public class NotificationQueryRepository {
      *  대상을 찾아서 메서드 안 로컬 레코드로 두면 런타임에 프로젝션이 실패한다(model 댓글 2026-09-28 500) */
     public record NotificationRow(Long id, String type, Long actorUserId, String actorName,
                                   String actorNickname, Long modelId, String modelName,
-                                  Long workspaceId, Instant readAt, Instant createdAt) {
+                                  Long workspaceId, Long postId, String postTitle, Long commentId,
+                                  Instant readAt, Instant createdAt) {
     }
 
-    /** 수신자의 알림 목록 — 최신순(id desc) 오프셋 페이징. 문서는 FK CASCADE로 항상 함께 살아 있다 */
+    /** 수신자의 알림 목록 — 최신순(id desc) 오프셋 페이징. 문서·게시글은 FK CASCADE로 항상 함께 살아 있다.
+     *  게시글 알림은 문서가 없어 문서를 left join한다 */
     public List<NotificationRow> findByUserIdOrderByIdDesc(long userId, long offset, int limit) {
         QNotification notification = QNotification.notification;
         QUser actor = QUser.user;
@@ -39,10 +41,11 @@ public class NotificationQueryRepository {
                 .select(Projections.constructor(NotificationRow.class, notification.id, notification.type,
                         notification.actorUserId, actor.name, notification.actorNickname,
                         notification.modelId, model.name, model.workspaceId,
+                        notification.postId, notification.postTitle, notification.commentId,
                         notification.readAt, notification.createdAt))
                 .from(notification)
                 .leftJoin(actor).on(notification.actorUserId.eq(actor.id))
-                .join(model).on(notification.modelId.eq(model.id))
+                .leftJoin(model).on(notification.modelId.eq(model.id))
                 .where(notification.userId.eq(userId))
                 .orderBy(notification.id.desc())
                 .offset(offset)

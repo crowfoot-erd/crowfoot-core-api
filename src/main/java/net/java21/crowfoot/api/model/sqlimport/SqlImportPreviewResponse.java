@@ -11,13 +11,15 @@ import java.util.List;
  * @param relationshipCount 만들어질 관계(FK) 수
  * @param tables            테이블별 요약 — 문서 순서
  * @param skipped           읽지 못한 문장·제약 요약 — CREATE TABLE 0개면 400(SQL_IMPORT_NO_TABLES)으로 실패
+ * @param warnings          읽었지만 줄이거나 버린 것(타입 축소·카탈로그 밖 타입·컬럼 속성·인덱스 접두 길이 — v1.34)
  */
 public record SqlImportPreviewResponse(
         String databaseType,
         int tableCount,
         int relationshipCount,
         List<PreviewTable> tables,
-        List<String> skipped
+        List<String> skipped,
+        List<String> warnings
 ) {
 
     /**

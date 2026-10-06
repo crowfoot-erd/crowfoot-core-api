@@ -95,7 +95,7 @@ class DdlGeneratorTest {
                 "    email VARCHAR(255) NOT NULL COMMENT '이메일',",
                 "    point DECIMAL(10,2) NOT NULL DEFAULT 0,",
                 "    active TINYINT(1) NOT NULL,",
-                "    CONSTRAINT pk_member PRIMARY KEY (id),",
+                "    PRIMARY KEY (id),",
                 "    CONSTRAINT uk_member_email UNIQUE (email)",
                 ") COMMENT='회원';")));
         assertThat(result.sql()).contains("    title VARCHAR(200) NOT NULL DEFAULT ''");
@@ -266,7 +266,8 @@ class DdlGeneratorTest {
                 """;
 
         assertThat(generate(doc, "mysql", null).sql())
-                .contains("CONSTRAINT pk_order_line PRIMARY KEY (order_no, line_no)")
+                .contains("PRIMARY KEY (order_no, line_no)")
+                .doesNotContain("CONSTRAINT pk_order_line")
                 .contains("CONSTRAINT uk_order_line_code UNIQUE (product_code, order_no)");
     }
 

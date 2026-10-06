@@ -24,6 +24,7 @@ public class NotificationRecorder {
 
     private final NotificationRepository notificationRepository;
     private final NotificationWriter notificationWriter;
+    private final net.java21.crowfoot.api.account.repository.UserRepository userRepository;
 
     /** 내 문서에 원댓글(COMMENT_CREATED) — 수신자 = 문서 오너. 게스트 댓글은 별명 스냅샷으로 남는다 */
     public void notifyCommentCreated(Model model, Long authorUserId, String guestNickname) {
@@ -56,6 +57,41 @@ public class NotificationRecorder {
         } catch (Exception ex) {
             log.warn("알림 발행 실패(type=REACTION_ADDED, model={}) — 본류에는 영향 없음: {}",
                     model.getId(), ex.getMessage());
+        }
+    }
+
+    /** 내 "제안 및 신고" 글에 댓글(COMMUNITY_COMMENT_CREATED, Section 2.1) — 수신자 = 게시글 작성자.
+     *  자기 글에 단 자기 댓글은 알리지 않는다. 제목은 이벤트 시점 스냅샷(200자) */
+    public void notifyCommunityCommentCreated(long postId, Long postAuthorId, String postTitle, long commenterId,
+                                              long commentId) {
+        try {
+            if (postAuthorId == null || postAuthorId == commenterId) {
+                return;
+            }
+            String title = postTitle == null ? "" : postTitle.length() > 200 ? postTitle.substring(0, 200) : postTitle;
+            notificationWriter.insert(Notification.forPost(postAuthorId, Notification.TYPE_COMMUNITY_COMMENT_CREATED,
+                    commenterId, postId, title, commentId));
+        } catch (Exception ex) {
+            log.warn("알림 발행 실패(type=COMMUNITY_COMMENT_CREATED, post={}) — 본류에는 영향 없음: {}",
+                    postId, ex.getMessage());
+        }
+    }
+
+    /** "제안 및 신고" 새 글(FEEDBACK_POST_CREATED, Section 2.2) — 수신자 = 탈퇴하지 않은 관리자 전원.
+     *  작성자가 관리자면 본인은 빼고 보낸다. 수신자마다 한 행(각자 읽음 처리) */
+    public void notifyFeedbackPostCreated(long postId, String postTitle, long authorId) {
+        try {
+            String title = postTitle == null ? "" : postTitle.length() > 200 ? postTitle.substring(0, 200) : postTitle;
+            for (Long adminId : userRepository.findActiveAdminIds()) {
+                if (adminId == null || adminId == authorId) {
+                    continue;
+                }
+                notificationWriter.insert(Notification.forPost(adminId, Notification.TYPE_FEEDBACK_POST_CREATED,
+                        authorId, postId, title, null));
+            }
+        } catch (Exception ex) {
+            log.warn("알림 발행 실패(type=FEEDBACK_POST_CREATED, post={}) — 본류에는 영향 없음: {}",
+                    postId, ex.getMessage());
         }
     }
 

@@ -11,5 +11,11 @@ import jakarta.validation.constraints.NotNull;
 public record ValidationRunRequest(
         @NotNull @Min(0) @Max(100_000) Integer errorCount,
         @NotNull @Min(0) @Max(100_000) Integer warningCount,
-        @NotNull @Min(0) @Max(100_000) Integer infoCount) {
+        @NotNull @Min(0) @Max(100_000) Integer infoCount,
+        @Min(0) @Max(100_000) Integer exceptionCount) {
+
+    /** 예외 건수 없는 요청 — v1.34 이전 화면 */
+    public ValidationRunRequest(Integer errorCount, Integer warningCount, Integer infoCount) {
+        this(errorCount, warningCount, infoCount, null);
+    }
 }

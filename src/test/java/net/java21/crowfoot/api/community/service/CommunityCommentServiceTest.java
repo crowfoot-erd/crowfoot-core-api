@@ -50,6 +50,8 @@ class CommunityCommentServiceTest {
     private AdminGuard adminGuard;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private net.java21.crowfoot.api.notification.service.NotificationRecorder notificationRecorder;
 
     @InjectMocks
     private CommunityCommentService communityCommentService;
@@ -91,6 +93,8 @@ class CommunityCommentServiceTest {
         assertThat(response.content()).isEqualTo("좋은 제안입니다");
         then(auditRecorder).should().record(7L, "COMMUNITY_COMMENT_CREATED", "COMMUNITY_COMMENT", "61",
                 Map.of("postId", 41L));
+        // 글쓴이(2)에게 알림 — 자기 댓글 판정은 Recorder가 한다
+        then(notificationRecorder).should().notifyCommunityCommentCreated(41L, 2L, "제안", 7L, 61L);
     }
 
     @Test

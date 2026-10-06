@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
  * 사용자가 elkjs 자동 배치로 다시 잡을 수 있다.
  *
  * <p>키 이름은 문서 전체 단일 네임스페이스(01-core.md Section 18)라 DB 제약 이름을 그대로
- * 쓰되, MySQL PK 상수명({@code PRIMARY})은 {@code PK_{테이블}}으로 정규화한다.
+ * 쓰되, MySQL PK 상수명({@code PRIMARY})은 에디터 기본 이름 {@code {테이블}_pk}로 정규화한다.
  *
  * <p>FK 인덱스 자동 생성 (05-editor/01-core.md §6.6 인덱스 자동 생성 정책) — PostgreSQL·Oracle·
  * SQL Server 등 FK 선언만으로 자식 인덱스를 만들지 않는 DBMS는 조립 시점에 FK 전체 컬럼으로
@@ -44,10 +44,13 @@ public class ReverseContentAssembler {
     private static final int GRID_MARGIN = 80;
 
     /** 길이(n)를 저장하는 공용 코드 — 나머지 타입의 length는 버린다 (dbms.ts 규칙과 동일) */
-    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR");
+    private static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "BINARY", "VARBINARY");
 
     /** 정밀도(p,s)를 저장하는 공용 코드 */
     private static final Set<String> PRECISION_TYPES = Set.of("DECIMAL");
+
+    /** 소수 초 자릿수를 precision에 저장하는 공용 코드 */
+    private static final Set<String> FRACTIONAL_TYPES = Set.of("TIME", "DATETIME", "TIMESTAMP");
 
     /** MySQL PK 제약의 상수 이름 — 모든 테이블이 같아서 단일 네임스페이스 규칙 위반 */
     private static final String MYSQL_PRIMARY = "PRIMARY";
@@ -91,6 +94,8 @@ public class ReverseContentAssembler {
                 usedKeyNames.add(tableNode.get("primaryKey").get("name").asText().toLowerCase());
             }
             tableNode.get("uniques").forEach(u -> usedKeyNames.add(u.get("name").asText().toLowerCase()));
+            tableNode.get("indexes").forEach(i -> usedKeyNames.add(i.get("name").asText().toLowerCase()));
+            tableNode.get("checks").forEach(c -> usedKeyNames.add(c.get("name").asText().toLowerCase()));
         }
 
         ArrayNode relationshipsNode = modelNode.putArray("relationships");
@@ -141,7 +146,7 @@ public class ReverseContentAssembler {
         node.put("id", tableId);
         // DB COMMENT ≡ 논리명(§3.2) — DB 코멘트를 논리명으로 가져오고, 없으면 물리명으로 대신한다.
         // content의 comment 필드는 DB 코멘트와 무관한 문서 설명이라 리버스에서는 채우지 않는다.
-        node.put("logicalName", table.comment() != null ? table.comment() : table.name());
+        node.put("logicalName", table.comment() != null ? CommentLogicalName.of(table.comment()) : table.name());
         node.put("physicalName", table.name());
         node.putNull("comment");
 
@@ -156,7 +161,7 @@ public class ReverseContentAssembler {
             ObjectNode primaryKey = node.putObject("primaryKey");
             String name = table.primaryKeyName();
             if (name == null || name.isBlank() || MYSQL_PRIMARY.equals(name)) {
-                name = "PK_" + table.name();
+                name = table.name().toLowerCase(java.util.Locale.ROOT) + "_pk"; // 에디터 기본 이름과 같다
             }
             primaryKey.put("name", name);
             ArrayNode columnIdArray = primaryKey.putArray("columnIds");
@@ -171,7 +176,37 @@ public class ReverseContentAssembler {
             ArrayNode columnIdArray = uniqueNode.putArray("columnIds");
             unique.columns().stream().map(columnIds::get).forEach(columnIdArray::add);
         }
-        node.putArray("indexes");
+        ArrayNode indexesNode = node.putArray("indexes");
+        for (IntrospectedSchema.IntrospectedIndex index : table.indexes()) {
+            List<String> ids = new ArrayList<>();
+            for (IntrospectedSchema.IndexColumn column : index.columns()) {
+                ids.add(columnIds.get(column.name()));
+            }
+            if (ids.isEmpty() || ids.contains(null)) {
+                continue; // 식 인덱스처럼 컬럼으로 표현하지 못하는 인덱스
+            }
+            ObjectNode indexNode = indexesNode.addObject();
+            indexNode.put("id", UUID.randomUUID().toString());
+            indexNode.put("name", index.name());
+            ArrayNode columns = indexNode.putArray("columns");
+            for (int i = 0; i < ids.size(); i++) {
+                String order = index.columns().get(i).order();
+                columns.addObject().put("columnId", ids.get(i)).put("order", "DESC".equalsIgnoreCase(order) ? "DESC" : "ASC");
+            }
+            indexNode.put("type", index.type() == null ? "BTREE" : index.type());
+            if (index.parser() == null) {
+                indexNode.putNull("parser");
+            } else {
+                indexNode.put("parser", index.parser());
+            }
+        }
+        ArrayNode checksNode = node.putArray("checks");
+        for (IntrospectedSchema.IntrospectedCheck check : table.checks()) {
+            ObjectNode checkNode = checksNode.addObject();
+            checkNode.put("id", UUID.randomUUID().toString());
+            checkNode.put("name", check.name());
+            checkNode.put("expression", check.expression());
+        }
         return node;
     }
 
@@ -227,19 +262,32 @@ public class ReverseContentAssembler {
         // length는 CHAR·VARCHAR에만, precision/scale은 DECIMAL에만 — 나머지는 버린다
         node.put("length", LENGTH_TYPES.contains(commonType) && column.length() != null
                 ? column.length() : null);
-        node.put("precision", PRECISION_TYPES.contains(commonType) && column.precision() != null
-                ? column.precision() : null);
+        boolean keepsPrecision = PRECISION_TYPES.contains(commonType)
+                || (FRACTIONAL_TYPES.contains(commonType) && column.precision() != null && column.precision() > 0);
+        node.put("precision", keepsPrecision && column.precision() != null ? column.precision() : null);
         node.put("scale", PRECISION_TYPES.contains(commonType) && column.scale() != null
                 ? column.scale() : null);
         node.put("nullable", column.nullable());
-        if (column.defaultValue() != null) {
+        if (column.generatedExpression() != null) {
+            node.putObject("generated")
+                    .put("expression", column.generatedExpression())
+                    .put("stored", column.generatedStored());
+        } else {
+            node.putNull("generated");
+        }
+        if (column.onUpdate() != null && column.generatedExpression() == null) {
+            node.put("onUpdate", column.onUpdate());
+        } else {
+            node.putNull("onUpdate");
+        }
+        if (column.defaultValue() != null && column.generatedExpression() == null) {
             node.put("defaultValue", column.defaultValue());
         } else {
             node.putNull("defaultValue");
         }
         node.put("autoIncrement", column.autoIncrement());
         // 테이블과 같은 규칙 — DB 코멘트가 논리명이고, 없으면 물리명
-        node.put("logicalName", column.comment() != null ? column.comment() : column.name());
+        node.put("logicalName", column.comment() != null ? CommentLogicalName.of(column.comment()) : column.name());
         node.putNull("comment");
         return node;
     }

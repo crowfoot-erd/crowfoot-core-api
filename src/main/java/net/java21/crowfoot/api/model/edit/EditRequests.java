@@ -24,18 +24,47 @@ public final class EditRequests {
 
     public record TableItem(String physicalName, String rename, String logicalName, String description,
                             List<ColumnItem> columns, List<String> primaryKey, List<UniqueItem> uniques,
-                            List<IndexItem> indexes, List<String> requirementCodes) {
+                            List<IndexItem> indexes, List<String> requirementCodes, List<CheckItem> checks) {
+
+        /** CHECK 없는 요청 — v1.34 이전 꼴 */
+        public TableItem(String physicalName, String rename, String logicalName, String description,
+                         List<ColumnItem> columns, List<String> primaryKey, List<UniqueItem> uniques,
+                         List<IndexItem> indexes, List<String> requirementCodes) {
+            this(physicalName, rename, logicalName, description, columns, primaryKey, uniques, indexes,
+                    requirementCodes, null);
+        }
     }
 
     public record ColumnItem(String physicalName, String rename, String logicalName, String description, String dataType,
                              Integer length, Integer precision, Integer scale, Boolean nullable, String defaultValue,
-                             Boolean autoIncrement, String domainType) {
+                             Boolean autoIncrement, String domainType, GeneratedItem generated, String onUpdate) {
+
+        /** 생성식·ON UPDATE 없는 요청 — v1.34 이전 꼴 */
+        public ColumnItem(String physicalName, String rename, String logicalName, String description, String dataType,
+                          Integer length, Integer precision, Integer scale, Boolean nullable, String defaultValue,
+                          Boolean autoIncrement, String domainType) {
+            this(physicalName, rename, logicalName, description, dataType, length, precision, scale, nullable,
+                    defaultValue, autoIncrement, domainType, null, null);
+        }
+    }
+
+    /** 생성 컬럼 — expression이 빈 문자열이면 생성 컬럼을 해제한다. stored 생략은 true */
+    public record GeneratedItem(String expression, Boolean stored) {
+    }
+
+    /** CHECK 제약 — 같은 이름이 있으면 식을 바꾸고, 이름을 생략하면 ck_{테이블}_{n} */
+    public record CheckItem(String name, String expression) {
     }
 
     public record UniqueItem(String name, List<String> columns) {
     }
 
-    public record IndexItem(String name, List<IndexColumnItem> columns) {
+    public record IndexItem(String name, List<IndexColumnItem> columns, String type, String parser) {
+
+        /** 일반 인덱스 — v1.34 이전 꼴 */
+        public IndexItem(String name, List<IndexColumnItem> columns) {
+            this(name, columns, null, null);
+        }
     }
 
     public record IndexColumnItem(String name, String order) {

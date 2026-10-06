@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.model.sqlimport;
 
+import net.java21.crowfoot.api.model.ddl.DbmsTemplates;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -74,7 +76,9 @@ public class SqlImportService {
         if (modelRepository.existsByWorkspaceIdAndName(workspaceId, modelName)) {
             throw BusinessException.of(ErrorCode.DUPLICATED_NAME, "detail.doc-name.duplicated");
         }
-        ReverseContentAssembler.AssembledContent assembled = assemble(request.ddl(), databaseType);
+        DdlTextParser.DdlParseResult parsed = new DdlTextParser().parse(request.ddl());
+        requireTables(parsed);
+        ReverseContentAssembler.AssembledContent assembled = assembleParsed(parsed, databaseType);
 
         Model model = modelRepository.save(new Model(workspaceId, modelName, request.description(),
                 databaseType, assembled.content(), userId));
@@ -89,7 +93,7 @@ public class SqlImportService {
                         "tables", assembled.tableCount(),
                         "relationships", assembled.relationshipCount()));
         return new SqlImportResponse(toResponse(model), assembled.tableCount(),
-                assembled.relationshipCount(), assembled.skipped());
+                assembled.relationshipCount(), assembled.skipped(), warnings(parsed, databaseType));
     }
 
     /** 미리보기(Editor 이상) — 파싱·조립까지만, 저장 없음 */
@@ -116,16 +120,38 @@ public class SqlImportService {
                     fkCountByChild.getOrDefault(table.name(), 0L).intValue()));
         }
         return new SqlImportPreviewResponse(databaseType, assembled.tableCount(),
-                assembled.relationshipCount(), tables, assembled.skipped());
+                assembled.relationshipCount(), tables, assembled.skipped(), warnings(parsed, databaseType));
+    }
+
+    /** 물리 타입 중 공용 타입이 더 좁거나 다른 것 — 가져오면 정보가 줄어든다 */
+    private static final Set<String> NARROWING_TYPES = Set.of(
+            "tinytext", "tinyblob", "mediumblob", "longblob", "mediumint", "year", "bit");
+
+    /** 가져오기 경고 — 파서가 남긴 것(컬럼 속성·접두 길이) + 타입 판정(카탈로그 밖·축소) */
+    private List<String> warnings(DdlTextParser.DdlParseResult parsed, String databaseType) {
+        List<String> warnings = new ArrayList<>(parsed.warnings());
+        SchemaIntrospector introspector = introspectors.forDbmsType(databaseType);
+        if (introspector == null) {
+            return warnings;
+        }
+        for (IntrospectedSchema.IntrospectedTable table : parsed.schema().tables()) {
+            for (IntrospectedSchema.IntrospectedColumn column : table.columns()) {
+                String physical = column.typeName() == null ? "" : column.typeName().toLowerCase(Locale.ROOT);
+                String common = introspector.commonTypeCode(column.typeName());
+                String target = table.name() + "." + column.name();
+                if (!DbmsTemplates.COMMON_TYPES.contains(common)) {
+                    warnings.add(target + ": " + physical.toUpperCase(Locale.ROOT)
+                            + " — 공용 타입 목록에 없는 타입(DDL 생성 때 경고)");
+                } else if (NARROWING_TYPES.contains(physical)) {
+                    warnings.add(target + ": " + physical.toUpperCase(Locale.ROOT) + " → " + common
+                            + " — 타입을 바꿔 읽음");
+                }
+            }
+        }
+        return List.copyOf(warnings);
     }
 
     /* ---------- 파싱·조립 ---------- */
-
-    private ReverseContentAssembler.AssembledContent assemble(String ddl, String databaseType) {
-        DdlTextParser.DdlParseResult parsed = new DdlTextParser().parse(ddl);
-        requireTables(parsed);
-        return assembleParsed(parsed, databaseType);
-    }
 
     private ReverseContentAssembler.AssembledContent assembleParsed(DdlTextParser.DdlParseResult parsed,
                                                                     String databaseType) {

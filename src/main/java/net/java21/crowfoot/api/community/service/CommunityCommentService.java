@@ -1,5 +1,7 @@
 package net.java21.crowfoot.api.community.service;
 
+import net.java21.crowfoot.common.i18n.LocalizedTexts;
+import net.java21.crowfoot.api.notification.service.NotificationRecorder;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
@@ -39,6 +41,7 @@ public class CommunityCommentService {
     private final UserRepository userRepository;
     private final AdminGuard adminGuard;
     private final AuditRecorder auditRecorder;
+    private final NotificationRecorder notificationRecorder;
 
     /** 목록 — 오래된 순(대화 흐름), 페이징 없음(게시글당 규모가 작다 — 멤버 목록 관례) */
     @Transactional(readOnly = true)
@@ -60,6 +63,9 @@ public class CommunityCommentService {
                 new CommunityComment(postId, request.content(), userId));
         auditRecorder.record(userId, "COMMUNITY_COMMENT_CREATED", "COMMUNITY_COMMENT", comment.getId().toString(),
                 Map.of("postId", postId));
+        // 글쓴이에게 알림(08-core/11-notification.md Section 2.1) — 제목은 글쓴이가 쓴 기본 언어(ko 우선) 스냅샷
+        notificationRecorder.notifyCommunityCommentCreated(postId, post.getCreatedBy(),
+                LocalizedTexts.resolve(post.getTitleI18n(), "ko"), userId, comment.getId());
         return toResponse(comment, userId, authorName(userId));
     }
 

@@ -74,7 +74,10 @@ public class NotificationService {
         return new NotificationResponse(row.id().toString(), row.type(),
                 row.actorUserId() == null ? null : row.actorUserId().toString(),
                 row.actorUserId() != null ? row.actorName() : row.actorNickname(),
-                row.modelId().toString(), row.modelName(), row.workspaceId().toString(),
+                row.modelId() == null ? null : row.modelId().toString(), row.modelName(),
+                row.workspaceId() == null ? null : row.workspaceId().toString(),
+                row.postId() == null ? null : row.postId().toString(), row.postTitle(),
+                row.commentId() == null ? null : row.commentId().toString(),
                 row.readAt() != null, row.createdAt());
     }
 }

@@ -122,7 +122,7 @@ class ReverseContentAssemblerTest {
 
         JsonNode tables = content.path("model").path("tables");
         assertThat(tables.get(0).path("primaryKey").path("name").asText()).isEqualTo("member_pkey");
-        assertThat(tables.get(1).path("primaryKey").path("name").asText()).isEqualTo("PK_orders");
+        assertThat(tables.get(1).path("primaryKey").path("name").asText()).isEqualTo("orders_pk");
         assertThat(tables.get(0).path("uniques").get(0).path("name").asText()).isEqualTo("uq_member_email");
     }
 

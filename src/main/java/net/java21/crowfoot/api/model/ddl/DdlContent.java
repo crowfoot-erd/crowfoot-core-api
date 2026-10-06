@@ -27,10 +27,18 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
             List<Column> columns,
             KeyConstraint primaryKey,
             List<KeyConstraint> uniques,
-            List<Index> indexes) {
+            List<Index> indexes,
+            List<Check> checks) {
+
+        /** CHECK 제약 없는 테이블 — v1.34 이전 꼴 */
+        public Table(String id, String physicalName, String logicalName, List<Column> columns,
+                     KeyConstraint primaryKey, List<KeyConstraint> uniques, List<Index> indexes) {
+            this(id, physicalName, logicalName, columns, primaryKey, uniques, indexes, List.of());
+        }
     }
 
-    /** 컬럼 — length는 CHAR·VARCHAR, precision/scale은 DECIMAL에만 의미가 있다 */
+    /** 컬럼 — length는 CHAR·VARCHAR·BINARY·VARBINARY, precision/scale은 DECIMAL,
+     *  precision만은 TIME·DATETIME·TIMESTAMP의 소수 초 자릿수다 */
     public record Column(
             String id,
             String physicalName,
@@ -41,15 +49,46 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
             boolean nullable,
             String defaultValue,
             boolean autoIncrement,
-            String logicalName) {
+            String logicalName,
+            Generated generated,
+            String onUpdate) {
+
+        /** 생성식·ON UPDATE 없는 컬럼 — v1.34 이전 꼴 */
+        public Column(String id, String physicalName, String dataType, Integer length, Integer precision,
+                      Integer scale, boolean nullable, String defaultValue, boolean autoIncrement,
+                      String logicalName) {
+            this(id, physicalName, dataType, length, precision, scale, nullable, defaultValue,
+                    autoIncrement, logicalName, null, null);
+        }
+    }
+
+    /** 생성 컬럼 — stored=true는 STORED·PERSISTED, false는 VIRTUAL */
+    public record Generated(String expression, boolean stored) {
+    }
+
+    /** CHECK 제약 — 식은 바깥 괄호 없는 원문 */
+    public record Check(String name, String expression) {
     }
 
     /** PK·UK 제약 — 이름은 문서 전체 단일 네임스페이스(§18)라 DDL에서 충돌하지 않는다 */
     public record KeyConstraint(String name, List<String> columnIds) {
     }
 
-    /** 인덱스 — 컬럼별 정렬 포함 */
-    public record Index(String name, List<IndexColumn> columns) {
+    /** 인덱스 — 컬럼별 정렬 포함. type은 BTREE·FULLTEXT·SPATIAL, parser는 MySQL 전문 검색 파서 */
+    public record Index(String name, List<IndexColumn> columns, String type, String parser) {
+
+        public static final String BTREE = "BTREE";
+        public static final String FULLTEXT = "FULLTEXT";
+        public static final String SPATIAL = "SPATIAL";
+
+        /** 일반(BTREE) 인덱스 — v1.34 이전 꼴 */
+        public Index(String name, List<IndexColumn> columns) {
+            this(name, columns, BTREE, null);
+        }
+
+        public boolean btree() {
+            return type == null || BTREE.equals(type);
+        }
     }
 
     public record IndexColumn(String columnId, String order) {

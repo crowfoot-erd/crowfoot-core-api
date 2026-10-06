@@ -184,7 +184,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:users.email",
           "logicalName" : "이메일",
@@ -196,7 +198,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         } ],
         "primaryKey" : {
           "name" : "users_pk",
@@ -207,7 +211,8 @@
           "name" : "uk_users_email",
           "columnIds" : [ "C:users.email" ]
         } ],
-        "indexes" : [ ]
+        "indexes" : [ ],
+        "checks" : [ ]
       }, {
         "id" : "T:purchase_orders",
         "logicalName" : "구매 주문",
@@ -224,7 +229,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : true,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:purchase_orders.users_id",
           "logicalName" : "회원 ID",
@@ -236,7 +243,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:purchase_orders.order_status",
           "logicalName" : "상태",
@@ -248,7 +257,9 @@
           "nullable" : false,
           "defaultValue" : "'PENDING'",
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:purchase_orders.total_amount",
           "logicalName" : "주문 금액",
@@ -260,7 +271,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:purchase_orders.ordered_at",
           "logicalName" : "주문 일시",
@@ -272,7 +285,9 @@
           "nullable" : false,
           "defaultValue" : null,
           "autoIncrement" : false,
-          "comment" : null
+          "comment" : null,
+          "generated" : null,
+          "onUpdate" : null
         }, {
           "id" : "C:purchase_orders.discount_amount",
           "logicalName" : "할인 금액",
@@ -285,6 +300,8 @@
           "defaultValue" : "0",
           "autoIncrement" : false,
           "comment" : null,
+          "generated" : null,
+          "onUpdate" : null,
           "domain" : {
             "id" : "12",
             "name" : "금액",
@@ -306,8 +323,11 @@
           }, {
             "columnId" : "C:purchase_orders.ordered_at",
             "order" : "DESC"
-          } ]
-        } ]
+          } ],
+          "type" : "BTREE",
+          "parser" : null
+        } ],
+        "checks" : [ ]
       } ],
       "relationships" : [ {
         "id" : "R:fk_orders_users",
@@ -366,7 +386,8 @@
         "appliedRevision" : 1,
         "tableIds" : [ ]
       } ],
-      "viewport" : null
+      "viewport" : null,
+      "validationExceptions" : [ ]
     }
   }
 }
