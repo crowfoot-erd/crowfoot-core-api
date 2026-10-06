@@ -58,6 +58,12 @@ public interface SqlDialect {
      *  반영 못 하는 변경(예: SQL Server 기본값)은 문장에서 빠지고 생성기가 경고를 붙인다 */
     String alterColumn(DdlContent.Table table, DdlContent.Column before, DdlContent.Column after);
 
+    /** 테이블 이름 변경(세미콜론 포함) — 데이터를 유지한다 (§3.3 이름 변경 감지) */
+    String renameTable(String from, String to);
+
+    /** 컬럼 이름 변경(세미콜론 포함) — 정의·데이터를 유지한다 */
+    String renameColumn(String table, String from, String to);
+
     /** 컬럼 삭제 */
     String dropColumn(DdlContent.Table table, DdlContent.Column column);
 

@@ -64,7 +64,34 @@ public class ModelEditService {
         out.put("version", model.getVersion());
         out.put("sourceConnectionId", model.getSourceConnectionId() == null ? null : String.valueOf(model.getSourceConnectionId()));
         out.putAll(DocumentOutline.build(root));
+        attachRequirementChanges(out, root, model);
         return out;
+    }
+
+    /** 반영 대기 요구사항마다 마지막으로 반영한 내용과 지금 내용(Section 2.4) — 버전 기록 최근 50개에서 찾는다 */
+    @SuppressWarnings("unchecked")
+    private void attachRequirementChanges(Map<String, Object> out, JsonNode root, Model model) {
+        Object items = out.get("requirements");
+        if (!(items instanceof List<?> list) || list.stream().noneMatch(i -> "PENDING".equals(((Map<String, Object>) i).get("state")))) {
+            return;
+        }
+        List<JsonNode> previous = new java.util.ArrayList<>();
+        for (net.java21.crowfoot.api.model.domain.ModelVersion version
+                : modelVersionRepository.findTop50ByModelIdOrderByVersionDesc(model.getId())) {
+            try {
+                previous.add(objectMapper.readTree(version.getContent()));
+            } catch (RuntimeException e) {
+                // 읽지 못한 버전은 건너뛴다
+            }
+        }
+        Map<String, Map<String, Object>> changes = RequirementChanges.compute(root, previous);
+        for (Object item : list) {
+            Map<String, Object> requirement = (Map<String, Object>) item;
+            Map<String, Object> change = changes.get(String.valueOf(requirement.get("code")));
+            if (change != null) {
+                requirement.put("changes", change);
+            }
+        }
     }
 
     /** 요구사항 반영(Editor 이상) (Section 3.2) */

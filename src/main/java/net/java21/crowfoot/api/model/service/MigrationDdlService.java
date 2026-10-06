@@ -10,6 +10,7 @@ import net.java21.crowfoot.api.model.ddl.Dialects;
 import net.java21.crowfoot.api.model.ddl.DbmsTemplates;
 import net.java21.crowfoot.api.model.ddl.ErdContentParser;
 import net.java21.crowfoot.api.model.ddl.MigrationDdlGenerator;
+import net.java21.crowfoot.api.model.ddl.RenameDetector;
 import net.java21.crowfoot.api.model.ddl.SqlDialect;
 import net.java21.crowfoot.api.model.domain.Model;
 import net.java21.crowfoot.api.model.dto.DdlWarningResponse;
@@ -125,17 +126,41 @@ public class MigrationDdlService {
             throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.migration.dbms-mismatch",
                     model.getDatabaseType(), connection.getDbmsType());
         }
-        String dbContent = schemaIntrospectionService.introspectContent(connection);
-        return generate(model, parse(dbContent), parse(model.getContent()), "DB", "문서", true);
+        // v1.34부터 리버스가 인덱스를 읽는다 — 인덱스도 비교한다. 비교용 조립은 DB에 있는 인덱스만 담는다
+        String dbContent = schemaIntrospectionService.introspectContentForComparison(connection);
+        DdlContent document = parse(model.getContent());
+        // 이름 변경 — 버전 기록에서 같은 테이블·컬럼 id의 예전 이름을 찾아 DB의 예전 이름을 지금 이름으로 맞춘다(RENAME)
+        RenameDetector.Result renames = RenameDetector.detect(parse(dbContent), document, previousContents(model));
+        return generate(model, renames.adjustedFrom(), document, "DB", "문서", false, renames.renames());
     }
 
     /** 공용 조립 — 방언은 문서 메타 databaseType에서 파생한다(1.7과 같다) */
     private MigrationDdlGenerator.Result generate(Model model, DdlContent from, DdlContent to,
                                                   String fromLabel, String toLabel, boolean skipIndexes) {
+        return generate(model, from, to, fromLabel, toLabel, skipIndexes, List.of());
+    }
+
+    private MigrationDdlGenerator.Result generate(Model model, DdlContent from, DdlContent to,
+                                                  String fromLabel, String toLabel, boolean skipIndexes,
+                                                  List<RenameDetector.Rename> renames) {
         String templateId = DbmsTemplates.templateIdForDatabase(model.getDatabaseType());
         SqlDialect dialect = Dialects.byId(templateId);
         return MigrationDdlGenerator.generate(from, to, dialect,
-                DbmsTemplates.byId(templateId).label(), model.getName(), fromLabel, toLabel, skipIndexes);
+                DbmsTemplates.byId(templateId).label(), model.getName(), fromLabel, toLabel, skipIndexes, renames);
+    }
+
+    /** 이름 변경을 찾을 예전 본체 — 최근 버전부터(보존 정책상 최근 기록만 남는다) */
+    private List<DdlContent> previousContents(Model model) {
+        List<DdlContent> contents = new java.util.ArrayList<>();
+        for (net.java21.crowfoot.api.model.domain.ModelVersion version
+                : modelVersionRepository.findTop50ByModelIdOrderByVersionDesc(model.getId())) {
+            try {
+                contents.add(ErdContentParser.parse(objectMapper.readTree(version.getContent())));
+            } catch (JacksonException e) {
+                // 읽지 못한 버전은 건너뛴다 — 이름 변경 감지는 보조 정보다
+            }
+        }
+        return contents;
     }
 
     private MigrationDdlResponse toResponse(MigrationDdlGenerator.Result result,

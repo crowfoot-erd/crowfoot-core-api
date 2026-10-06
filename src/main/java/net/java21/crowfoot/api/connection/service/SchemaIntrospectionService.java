@@ -50,7 +50,7 @@ public class SchemaIntrospectionService {
         DbConnection connection = connectionRepository.findByIdAndWorkspaceId(connectionId, workspaceId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
 
-        ReverseContentAssembler.AssembledContent assembled = doIntrospect(connection);
+        ReverseContentAssembler.AssembledContent assembled = doIntrospect(connection, true);
 
         auditRecorder.record(userId, "CONNECTION_SCHEMA_INTROSPECTED", "CONNECTION",
                 Long.toString(connectionId), Map.of(
@@ -62,11 +62,16 @@ public class SchemaIntrospectionService {
 
     /** 조립된 content만 반환(역할·감사 없음) — 문서↔DB 마이그레이션 DDL(02-model.md 1.7.1)이 재사용 */
     public String introspectContent(DbConnection connection) {
-        return doIntrospect(connection).content();
+        return doIntrospect(connection, true).content();
+    }
+
+    /** 실제 DB와 문서를 비교할 때 쓰는 조립 — DB에 있는 것만 담는다(FK 인덱스를 만들어 넣지 않는다) */
+    public String introspectContentForComparison(DbConnection connection) {
+        return doIntrospect(connection, false).content();
     }
 
     /** 접속 → introspect → Canonical 조립 본문 — 읽기 절반(리버스 3.6과 같은 규칙) */
-    private ReverseContentAssembler.AssembledContent doIntrospect(DbConnection connection) {
+    private ReverseContentAssembler.AssembledContent doIntrospect(DbConnection connection, boolean synthesizeFkIndexes) {
         SchemaIntrospector introspector = introspectors.forDbmsType(connection.getDbmsType());
         if (introspector == null) {
             throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
@@ -81,7 +86,8 @@ public class SchemaIntrospectionService {
             throw new BusinessException(ErrorCode.CONNECTION_UNREACHABLE, JdbcDiagnostics.diagnoseStatement(e));
         }
 
-        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(schema, introspector, connection.getDbmsType());
+        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(schema, introspector, connection.getDbmsType(),
+                synthesizeFkIndexes);
         if (assembled.content().getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
             throw new BusinessException(ErrorCode.REVERSE_FAILED,
                     "스키마가 너무 커 문서 상한(5MB)을 초과했습니다 — 대상 스키마를 줄여 다시 시도하세요");

@@ -47,7 +47,23 @@ public final class MigrationDdlGenerator {
 
     public static Result generate(DdlContent from, DdlContent to, SqlDialect dialect, String dbmsLabel,
                                   String modelName, String fromLabel, String toLabel, boolean skipIndexes) {
+        return generate(from, to, dialect, dbmsLabel, modelName, fromLabel, toLabel, skipIndexes, List.of());
+    }
+
+    /**
+     * @param renames 이름 변경(§3.3 — {@link RenameDetector}). from은 이미 지금 이름으로 맞춘 본체다.
+     *                RENAME 문장은 맨 앞 블록으로 내고, 삭제 문장이 아니라 기본 실행에 들어간다
+     */
+    public static Result generate(DdlContent from, DdlContent to, SqlDialect dialect, String dbmsLabel,
+                                  String modelName, String fromLabel, String toLabel, boolean skipIndexes,
+                                  List<RenameDetector.Rename> renames) {
         SchemaDiffer.Result diff = SchemaDiffer.diff(from, to, skipIndexes);
+        List<String> renameStatements = new ArrayList<>();
+        for (RenameDetector.Rename rename : renames) {
+            renameStatements.add(RenameDetector.KIND_TABLE.equals(rename.kind())
+                    ? dialect.renameTable(rename.from(), rename.to())
+                    : dialect.renameColumn(rename.table(), rename.from(), rename.to()));
+        }
         List<DdlGenerator.Warning> warnings = new ArrayList<>();
         if ("common".equals(dialect.id())) {
             warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.COMMON_DIALECT,
@@ -69,10 +85,21 @@ public final class MigrationDdlGenerator {
 
         for (SchemaDiffer.Change change : diff.changes()) {
             switch (change) {
-                case SchemaDiffer.TableAdded added -> createsAdds.add(
-                        DdlGenerator.createTableStatement(added.table(), dialect));
-                case SchemaDiffer.ColumnAdded added -> createsAdds.add(
-                        dialect.addColumn(added.table(), added.column()));
+                case SchemaDiffer.TableAdded added -> {
+                    createsAdds.add(DdlGenerator.createTableStatement(added.table(), dialect));
+                    // COMMENT ON 방언(PG·Oracle)은 코멘트가 별도 문장이다 — 배포(CREATE)와 같게 함께 낸다(MySQL은 인라인이라 빈 목록)
+                    for (String statement : dialect.commentStatements(added.table())) {
+                        createsAdds.add(statement + ";");
+                    }
+                }
+                case SchemaDiffer.ColumnAdded added -> {
+                    createsAdds.add(dialect.addColumn(added.table(), added.column()));
+                    if (!"mysql".equals(dialect.id())) {
+                        for (String statement : dialect.commentRefresh(added.table(), added.column())) {
+                            createsAdds.add(statement + ";");
+                        }
+                    }
+                }
                 case SchemaDiffer.KeyAltered altered -> keyAltered(altered, dialect, createsAdds, constraintDrops);
                 case SchemaDiffer.ForeignKeyAdded added -> {
                     DdlContent.Table child = toTables.get(added.relationship().childTableId());
@@ -146,13 +173,15 @@ public final class MigrationDdlGenerator {
 
         List<String> blocks = new ArrayList<>();
         blocks.add(header);
+        addIfNotEmpty(blocks, renameStatements);
         addIfNotEmpty(blocks, createsAdds);
         addIfNotEmpty(blocks, alters);
         if (!destructive.isEmpty()) {
             blocks.add(DESTRUCTIVE_BANNER + "\n" + String.join("\n", destructive));
         }
 
-        List<String> statements = new ArrayList<>(createsAdds);
+        List<String> statements = new ArrayList<>(renameStatements);
+        statements.addAll(createsAdds);
         statements.addAll(alters);
         statements.addAll(destructive);
         return new Result(String.join("\n\n", blocks), List.copyOf(warnings), List.copyOf(statements), List.copyOf(destructive));

@@ -143,7 +143,110 @@ class DdlRoundTripTest {
                 .contains("TIMESTAMP(3)");
     }
 
+    @Test
+    @DisplayName("MySQL — 마이그레이션: 이름 변경은 RENAME으로 데이터를 지키고, 기존 테이블에 더한 인덱스가 생기며, 반영 뒤 차이가 0이다")
+    void mysqlMigrationRenameAndIndex() throws Exception {
+        String ddl = """
+                CREATE TABLE zz_alt_author (
+                  id BIGINT NOT NULL AUTO_INCREMENT,
+                  name VARCHAR(50) NOT NULL,
+                  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                  legacy_note VARCHAR(100) NULL,
+                  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                  PRIMARY KEY (id),
+                  UNIQUE KEY uk_zz_alt_author_name (name)
+                );
+                CREATE TABLE zz_alt_post (
+                  id BIGINT NOT NULL AUTO_INCREMENT,
+                  author_id BIGINT NOT NULL,
+                  title VARCHAR(100) NOT NULL,
+                  PRIMARY KEY (id),
+                  KEY idx_zz_alt_post_author (author_id),
+                  CONSTRAINT fk_zz_alt_post_author FOREIGN KEY (author_id) REFERENCES zz_alt_author (id)
+                );
+                """;
+        try (Connection admin = mysql("")) {
+            execute(admin, "CREATE DATABASE migration_db");
+        }
+        String original = assembler.assemble(new DdlTextParser().parse(ddl).schema(), mysqlIntrospector, "mysql").content();
+        DdlContent originalDoc = ErdContentParser.parse(mapper.readTree(original));
+        try (Connection db = mysql("migration_db")) {
+            for (String statement : DdlGenerator.generate(originalDoc, Dialects.byId("mysql"), "MySQL", "alter-test").statements()) {
+                execute(db, statement);
+            }
+            execute(db, "INSERT INTO zz_alt_author (name, legacy_note) VALUES ('kim', '지켜야 할 메모')");
+        }
+
+        // 문서 고치기 — apply_schema와 같은 결과: 이름 변경은 id를 그대로 두고 물리명만 바꾼다
+        tools.jackson.databind.node.ObjectNode root = (tools.jackson.databind.node.ObjectNode) mapper.readTree(original);
+        tools.jackson.databind.JsonNode tables = root.path("model").path("tables");
+        tools.jackson.databind.node.ObjectNode author = null;
+        tools.jackson.databind.node.ObjectNode post = null;
+        for (tools.jackson.databind.JsonNode table : tables) {
+            if ("zz_alt_author".equals(table.path("physicalName").asString())) author = (tools.jackson.databind.node.ObjectNode) table;
+            if ("zz_alt_post".equals(table.path("physicalName").asString())) post = (tools.jackson.databind.node.ObjectNode) table;
+        }
+        for (tools.jackson.databind.JsonNode column : author.path("columns")) {
+            if ("legacy_note".equals(column.path("physicalName").asString())) {
+                ((tools.jackson.databind.node.ObjectNode) column).put("physicalName", "memo").put("logicalName", "memo");
+            }
+        }
+        ((tools.jackson.databind.node.ArrayNode) author.path("columns")).addObject()
+                .put("id", "c-bio").put("physicalName", "bio").put("logicalName", "bio").put("dataType", "VARCHAR")
+                .put("length", 200).put("nullable", true).put("autoIncrement", false);
+        String titleId = null;
+        for (tools.jackson.databind.JsonNode column : post.path("columns")) {
+            if ("title".equals(column.path("physicalName").asString())) {
+                ((tools.jackson.databind.node.ObjectNode) column).put("length", 200);
+                titleId = column.path("id").asString();
+            }
+        }
+        tools.jackson.databind.node.ObjectNode index = ((tools.jackson.databind.node.ArrayNode) post.path("indexes")).addObject();
+        index.put("id", "i-title").put("name", "idx_zz_alt_post_title").put("type", "BTREE");
+        index.putArray("columns").addObject().put("columnId", titleId).put("order", "ASC");
+        DdlContent editedDoc = ErdContentParser.parse(root);
+
+        DdlContent dbBefore;
+        try (Connection db = mysql("migration_db")) {
+            dbBefore = comparisonContent(mysqlIntrospector.introspect(db, null), mysqlIntrospector, "mysql");
+        }
+        RenameDetector.Result renames = RenameDetector.detect(dbBefore, editedDoc, List.of(originalDoc));
+        MigrationDdlGenerator.Result plan = MigrationDdlGenerator.generate(renames.adjustedFrom(), editedDoc,
+                Dialects.byId("mysql"), "MySQL", "alter-test", "DB", "문서", false, renames.renames());
+
+        assertThat(plan.sql())
+                .contains("ALTER TABLE zz_alt_author RENAME COLUMN legacy_note TO memo;")
+                .contains("CREATE INDEX idx_zz_alt_post_title ON zz_alt_post (title ASC);")
+                .contains("MODIFY COLUMN title VARCHAR(200)")
+                .contains("ADD COLUMN bio VARCHAR(200)")
+                .doesNotContain("DROP COLUMN legacy_note")
+                .doesNotContain("NOT_INTROSPECTED");
+        assertThat(plan.destructive()).isEmpty();
+        assertThat(plan.warnings()).noneMatch(w -> "NOT_INTROSPECTED".equals(w.code()));
+
+        try (Connection db = mysql("migration_db")) {
+            for (String statement : plan.safeStatements()) {
+                execute(db, statement);
+            }
+            try (java.sql.ResultSet rs = db.createStatement().executeQuery("SELECT memo FROM zz_alt_author WHERE name = 'kim'")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString(1)).isEqualTo("지켜야 할 메모"); // 이름을 바꿔도 데이터가 남는다
+            }
+            DdlContent dbAfter = comparisonContent(mysqlIntrospector.introspect(db, null), mysqlIntrospector, "mysql");
+            List<SchemaDiffer.Change> remaining = SchemaDiffer.diff(dbAfter, editedDoc, false).changes().stream()
+                    .filter(change -> !(change instanceof SchemaDiffer.CommentRefresh))
+                    .toList();
+            assertThat(remaining).isEmpty();
+        }
+    }
+
     /* ---------- 헬퍼 ---------- */
+
+    /** 실제 DB와 비교할 때의 조립 — FK 인덱스를 만들어 넣지 않는다(마이그레이션 계획과 같다) */
+    private DdlContent comparisonContent(IntrospectedSchema schema, SchemaIntrospector introspector, String databaseType) {
+        String json = assembler.assemble(schema, introspector, databaseType, false).content();
+        return ErdContentParser.parse(mapper.readTree(json));
+    }
 
     private DdlContent content(IntrospectedSchema schema, SchemaIntrospector introspector, String databaseType) {
         String json = assembler.assemble(schema, introspector, databaseType).content();

@@ -521,6 +521,7 @@ public final class DocumentEditor {
                 error(at + ".rename", "같은 물리명의 테이블이 이미 있습니다: " + item.rename());
                 return;
             }
+            followRename(table, table.path("physicalName").asText(), item.rename(), item.logicalName());
             table.put("physicalName", item.rename());
         }
         String tableName = table.path("physicalName").asText();
@@ -649,6 +650,7 @@ public final class DocumentEditor {
                     error(at + ".rename", "같은 물리명의 컬럼이 이미 있습니다: " + item.rename());
                     return;
                 }
+                followRename(column, column.path("physicalName").asText(), item.rename(), item.logicalName());
                 column.put("physicalName", item.rename());
             }
         }
@@ -785,6 +787,17 @@ public final class DocumentEditor {
             changes.add(new Change("column", "add", tableName, name));
         } else if (!column.toString().equals(before)) {
             changes.add(new Change("column", "update", tableName, name));
+        }
+    }
+
+    /** 이름 변경에 논리명을 맞춘다 — 논리명이 예전 물리명 그대로였으면(가져오기·리버스가 코멘트 없는 객체에 채운 값)
+     *  새 물리명으로 바꾼다. 요청이 논리명을 따로 주면 그 값이 이긴다(뒤에서 applyNames가 덮어쓴다) */
+    private static void followRename(ObjectNode node, String oldName, String newName, String requestedLogicalName) {
+        if (requestedLogicalName != null) {
+            return;
+        }
+        if (node.path("logicalName").asText("").equals(oldName)) {
+            node.put("logicalName", newName);
         }
     }
 
@@ -1050,7 +1063,8 @@ public final class DocumentEditor {
         for (JsonNode index : table.path("indexes")) {
             List<String> existing = new ArrayList<>();
             index.path("columns").forEach(column -> existing.add(column.path("columnId").asText()));
-            if (existing.equals(columnIds)) {
+            // 같은 컬럼이라도 종류가 다르면 다른 인덱스다 — title의 FULLTEXT와 BTREE는 함께 둘 수 있다
+            if (existing.equals(columnIds) && indexType.equals(index.path("type").asText("BTREE"))) {
                 // 같은 컬럼 조합 — 정렬만 맞춘다
                 boolean changed = false;
                 int i = 0;

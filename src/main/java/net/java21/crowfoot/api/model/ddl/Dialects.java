@@ -131,6 +131,18 @@ public final class Dialects {
             return "ALTER TABLE " + table.physicalName() + " DROP COLUMN " + column.physicalName() + ";";
         }
 
+        /** 표준형 — PostgreSQL·Oracle. MySQL·SQL Server는 덮어쓴다 */
+        @Override
+        public String renameTable(String from, String to) {
+            return "ALTER TABLE " + from + " RENAME TO " + to + ";";
+        }
+
+        /** 표준형 — MySQL 8·PostgreSQL·Oracle이 같은 문법이다 */
+        @Override
+        public String renameColumn(String table, String from, String to) {
+            return "ALTER TABLE " + table + " RENAME COLUMN " + from + " TO " + to + ";";
+        }
+
         @Override
         public String dropConstraint(DdlContent.Table table, String name, String kind) {
             return "ALTER TABLE " + table.physicalName() + " DROP CONSTRAINT " + name + ";";
@@ -164,6 +176,11 @@ public final class Dialects {
         @Override
         public String onUpdateClause(DdlContent.Column column) {
             return column.onUpdate() == null ? null : "ON UPDATE " + column.onUpdate();
+        }
+
+        @Override
+        public String renameTable(String from, String to) {
+            return "RENAME TABLE " + from + " TO " + to + ";";
         }
 
         @Override
@@ -336,6 +353,16 @@ public final class Dialects {
 
         private MssqlDialect() {
             super("mssql");
+        }
+
+        @Override
+        public String renameTable(String from, String to) {
+            return "EXEC sp_rename '" + from + "', '" + to + "';";
+        }
+
+        @Override
+        public String renameColumn(String table, String from, String to) {
+            return "EXEC sp_rename '" + table + "." + from + "', '" + to + "', 'COLUMN';";
         }
 
         /** SQL Server 계산 컬럼 — 타입 없이 {@code AS (식) [PERSISTED]}. NOT NULL은 PERSISTED에서만 쓸 수 있다 */

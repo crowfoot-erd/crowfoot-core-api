@@ -189,7 +189,7 @@ class MigrationDdlServiceTest {
                 .willReturn(Optional.of(model("mysql", V3)));
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
                 .willReturn(Optional.of(connection("mysql")));
-        given(schemaIntrospectionService.introspectContent(any()))
+        given(schemaIntrospectionService.introspectContentForComparison(any()))
                 .willReturn(DB);
 
         MigrationDdlResponse response = service.generateConnectionMigration(7L, 77L, 501L, 11L);
@@ -242,7 +242,7 @@ class MigrationDdlServiceTest {
                 .willReturn(Optional.of(model("mysql", V3)));
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
                 .willReturn(Optional.of(connection("mysql")));
-        given(schemaIntrospectionService.introspectContent(any())).willReturn(DB);
+        given(schemaIntrospectionService.introspectContentForComparison(any())).willReturn(DB);
         given(statementExecutor.execute(any(), anyList()))
                 .willReturn(List.of(new ModelDeployResponse.Statement(
                         "ALTER TABLE users ADD COLUMN grade VARCHAR(10);", true, null)));
@@ -272,7 +272,7 @@ class MigrationDdlServiceTest {
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
                 .willReturn(Optional.of(connection("mysql")));
         // DB 스키마가 문서와 동일한 스냅샷 — diff 0문장
-        given(schemaIntrospectionService.introspectContent(any())).willReturn(V3);
+        given(schemaIntrospectionService.introspectContentForComparison(any())).willReturn(V3);
 
         ModelDeployResponse response = service.executeConnectionMigration(7L, 77L, 501L, 11L, false);
 
@@ -294,7 +294,7 @@ class MigrationDdlServiceTest {
                 .willReturn(Optional.of(model("mysql", DB)));
         given(connectionRepository.findByIdAndWorkspaceId(11L, 77L))
                 .willReturn(Optional.of(connection("mysql")));
-        given(schemaIntrospectionService.introspectContent(any())).willReturn(V3);
+        given(schemaIntrospectionService.introspectContentForComparison(any())).willReturn(V3);
 
         // 계획 — 삭제 문장을 따로 알려 준다
         MigrationDdlResponse plan = service.generateConnectionMigration(7L, 77L, 501L, 11L);

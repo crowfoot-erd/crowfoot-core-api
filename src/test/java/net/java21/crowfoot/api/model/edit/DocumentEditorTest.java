@@ -577,4 +577,42 @@ class DocumentEditorTest {
         assertThatThrownBy(() -> editor("postgresql").applyRequirements(batch.subList(0, 101)))
                 .isInstanceOf(DocumentEditor.RequirementLimitException.class);
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("이름 변경 — 논리명이 예전 물리명 그대로였으면 새 물리명을 따라간다(가져오기가 채운 값), 직접 쓴 논리명은 그대로")
+    void logicalNameFollowsRename() {
+        seed("mysql");
+        DocumentEditor first = editor("mysql");
+        first.applySchema(List.of(new TableItem("users", null, null, null,
+                List.of(new ColumnItem("email", null, "email", null, null, 100, null, null, null, null, null, null)), null, null, null, null)), null, null);
+        first.throwIfInvalid();
+
+        DocumentEditor editor = editor("mysql");
+        editor.applySchema(List.of(new TableItem("users", null, null, null, List.of(
+                new ColumnItem("email", "contact_email", null, null, null, null, null, null, null, null, null, null),
+                new ColumnItem("id", "user_id", null, null, null, null, null, null, null, null, null, null)), null, null, null, null)), null, null);
+        editor.throwIfInvalid();
+
+        List<String> names = new java.util.ArrayList<>();
+        tableNode("users").path("columns").forEach(c -> names.add(c.path("physicalName").asText() + "=" + c.path("logicalName").asText()));
+        assertThat(names).contains("contact_email=contact_email", "user_id=회원 ID");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("같은 컬럼의 FULLTEXT 인덱스가 있어도 BTREE 인덱스를 새로 더한다 — 종류를 덮어쓰지 않는다")
+    void sameColumnsDifferentIndexType() {
+        seed("mysql");
+        DocumentEditor first = editor("mysql");
+        first.applySchema(List.of(new TableItem("users", null, null, null, null, null, null,
+                List.of(new IndexItem("ft_users_email", List.of(new IndexColumnItem("email", null)), "FULLTEXT", "ngram")), null)), null, null);
+        first.throwIfInvalid();
+        DocumentEditor second = editor("mysql");
+        second.applySchema(List.of(new TableItem("users", null, null, null, null, null, null,
+                List.of(new IndexItem("idx_users_email", List.of(new IndexColumnItem("email", null)))), null)), null, null);
+        second.throwIfInvalid();
+
+        List<String> indexes = new java.util.ArrayList<>();
+        tableNode("users").path("indexes").forEach(i -> indexes.add(i.path("name").asText() + ":" + i.path("type").asText()));
+        assertThat(indexes).containsExactly("ft_users_email:FULLTEXT", "idx_users_email:BTREE");
+    }
 }

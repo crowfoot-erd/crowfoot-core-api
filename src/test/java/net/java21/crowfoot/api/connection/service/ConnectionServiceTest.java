@@ -345,7 +345,7 @@ class ConnectionServiceTest {
         assertThatThrownBy(() -> connectionService.delete(2L, 7L, 1L))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.INVALID_REQUEST);
+                .isEqualTo(ErrorCode.MANAGED_CONNECTION_REVOKE_REQUIRED);
         verify(connectionRepository, org.mockito.Mockito.never()).deleteById(anyLong());
     }
 }

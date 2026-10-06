@@ -236,8 +236,20 @@ public final class SchemaDiffer {
         if (expression == null || expression.isBlank()) {
             return null;
         }
-        return expression.replaceAll("[()`\"\\s]", "").toLowerCase(java.util.Locale.ROOT);
+        String text = expression.toLowerCase(java.util.Locale.ROOT);
+        // PostgreSQL은 식을 다시 써서 돌려준다 — 캐스트(::text, ::character varying(20), ::text[])를 지우고
+        // "= ANY (ARRAY[a, b])"를 "IN (a, b)"로 되돌린다(status IN ('A','B') ≡ (status)::text = ANY (ARRAY['A'::…]))
+        text = PG_CAST.matcher(text).replaceAll("");
+        text = PG_ANY_ARRAY.matcher(text).replaceAll(" in (");
+        text = text.replace("]", ")");
+        return text.replaceAll("[()`\"\\s]", "");
     }
+
+    private static final java.util.regex.Pattern PG_CAST = java.util.regex.Pattern.compile(
+            "::(?:character varying|double precision|timestamp(?: with(?:out)? time zone)?|[a-z_][a-z0-9_]*)(?:\\(\\d+(?:,\\s*\\d+)?\\))?(?:\\[\\])?");
+
+    private static final java.util.regex.Pattern PG_ANY_ARRAY = java.util.regex.Pattern.compile(
+            "=\\s*any\\s*\\(+\\s*array\\s*\\[");
 
     private static List<Change> indexChanges(DdlContent.Table fromTable, DdlContent.Table toTable) {
         List<Change> changes = new ArrayList<>();

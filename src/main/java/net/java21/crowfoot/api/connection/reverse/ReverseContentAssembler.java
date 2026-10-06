@@ -65,9 +65,18 @@ public class ReverseContentAssembler {
     }
 
     public AssembledContent assemble(IntrospectedSchema schema, SchemaIntrospector introspector, String databaseType) {
+        return assemble(schema, introspector, databaseType, true);
+    }
+
+    /**
+     * @param synthesizeFkIndexes FK 인덱스를 만들어 넣을지 — 새 문서(리버스·가져오기)는 넣고, 실제 DB와 비교하는 조립
+     *                            (마이그레이션 계획)은 넣지 않는다. 비교 쪽에 없는 인덱스를 만들면 지울 인덱스로 잘못 나온다
+     */
+    public AssembledContent assemble(IntrospectedSchema schema, SchemaIntrospector introspector, String databaseType,
+                                     boolean synthesizeFkIndexes) {
         List<String> skipped = new ArrayList<>();
-        boolean fkIndexesManagedByDb = databaseType != null
-                && FK_AUTO_INDEX_DBMS.equalsIgnoreCase(databaseType.trim());
+        boolean fkIndexesManagedByDb = !synthesizeFkIndexes || (databaseType != null
+                && FK_AUTO_INDEX_DBMS.equalsIgnoreCase(databaseType.trim()));
 
         Map<String, String> tableIds = new HashMap<>();
         Map<String, Map<String, String>> columnIds = new HashMap<>();

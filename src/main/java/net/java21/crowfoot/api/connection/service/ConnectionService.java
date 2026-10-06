@@ -179,8 +179,7 @@ public class ConnectionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.CONNECTION_NOT_FOUND));
         // 매니지드 발급 커넥션은 철회가 통째로 정리한다 — 커넥션만 지우면 스키마가 방치된다
         if (managedDatabaseRepository.findByConnectionId(connectionId).isPresent()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "매니지드 발급 커넥션은 삭제할 수 없습니다 — 발급 철회로 정리해야 합니다");
+            throw new BusinessException(ErrorCode.MANAGED_CONNECTION_REVOKE_REQUIRED);
         }
         connectionRepository.deleteById(connection.getId());
         auditRecorder.record(userId, "CONNECTION_DELETED", "CONNECTION",

@@ -58,6 +58,8 @@ public enum ErrorCode {
     MODEL_VERSION_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_VERSION_NOT_FOUND", "버전 기록을 찾을 수 없습니다"),
     SQL_IMPORT_NO_TABLES(HttpStatus.BAD_REQUEST, "SQL_IMPORT_NO_TABLES", "CREATE TABLE 문을 찾을 수 없습니다"),
     MODEL_ALREADY_CONNECTED(HttpStatus.CONFLICT, "MODEL_ALREADY_CONNECTED", "이미 커넥션이 연결된 문서입니다"),
+    // DB → 문서 동기화 (08-core/02-model.md Section 1.16.2)
+    SYNC_PLAN_CHANGED(HttpStatus.CONFLICT, "SYNC_PLAN_CHANGED", "동기화 계획이 바뀌었습니다. 계획을 다시 확인한 뒤 적용하세요"),
     // 워크스페이스 액세스 토큰 (08-core/18-access-token.md Section 6)
     ACCESS_TOKEN_NOT_FOUND(HttpStatus.NOT_FOUND, "ACCESS_TOKEN_NOT_FOUND", "토큰을 찾을 수 없습니다"),
     ACCESS_TOKEN_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "ACCESS_TOKEN_LIMIT_EXCEEDED", "토큰은 한 사람이 워크스페이스당 5개까지 발급할 수 있습니다"),
@@ -84,6 +86,7 @@ public enum ErrorCode {
     MANAGED_INSTANCE_UNREACHABLE(HttpStatus.BAD_GATEWAY, "MANAGED_INSTANCE_UNREACHABLE", "매니지드 인스턴스에 접속할 수 없습니다"),
     MANAGED_INSTANCE_IN_USE(HttpStatus.CONFLICT, "MANAGED_INSTANCE_IN_USE", "발급이 남아 있는 인스턴스는 삭제할 수 없습니다"),
     MANAGED_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "MANAGED_LIMIT_EXCEEDED", "발급 한도에 도달했습니다"),
+    MANAGED_CONNECTION_REVOKE_REQUIRED(HttpStatus.CONFLICT, "MANAGED_CONNECTION_REVOKE_REQUIRED", "서비스 제공 DB의 커넥션은 발급 철회로 정리합니다"),
     MANAGED_PROVISION_FAILED(HttpStatus.BAD_GATEWAY, "MANAGED_PROVISION_FAILED", "발급 스키마 프로비저닝에 실패했습니다"),
     MANAGED_DATABASE_NOT_FOUND(HttpStatus.NOT_FOUND, "MANAGED_DATABASE_NOT_FOUND", "매니지드 발급을 찾을 수 없습니다"),
 
