@@ -28,6 +28,7 @@ import net.java21.crowfoot.api.model.edit.EditRequests.UniqueItem;
 import net.java21.crowfoot.common.ErrorResponse;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -48,6 +49,8 @@ public final class DocumentEditor {
     static final Pattern REQUIREMENT_CODE = Pattern.compile("^REQ-(\\d{3,})$");
     static final String SEPARATOR = "-----";
     static final int REQUIREMENT_LIMIT = 500;
+    /** 요구사항 하나의 수용 기준 상한 — 에디터 화면과 같다(05-editor/02-ui.md Section 21) */
+    static final int CRITERIA_LIMIT = 20;
     /** 공용 타입 코드 — DDL 생성기와 같은 카탈로그(05-editor/01-core.md §17) */
     static final Set<String> DATA_TYPES = net.java21.crowfoot.api.model.ddl.DbmsTemplates.COMMON_TYPES;
     static final Set<String> LENGTH_TYPES = Set.of("CHAR", "VARCHAR", "BINARY", "VARBINARY");
@@ -278,7 +281,62 @@ public final class DocumentEditor {
         node.put("appliedRevision", item.tables() != null ? 1 : 0);
         ArrayNode ids = node.putArray("tableIds");
         tableIds.forEach(ids::add);
+        if (item.criteria() != null) {
+            applyCriteria(at, node, item.criteria());
+        }
         changes.add(new Change("requirement", "add", "", code));
+    }
+
+    /**
+     * 수용 기준을 목록째 바꾼다(v1.36 — 08-core/17-model-edit.md Section 2.2). 문구가 같은 기준은 id와 체크(done)를 이어받는다.
+     * sql이 있으면 데이터 확인(check)을 둔다. 개정 번호는 오르지 않는다(반영 대기가 되지 않는다). 바뀌었으면 true
+     */
+    private boolean applyCriteria(String at, ObjectNode node, List<EditRequests.CriterionItem> items) {
+        if (items.size() > CRITERIA_LIMIT) {
+            error(at + ".criteria", "수용 기준은 " + CRITERIA_LIMIT + "개까지입니다");
+            return false;
+        }
+        Map<String, JsonNode> previous = new HashMap<>();
+        node.path("criteria").forEach(criterion -> previous.putIfAbsent(criterion.path("text").asText("").strip(), criterion));
+        ArrayNode next = JsonNodeFactory.instance.arrayNode();
+        for (int i = 0; i < items.size(); i++) {
+            EditRequests.CriterionItem item = items.get(i);
+            String where = at + ".criteria[" + i + "]";
+            String text = item == null || item.text() == null ? "" : item.text().strip();
+            if (text.isEmpty() || text.length() > 200) {
+                error(where + ".text", "수용 기준은 1~200자여야 합니다");
+                return false;
+            }
+            String sql = item.sql() == null ? "" : item.sql().strip();
+            if (sql.length() > 4000) {
+                error(where + ".sql", "확인 SQL은 4,000자 이하여야 합니다");
+                return false;
+            }
+            String expect = item.expect() == null || item.expect().isBlank() ? "0" : item.expect().strip();
+            if (expect.length() > 200) {
+                error(where + ".expect", "기대값은 200자 이하여야 합니다");
+                return false;
+            }
+            JsonNode before = previous.remove(text);
+            ObjectNode criterion = next.addObject();
+            criterion.put("id", before != null ? before.path("id").asText() : ids.get());
+            criterion.put("text", text);
+            criterion.put("done", before != null && before.path("done").asBoolean(false));
+            if (!sql.isEmpty()) {
+                ObjectNode check = criterion.putObject("check");
+                check.put("sql", sql);
+                check.put("expect", expect);
+            }
+        }
+        if (next.equals(node.path("criteria")) || (next.isEmpty() && !node.has("criteria"))) {
+            return false;
+        }
+        if (next.isEmpty()) {
+            node.remove("criteria");
+        } else {
+            node.set("criteria", next);
+        }
+        return true;
     }
 
     private void updateRequirement(String at, ObjectNode node, RequirementItem item) {
@@ -352,6 +410,9 @@ public final class DocumentEditor {
                 node.put("appliedRevision", revision);
                 changed = true;
             }
+        }
+        if (item.criteria() != null && applyCriteria(at, node, item.criteria())) {
+            changed = true;
         }
         if (changed) {
             changes.add(new Change("requirement", "update", "", node.path("code").asText()));

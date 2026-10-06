@@ -60,6 +60,7 @@ public enum ErrorCode {
     MODEL_ALREADY_CONNECTED(HttpStatus.CONFLICT, "MODEL_ALREADY_CONNECTED", "이미 커넥션이 연결된 문서입니다"),
     // DB → 문서 동기화 (08-core/02-model.md Section 1.16.2)
     SYNC_PLAN_CHANGED(HttpStatus.CONFLICT, "SYNC_PLAN_CHANGED", "동기화 계획이 바뀌었습니다. 계획을 다시 확인한 뒤 적용하세요"),
+    REQUIREMENTS_SYNC_PLAN_CHANGED(HttpStatus.CONFLICT, "REQUIREMENTS_SYNC_PLAN_CHANGED", "요구사항 동기화 계획이 바뀌었습니다. 계획을 다시 확인한 뒤 적용하세요"),
     // 워크스페이스 액세스 토큰 (08-core/18-access-token.md Section 6)
     ACCESS_TOKEN_NOT_FOUND(HttpStatus.NOT_FOUND, "ACCESS_TOKEN_NOT_FOUND", "토큰을 찾을 수 없습니다"),
     ACCESS_TOKEN_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "ACCESS_TOKEN_LIMIT_EXCEEDED", "토큰은 한 사람이 워크스페이스당 5개까지 발급할 수 있습니다"),

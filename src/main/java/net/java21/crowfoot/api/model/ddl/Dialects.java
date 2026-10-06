@@ -241,15 +241,13 @@ public final class Dialects {
         @Override
         public List<String> commentRefresh(DdlContent.Table table, DdlContent.Column column) {
             if (column == null) {
-                return table.logicalName() == null || tableOption(table).isEmpty() ? List.of()
-                        : List.of("ALTER TABLE " + table.physicalName() + tableOption(table));
-            }
-            // 코멘트 해제는 MODIFY로 표현할 수 없다 — 논리명이 있을 때만 갱신한다
-            if (column.logicalName() == null) {
-                return List.of();
+                // 논리명이 없으면 DB에 남은 코멘트를 지운다(빈 코멘트 = 코멘트 없음, v1.36)
+                return List.of("ALTER TABLE " + table.physicalName()
+                        + (table.logicalName() == null ? " COMMENT=''" : tableOption(table)));
             }
             return List.of("ALTER TABLE " + table.physicalName() + " MODIFY COLUMN "
-                    + DdlGenerator.columnAttributes(column, this) + " " + columnComment(column));
+                    + DdlGenerator.columnAttributes(column, this) + " "
+                    + (column.logicalName() == null ? "COMMENT ''" : columnComment(column)));
         }
     }
 
@@ -302,12 +300,11 @@ public final class Dialects {
 
         @Override
         public List<String> commentRefresh(DdlContent.Table table, DdlContent.Column column) {
+            // 논리명이 없으면 DB에 남은 코멘트를 지운다(IS NULL, v1.36)
             return column == null
-                    ? (table.logicalName() == null ? List.of() : List.of("COMMENT ON TABLE "
-                            + table.physicalName() + " IS " + stringLiteral(table.logicalName())))
-                    : (column.logicalName() == null ? List.of() : List.of("COMMENT ON COLUMN "
-                            + table.physicalName() + "." + column.physicalName()
-                            + " IS " + stringLiteral(column.logicalName())));
+                    ? List.of("COMMENT ON TABLE " + table.physicalName() + " IS " + commentLiteral(table.logicalName()))
+                    : List.of("COMMENT ON COLUMN " + table.physicalName() + "." + column.physicalName()
+                            + " IS " + commentLiteral(column.logicalName()));
         }
     }
 
@@ -452,6 +449,10 @@ public final class Dialects {
             attributes.append(' ').append(autoIncrement);
         }
         return attributes.toString();
+    }
+
+    private static String commentLiteral(String logicalName) {
+        return logicalName == null ? "NULL" : stringLiteral(logicalName);
     }
 
     /** COMMENT ON 방언(PG·Oracle) 공통 — 테이블·컬럼 코멘트(논리명)를 별도 문장으로 내보낸다 */

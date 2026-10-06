@@ -94,7 +94,7 @@ public final class MigrationDdlGenerator {
                 }
                 case SchemaDiffer.ColumnAdded added -> {
                     createsAdds.add(dialect.addColumn(added.table(), added.column()));
-                    if (!"mysql".equals(dialect.id())) {
+                    if (!"mysql".equals(dialect.id()) && added.column().logicalName() != null) {
                         for (String statement : dialect.commentRefresh(added.table(), added.column())) {
                             createsAdds.add(statement + ";");
                         }

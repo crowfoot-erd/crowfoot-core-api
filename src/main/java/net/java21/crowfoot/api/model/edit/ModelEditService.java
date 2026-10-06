@@ -115,6 +115,75 @@ public class ModelEditService {
                 editor -> editor.remove(request.tables(), request.columns(), request.relationships(), request.requirements()));
     }
 
+    /** 요구사항 동기화 계획 응답 (Section 3.5) */
+    public record RequirementsSyncPlan(String workspaceId, String modelId, long documentVersion,
+                                       List<RequirementSync.Added> added, List<RequirementSync.Updated> updated,
+                                       List<RequirementSync.Missing> missing, int unchanged, int changeCount,
+                                       String planFingerprint) {
+    }
+
+    /** 요구사항 동기화 적용 응답 — 편집 결과와 계획 건수 */
+    public record RequirementsSyncResult(EditResult result, int added, int updated, int dropped, int removed) {
+    }
+
+    /** 요구사항 동기화 계획(Editor 이상) — 문서를 바꾸지 않는다. 검증 오류는 400으로 알린다 (Section 3.5) */
+    @Transactional(readOnly = true)
+    public RequirementsSyncPlan planRequirementsSync(long userId, long workspaceId, long modelId, EditRequests.RequirementsSync request) {
+        roleChecker.requireEditor(userId, workspaceId);
+        Model model = find(workspaceId, modelId);
+        RequirementSync.Plan plan = syncPlan(model, workspaceId, request);
+        return new RequirementsSyncPlan(String.valueOf(workspaceId), String.valueOf(modelId), model.getVersion(),
+                plan.added(), plan.updated(), plan.missing(), plan.unchanged(), plan.changeCount(), plan.fingerprint());
+    }
+
+    /** 요구사항 동기화 적용(Editor 이상) — 지문이 다르면 409 REQUIREMENTS_SYNC_PLAN_CHANGED (Section 3.5) */
+    @Transactional
+    public RequirementsSyncResult applyRequirementsSync(long userId, long workspaceId, long modelId, EditRequests.RequirementsSync request) {
+        roleChecker.requireEditor(userId, workspaceId);
+        if (request.planFingerprint() == null || request.planFingerprint().isBlank()) {
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model-edit.plan-fingerprint");
+        }
+        Model model = find(workspaceId, modelId);
+        RequirementSync.Plan plan = syncPlan(model, workspaceId, request);
+        if (!plan.fingerprint().equals(request.planFingerprint())) {
+            throw new BusinessException(ErrorCode.REQUIREMENTS_SYNC_PLAN_CHANGED);
+        }
+        // 계획을 계산한 버전에 그대로 쓴다 — 그 사이에 저장이 끼어들었으면 409 VERSION_CONFLICT
+        EditResult result = edit(userId, workspaceId, modelId, model.getVersion(), request.note(), "MODEL_REQUIREMENTS_SYNCED",
+                editor -> applySyncPlan(editor, plan));
+        return new RequirementsSyncResult(result, plan.added().size(), plan.updated().size(), plan.toDrop().size(),
+                plan.toRemove().size());
+    }
+
+    private RequirementSync.Plan syncPlan(Model model, long workspaceId, EditRequests.RequirementsSync request) {
+        if (request.items() == null || request.items().isEmpty()) {
+            // 빈 목록은 모든 요구사항을 빠짐으로 만든다 — 실수로 비우지 않게 막는다
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model-edit.sync-items");
+        }
+        ObjectNode root = (ObjectNode) read(model);
+        RequirementSync.Plan plan = RequirementSync.plan(root, request.items(), Boolean.TRUE.equals(request.acceptRemovals()));
+        // 미리 적용해 본다 — 검증(제목 길이, 없는 테이블 등)은 save_requirements와 같고 오류 위치는 items[n]이다
+        DocumentEditor dryRun = new DocumentEditor(root.deepCopy(), model.getDatabaseType(), domainTypes(workspaceId));
+        try {
+            applySyncPlan(dryRun, plan);
+        } catch (DocumentEditor.RequirementLimitException e) {
+            throw new BusinessException(ErrorCode.REQUIREMENT_LIMIT_EXCEEDED);
+        }
+        dryRun.throwIfInvalid();
+        return plan;
+    }
+
+    private static void applySyncPlan(DocumentEditor editor, RequirementSync.Plan plan) {
+        editor.applyRequirements(plan.resolvedItems());
+        if (!plan.toDrop().isEmpty()) {
+            editor.applyRequirements(plan.toDrop().stream()
+                    .map(code -> new EditRequests.RequirementItem(code, null, null, "dropped", null, null, null)).toList());
+        }
+        if (!plan.toRemove().isEmpty()) {
+            editor.remove(null, null, null, plan.toRemove());
+        }
+    }
+
     private EditResult edit(long userId, long workspaceId, long modelId, Long baseVersion, String note, String auditAction,
                             Consumer<DocumentEditor> action) {
         roleChecker.requireEditor(userId, workspaceId);

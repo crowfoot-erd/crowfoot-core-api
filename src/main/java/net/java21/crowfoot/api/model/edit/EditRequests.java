@@ -14,8 +14,21 @@ public final class EditRequests {
     public record RequirementsApply(Long baseVersion, String note, List<RequirementItem> items) {
     }
 
+    /** 요구사항 동기화 계획·적용 (Section 3.5 — v1.36). 적용은 planFingerprint가 필요하다 */
+    public record RequirementsSync(String note, List<RequirementItem> items, Boolean acceptRemovals, String planFingerprint) {
+    }
+
     public record RequirementItem(String code, String title, String description, String status, String scope,
-                                  String domain, List<String> tables) {
+                                  String domain, List<String> tables, List<CriterionItem> criteria) {
+
+        public RequirementItem(String code, String title, String description, String status, String scope,
+                               String domain, List<String> tables) {
+            this(code, title, description, status, scope, domain, tables, null);
+        }
+    }
+
+    /** 수용 기준 한 줄(v1.36) — sql은 데이터로 확인하는 SELECT(한 값), expect는 기대값(생략하면 "0") */
+    public record CriterionItem(String text, String sql, String expect) {
     }
 
     public record SchemaApply(Long baseVersion, String note, List<TableItem> tables,

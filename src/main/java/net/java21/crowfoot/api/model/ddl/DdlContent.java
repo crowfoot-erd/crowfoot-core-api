@@ -30,6 +30,12 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
             List<Index> indexes,
             List<Check> checks) {
 
+        /** 코멘트 비교 값 — 논리명이 없으면 물리명이다. 리버스가 코멘트 없는 객체를 논리명 = 물리명으로 읽는 것과 맞춘다(v1.36) */
+        public String commentText() {
+            return logicalName != null ? logicalName : physicalName;
+        }
+
+
         /** CHECK 제약 없는 테이블 — v1.34 이전 꼴 */
         public Table(String id, String physicalName, String logicalName, List<Column> columns,
                      KeyConstraint primaryKey, List<KeyConstraint> uniques, List<Index> indexes) {
@@ -52,6 +58,12 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
             String logicalName,
             Generated generated,
             String onUpdate) {
+
+        /** 코멘트 비교 값 — 논리명이 없으면 물리명이다. 리버스가 코멘트 없는 객체를 논리명 = 물리명으로 읽는 것과 맞춘다(v1.36) */
+        public String commentText() {
+            return logicalName != null ? logicalName : physicalName;
+        }
+
 
         /** 생성식·ON UPDATE 없는 컬럼 — v1.34 이전 꼴 */
         public Column(String id, String physicalName, String dataType, Integer length, Integer precision,

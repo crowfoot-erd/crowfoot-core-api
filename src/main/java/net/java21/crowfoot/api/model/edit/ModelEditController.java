@@ -36,6 +36,24 @@ public class ModelEditController {
         return ApiResponse.success(service.applyRequirements(CurrentUserHolder.get().userId(), workspaceId, modelId, request));
     }
 
+    /** 요구사항 동기화 계획 — Editor 이상 (3.5) */
+    @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/requirements/sync")
+    public ApiResponse<ModelEditService.RequirementsSyncPlan> planRequirementsSync(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @RequestBody EditRequests.RequirementsSync request) {
+        return ApiResponse.success(service.planRequirementsSync(CurrentUserHolder.get().userId(), workspaceId, modelId, request));
+    }
+
+    /** 요구사항 동기화 적용 — Editor 이상 (3.5) */
+    @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/requirements/sync/apply")
+    public ApiResponse<ModelEditService.RequirementsSyncResult> applyRequirementsSync(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @RequestBody EditRequests.RequirementsSync request) {
+        return ApiResponse.success(service.applyRequirementsSync(CurrentUserHolder.get().userId(), workspaceId, modelId, request));
+    }
+
     /** 스키마 반영 — Editor 이상 (3.3) */
     @PostMapping("/core/workspaces/{workspace-id}/models/{model-id}/schema/apply")
     public ApiResponse<ModelEditService.EditResult> applySchema(

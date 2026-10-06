@@ -615,4 +615,41 @@ class DocumentEditorTest {
         tableNode("users").path("indexes").forEach(i -> indexes.add(i.path("name").asText() + ":" + i.path("type").asText()));
         assertThat(indexes).containsExactly("ft_users_email:FULLTEXT", "idx_users_email:BTREE");
     }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("수용 기준(v1.36) — 확인 SQL·기대값을 두고, 문구가 같은 기준은 id와 체크를 이어받으며, 개정 번호는 오르지 않는다")
+    void criteriaWithChecks() {
+        DocumentEditor create = editor("postgresql");
+        create.applyRequirements(List.of(new RequirementItem(null, "주문 생성", "회원만 주문한다", "confirmed", null, null, null,
+                List.of(new EditRequests.CriterionItem("주문은 회원만 만든다", "SELECT COUNT(*) FROM orders WHERE member_id IS NULL", null),
+                        new EditRequests.CriterionItem("주문 금액은 0 이상", null, null)))));
+        create.throwIfInvalid();
+        JsonNode criteria = requirementNode("REQ-001").path("criteria");
+        assertThat(criteria.size()).isEqualTo(2);
+        assertThat(criteria.get(0).path("check").path("sql").asText()).startsWith("SELECT COUNT(*)");
+        assertThat(criteria.get(0).path("check").path("expect").asText()).isEqualTo("0");
+        assertThat(criteria.get(1).has("check")).isFalse();
+        String firstId = criteria.get(0).path("id").asText();
+        ((tools.jackson.databind.node.ObjectNode) criteria.get(0)).put("done", true); // 화면에서 체크했다
+
+        DocumentEditor revise = editor("postgresql");
+        revise.applyRequirements(List.of(new RequirementItem("REQ-001", null, null, null, null, null, null,
+                List.of(new EditRequests.CriterionItem("주문은 회원만 만든다", "SELECT COUNT(*) FROM orders WHERE member_id IS NULL", "0"),
+                        new EditRequests.CriterionItem("주문 금액은 0 이상", "SELECT COUNT(*) FROM orders WHERE total < 0", "")))));
+        revise.throwIfInvalid();
+        JsonNode after = requirementNode("REQ-001");
+        assertThat(after.path("criteria").get(0).path("id").asText()).isEqualTo(firstId);
+        assertThat(after.path("criteria").get(0).path("done").asBoolean()).isTrue();
+        assertThat(after.path("criteria").get(1).path("check").path("expect").asText()).isEqualTo("0");
+        assertThat(after.path("revision").asInt()).isEqualTo(1); // 수용 기준만 바뀌었다 — 반영 대기가 되지 않는다
+        assertThat(revise.changes()).extracting(DocumentEditor.Change::action).containsExactly("update");
+
+        DocumentEditor tooMany = editor("postgresql");
+        List<EditRequests.CriterionItem> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 21; i++) {
+            many.add(new EditRequests.CriterionItem("기준 " + i, null, null));
+        }
+        tooMany.applyRequirements(List.of(new RequirementItem("REQ-001", null, null, null, null, null, null, many)));
+        assertThat(fields(tooMany)).contains("items[0].criteria");
+    }
 }

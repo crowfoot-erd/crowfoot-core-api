@@ -114,6 +114,27 @@ public final class DocumentOutline {
             item.put("appliedRevision", requirement.path("appliedRevision").asInt(0));
             item.put("tables", names(requirement.path("tableIds"), tableNames));
             item.put("state", state(requirement));
+            // 수용 기준(v1.32)과 데이터 확인 SQL(v1.36) — 없는 요구사항에는 키를 두지 않는다
+            if (requirement.path("criteria").isArray()) {
+                List<Map<String, Object>> criteria = new ArrayList<>();
+                for (JsonNode criterion : requirement.path("criteria")) {
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("id", criterion.path("id").asText());
+                    entry.put("text", criterion.path("text").asText(""));
+                    entry.put("done", criterion.path("done").asBoolean(false));
+                    JsonNode check = criterion.path("check");
+                    if (check.isObject() && !check.path("sql").asText("").isBlank()) {
+                        Map<String, Object> checkOut = new LinkedHashMap<>();
+                        checkOut.put("sql", check.path("sql").asText());
+                        checkOut.put("expect", check.path("expect").asText("0"));
+                        entry.put("check", checkOut);
+                    } else {
+                        entry.put("check", null);
+                    }
+                    criteria.add(entry);
+                }
+                item.put("criteria", criteria);
+            }
             requirements.add(item);
         }
         requirements.sort((a, b) -> String.valueOf(a.get("code")).compareTo(String.valueOf(b.get("code"))));

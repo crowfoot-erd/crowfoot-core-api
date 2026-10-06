@@ -141,7 +141,8 @@ public final class SchemaDiffer {
             List<String> fields = changedFields(fromColumn, toColumn);
             if (!fields.isEmpty()) {
                 changes.add(new ColumnAltered(toTable, fromColumn, toColumn, fields));
-            } else if (!Objects.equals(fromColumn.logicalName(), toColumn.logicalName())) {
+            } else if (!Objects.equals(fromColumn.commentText(), toColumn.commentText())) {
+                // 코멘트 비교 — 논리명이 없으면 물리명으로 본다(리버스 규칙과 같다, v1.36)
                 changes.add(new CommentRefresh(toTable, toColumn.physicalName()));
             }
         }
@@ -193,7 +194,7 @@ public final class SchemaDiffer {
             }
         }
 
-        if (!Objects.equals(fromTable.logicalName(), toTable.logicalName())) {
+        if (!Objects.equals(fromTable.commentText(), toTable.commentText())) {
             changes.add(new CommentRefresh(toTable, null));
         }
         return skipped;
