@@ -37,6 +37,8 @@ public final class SchemaDiffer {
     public static final String FIELD_AUTO_INCREMENT = "AUTO_INCREMENT";
     public static final String FIELD_GENERATED = "GENERATED";
     public static final String FIELD_ON_UPDATE = "ON_UPDATE";
+    /** IDENTITY 종류(ALWAYS·BY DEFAULT) — 양쪽 모두 자동 증가일 때만 본다(v1.37) */
+    public static final String FIELD_IDENTITY = "IDENTITY";
 
     private SchemaDiffer() {
     }
@@ -213,6 +215,8 @@ public final class SchemaDiffer {
         }
         if (before.autoIncrement() != after.autoIncrement()) {
             fields.add(FIELD_AUTO_INCREMENT);
+        } else if (before.autoIncrement() && before.identityAlways() != after.identityAlways()) {
+            fields.add(FIELD_IDENTITY);
         }
         if (!sameGenerated(before.generated(), after.generated())) {
             fields.add(FIELD_GENERATED);
@@ -233,7 +237,7 @@ public final class SchemaDiffer {
 
     /** 식 비교 키 — DBMS가 돌려줄 때 덧붙이는 괄호·백틱·큰따옴표·공백과 대소문자를 무시한다
      *  (MySQL은 {@code (a >= 0)}을 {@code (`a` >= 0)}로 돌려준다). null·빈값은 같다 */
-    static String expressionKey(String expression) {
+    public static String expressionKey(String expression) {
         if (expression == null || expression.isBlank()) {
             return null;
         }
@@ -260,7 +264,8 @@ public final class SchemaDiffer {
                 changes.add(new IndexAdded(toTable, toIndex));
             } else if (!sameIndexColumns(fromTable, fromIndex, toTable, toIndex)
                     || !Objects.equals(indexType(fromIndex), indexType(toIndex))
-                    || !Objects.equals(key(String.valueOf(fromIndex.parser())), key(String.valueOf(toIndex.parser())))) {
+                    || !Objects.equals(key(String.valueOf(fromIndex.parser())), key(String.valueOf(toIndex.parser())))
+                    || !sameIndexExtras(fromTable, fromIndex, toTable, toIndex)) {
                 changes.add(new IndexDropped(toTable, fromIndex));
                 changes.add(new IndexAdded(toTable, toIndex));
             }
@@ -453,6 +458,35 @@ public final class SchemaDiffer {
     private static boolean sameIndexColumns(DdlContent.Table fromTable, DdlContent.Index fromIndex,
                                             DdlContent.Table toTable, DdlContent.Index toIndex) {
         return Objects.equals(indexColumnRefs(fromTable, fromIndex), indexColumnRefs(toTable, toIndex));
+    }
+
+    /** v1.37 인덱스 속성 — 유니크·식 키·조건·INCLUDE·연산자 클래스. 식은 공백·대소문자를 무시해 비교한다 */
+    private static boolean sameIndexExtras(DdlContent.Table fromTable, DdlContent.Index fromIndex,
+                                           DdlContent.Table toTable, DdlContent.Index toIndex) {
+        return fromIndex.unique() == toIndex.unique()
+                && Objects.equals(expressionKey(fromIndex.expression()), expressionKey(toIndex.expression()))
+                && Objects.equals(expressionKey(fromIndex.where()), expressionKey(toIndex.where()))
+                && Objects.equals(includeRefs(fromTable, fromIndex), includeRefs(toTable, toIndex))
+                && Objects.equals(opclasses(fromIndex), opclasses(toIndex));
+    }
+
+    private static List<String> includeRefs(DdlContent.Table table, DdlContent.Index index) {
+        List<String> refs = new ArrayList<>();
+        for (String columnId : index.includeColumnIds()) {
+            String name = physicalName(table, columnId);
+            if (name != null) {
+                refs.add(name);
+            }
+        }
+        return refs;
+    }
+
+    private static List<String> opclasses(DdlContent.Index index) {
+        List<String> out = new ArrayList<>();
+        for (DdlContent.IndexColumn column : index.columns()) {
+            out.add(column.opclass() == null ? "" : column.opclass().toLowerCase(java.util.Locale.ROOT));
+        }
+        return out;
     }
 
     private static String indexType(DdlContent.Index index) {

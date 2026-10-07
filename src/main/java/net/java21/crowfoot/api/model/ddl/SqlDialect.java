@@ -43,6 +43,12 @@ public interface SqlDialect {
      *  생성기가 문장을 빼고 경고(ddl.index-type-unsupported)를 낸다 */
     String createIndex(DdlContent.Table table, DdlContent.Index index);
 
+    /** createIndex가 null인 사유 — 인덱스 종류(GIN 등), EXPRESSION(식 키), UNIQUE WHERE(부분 유니크). 표현할 수 있으면 null */
+    String unsupportedIndexReason(DdlContent.Index index);
+
+    /** 이 방언이 표현하지 못해 빼고 낸 인덱스 부분 — WHERE·INCLUDE·opclass(v1.37). 생성기가 경고한다 */
+    List<String> droppedIndexParts(DdlContent.Index index);
+
     /** 생성 컬럼 정의(이름·타입·생성식·NOT NULL, 코멘트 제외) — 생성 컬럼에는 DEFAULT·AI·ON UPDATE가 없다 */
     String generatedColumnDefinition(DdlContent.Column column);
 

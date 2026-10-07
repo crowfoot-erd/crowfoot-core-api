@@ -46,7 +46,16 @@ public record IntrospectedSchema(List<IntrospectedTable> tables, List<Introspect
             String comment,
             String generatedExpression,
             boolean generatedStored,
-            String onUpdate) {
+            String onUpdate,
+            boolean identityAlways) {
+
+        /** IDENTITY 종류 없는 컬럼 — BY DEFAULT(v1.36 이전 꼴) */
+        public IntrospectedColumn(String name, String typeName, Integer length, Integer precision, Integer scale,
+                                  boolean nullable, String defaultValue, boolean autoIncrement, String comment,
+                                  String generatedExpression, boolean generatedStored, String onUpdate) {
+            this(name, typeName, length, precision, scale, nullable, defaultValue, autoIncrement, comment,
+                    generatedExpression, generatedStored, onUpdate, false);
+        }
 
         /** 생성식·ON UPDATE 없는 컬럼 — v1.34 이전 꼴 */
         public IntrospectedColumn(String name, String typeName, Integer length, Integer precision, Integer scale,
@@ -56,12 +65,30 @@ public record IntrospectedSchema(List<IntrospectedTable> tables, List<Introspect
         }
     }
 
-    /** 일반 인덱스 — 유니크 인덱스는 uniques로 간다. type은 BTREE·FULLTEXT·SPATIAL, parser는 MySQL 전문 검색 파서 */
-    public record IntrospectedIndex(String name, List<IndexColumn> columns, String type, String parser) {
+    /**
+     * 일반 인덱스 — 컬럼만으로 된 유니크 인덱스는 uniques로 간다. type은 BTREE·FULLTEXT·SPATIAL·HASH·GIN·GIST·BRIN·SPGIST,
+     * parser는 MySQL 전문 검색 파서. v1.37(신고 44): unique는 조건·식 등이 붙어 유니크 키로 담지 못한 유니크 인덱스,
+     * expression은 식이 든 키 목록 원문(있으면 columns는 비어 있다), where는 부분 인덱스 조건, include는 INCLUDE 컬럼 이름
+     */
+    public record IntrospectedIndex(String name, List<IndexColumn> columns, String type, String parser,
+                                    boolean unique, String expression, String where, List<String> include) {
+
+        public IntrospectedIndex {
+            include = include == null ? List.of() : List.copyOf(include);
+        }
+
+        public IntrospectedIndex(String name, List<IndexColumn> columns, String type, String parser) {
+            this(name, columns, type, parser, false, null, null, List.of());
+        }
     }
 
     /** 인덱스 컬럼 — order는 ASC·DESC */
-    public record IndexColumn(String name, String order) {
+    /** 인덱스 키 컬럼 — opclass는 PostgreSQL 연산자 클래스(v1.37) */
+    public record IndexColumn(String name, String order, String opclass) {
+
+        public IndexColumn(String name, String order) {
+            this(name, order, null);
+        }
     }
 
     /** CHECK 제약 — expression은 바깥 괄호 없는 식 */

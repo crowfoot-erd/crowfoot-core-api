@@ -126,10 +126,20 @@ public final class DdlGenerator {
                 }
             }
             for (DdlContent.Index index : table.indexes()) {
-                if (dialect.createIndex(table, index) == null) {
+                String reason = dialect.unsupportedIndexReason(index);
+                if (reason != null && reason.equals(index.type())) {
                     warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.index-type-unsupported",
                             new Object[]{index.name(), index.type()},
                             "이 DBMS는 이 인덱스 종류를 지원하지 않아 뺐습니다: " + index.name() + " (" + index.type() + ")")));
+                } else if (reason != null) {
+                    warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.index-unsupported",
+                            new Object[]{index.name(), reason},
+                            "이 DBMS는 이 인덱스를 표현하지 못해 뺐습니다: " + index.name() + " (" + reason + ")")));
+                } else if (!dialect.droppedIndexParts(index).isEmpty()) {
+                    String parts = String.join(", ", dialect.droppedIndexParts(index));
+                    warnings.add(new Warning(Warning.VALIDATION, ddl("ddl.index-part-unsupported",
+                            new Object[]{index.name(), parts},
+                            "이 DBMS가 지원하지 않는 인덱스 속성을 빼고 냈습니다: " + index.name() + " (" + parts + ")")));
                 }
             }
         }

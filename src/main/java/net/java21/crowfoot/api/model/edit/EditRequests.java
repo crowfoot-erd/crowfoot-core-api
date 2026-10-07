@@ -50,7 +50,16 @@ public final class EditRequests {
 
     public record ColumnItem(String physicalName, String rename, String logicalName, String description, String dataType,
                              Integer length, Integer precision, Integer scale, Boolean nullable, String defaultValue,
-                             Boolean autoIncrement, String domainType, GeneratedItem generated, String onUpdate) {
+                             Boolean autoIncrement, String domainType, GeneratedItem generated, String onUpdate,
+                             String identityGeneration) {
+
+        /** IDENTITY 종류 없는 요청 — v1.36 이전 꼴 */
+        public ColumnItem(String physicalName, String rename, String logicalName, String description, String dataType,
+                          Integer length, Integer precision, Integer scale, Boolean nullable, String defaultValue,
+                          Boolean autoIncrement, String domainType, GeneratedItem generated, String onUpdate) {
+            this(physicalName, rename, logicalName, description, dataType, length, precision, scale, nullable,
+                    defaultValue, autoIncrement, domainType, generated, onUpdate, null);
+        }
 
         /** 생성식·ON UPDATE 없는 요청 — v1.34 이전 꼴 */
         public ColumnItem(String physicalName, String rename, String logicalName, String description, String dataType,
@@ -72,20 +81,45 @@ public final class EditRequests {
     public record UniqueItem(String name, List<String> columns) {
     }
 
-    public record IndexItem(String name, List<IndexColumnItem> columns, String type, String parser) {
+    /**
+     * 인덱스 — v1.37: unique(유니크 인덱스), expression(식이 든 키 목록 원문 — columns 대신), where(부분 인덱스 조건),
+     * include(INCLUDE 컬럼 물리명). name이 이 테이블의 인덱스와 같으면 그 인덱스를 고친다
+     */
+    public record IndexItem(String name, List<IndexColumnItem> columns, String type, String parser,
+                            Boolean unique, String expression, String where, List<String> include) {
 
         /** 일반 인덱스 — v1.34 이전 꼴 */
         public IndexItem(String name, List<IndexColumnItem> columns) {
             this(name, columns, null, null);
         }
+
+        /** v1.36 이전 꼴 */
+        public IndexItem(String name, List<IndexColumnItem> columns, String type, String parser) {
+            this(name, columns, type, parser, null, null, null, null);
+        }
     }
 
-    public record IndexColumnItem(String name, String order) {
+    /** 인덱스 키 컬럼 — opclass는 PostgreSQL 연산자 클래스(gin_trgm_ops 등, v1.37) */
+    public record IndexColumnItem(String name, String order, String opclass) {
+
+        public IndexColumnItem(String name, String order) {
+            this(name, order, null);
+        }
     }
 
+    /**
+     * 관계 — 부모·자식이 같은 관계가 여럿이면 name(외래 키 이름)으로 고른다. name이 없으면 columnMappings의
+     * 자식 컬럼이 같은 관계를 고르고, 그래도 고를 수 없으면 오류다(신고 45). name이 문서에 없으면 그 이름으로 만든다
+     */
     public record RelationshipItem(String parent, String child, String type, Boolean identifying,
                                    String parentMultiplicity, String childMultiplicity, String onDelete, String onUpdate,
-                                   List<ColumnMappingItem> columnMappings) {
+                                   List<ColumnMappingItem> columnMappings, String name) {
+
+        public RelationshipItem(String parent, String child, String type, Boolean identifying,
+                                String parentMultiplicity, String childMultiplicity, String onDelete, String onUpdate,
+                                List<ColumnMappingItem> columnMappings) {
+            this(parent, child, type, identifying, parentMultiplicity, childMultiplicity, onDelete, onUpdate, columnMappings, null);
+        }
     }
 
     public record ColumnMappingItem(String parentColumn, String childColumn) {
@@ -95,13 +129,27 @@ public final class EditRequests {
     }
 
     public record SchemaRemove(Long baseVersion, String note, List<String> tables, List<ColumnRef> columns,
-                               List<RelationshipRef> relationships, List<String> requirements) {
+                               List<RelationshipRef> relationships, List<String> requirements, List<CheckRef> checks) {
+
+        public SchemaRemove(Long baseVersion, String note, List<String> tables, List<ColumnRef> columns,
+                            List<RelationshipRef> relationships, List<String> requirements) {
+            this(baseVersion, note, tables, columns, relationships, requirements, null);
+        }
     }
 
     public record ColumnRef(String table, String column) {
     }
 
-    public record RelationshipRef(String parent, String child) {
+    /** 지울 관계 — 부모·자식이 같은 관계가 여럿이면 name(외래 키 이름)이 있어야 한다 */
+    public record RelationshipRef(String parent, String child, String name) {
+
+        public RelationshipRef(String parent, String child) {
+            this(parent, child, null);
+        }
+    }
+
+    /** 지울 CHECK 제약 — 테이블 물리명과 제약 이름 */
+    public record CheckRef(String table, String name) {
     }
 
     /** 워크스페이스 도메인 타입 — 컬럼 입력의 domainType 이름으로 찾는다 */

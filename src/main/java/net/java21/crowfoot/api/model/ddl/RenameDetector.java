@@ -135,7 +135,7 @@ public final class RenameDetector {
                 String newName = renamedColumns.get(key(column.physicalName()));
                 columns.add(newName == null ? column : new DdlContent.Column(column.id(), newName, column.dataType(),
                         column.length(), column.precision(), column.scale(), column.nullable(), column.defaultValue(),
-                        column.autoIncrement(), column.logicalName(), column.generated(), column.onUpdate()));
+                        column.autoIncrement(), column.logicalName(), column.generated(), column.onUpdate(), column.identityAlways()));
             }
             adjusted.add(new DdlContent.Table(table.id(), newTableName, table.logicalName(), columns,
                     table.primaryKey(), table.uniques(), table.indexes(), table.checks()));

@@ -179,6 +179,9 @@ public class ReverseContentAssembler {
 
         ArrayNode uniquesNode = node.putArray("uniques");
         for (IntrospectedSchema.IntrospectedUnique unique : table.uniques()) {
+            if (unique.columns().isEmpty() || unique.columns().stream().anyMatch(name -> columnIds.get(name) == null)) {
+                continue; // 없는 컬럼을 가리키는 유니크 — 컬럼이 빈 키를 만들지 않는다(신고 44)
+            }
             ObjectNode uniqueNode = uniquesNode.addObject();
             uniqueNode.put("id", UUID.randomUUID().toString());
             uniqueNode.put("name", unique.name());
@@ -191,22 +194,41 @@ public class ReverseContentAssembler {
             for (IntrospectedSchema.IndexColumn column : index.columns()) {
                 ids.add(columnIds.get(column.name()));
             }
-            if (ids.isEmpty() || ids.contains(null)) {
-                continue; // 식 인덱스처럼 컬럼으로 표현하지 못하는 인덱스
+            if ((ids.isEmpty() && index.expression() == null) || ids.contains(null)) {
+                continue; // 없는 컬럼을 가리키는 인덱스
             }
             ObjectNode indexNode = indexesNode.addObject();
             indexNode.put("id", UUID.randomUUID().toString());
             indexNode.put("name", index.name());
             ArrayNode columns = indexNode.putArray("columns");
             for (int i = 0; i < ids.size(); i++) {
-                String order = index.columns().get(i).order();
-                columns.addObject().put("columnId", ids.get(i)).put("order", "DESC".equalsIgnoreCase(order) ? "DESC" : "ASC");
+                IntrospectedSchema.IndexColumn column = index.columns().get(i);
+                ObjectNode columnNode = columns.addObject().put("columnId", ids.get(i))
+                        .put("order", "DESC".equalsIgnoreCase(column.order()) ? "DESC" : "ASC");
+                if (column.opclass() != null) {
+                    columnNode.put("opclass", column.opclass());
+                }
             }
             indexNode.put("type", index.type() == null ? "BTREE" : index.type());
             if (index.parser() == null) {
                 indexNode.putNull("parser");
             } else {
                 indexNode.put("parser", index.parser());
+            }
+            // v1.37 속성 — 있을 때만 적는다(없는 인덱스는 이전과 같은 모양)
+            if (index.unique()) {
+                indexNode.put("unique", true);
+            }
+            if (index.expression() != null) {
+                indexNode.put("expression", index.expression());
+            }
+            if (index.where() != null) {
+                indexNode.put("where", index.where());
+            }
+            List<String> include = index.include().stream().map(columnIds::get).filter(java.util.Objects::nonNull).toList();
+            if (!include.isEmpty()) {
+                ArrayNode includeNode = indexNode.putArray("include");
+                include.forEach(includeNode::add);
             }
         }
         ArrayNode checksNode = node.putArray("checks");
@@ -240,6 +262,8 @@ public class ReverseContentAssembler {
             if (leading.equals(unique.get("columnIds").get(0).asText())) return;
         }
         for (JsonNode index : childTable.get("indexes")) {
+            // 부분·식 인덱스는 FK를 덮지 못한다(v1.37)
+            if (index.hasNonNull("where") || index.hasNonNull("expression") || index.path("columns").isEmpty()) continue;
             if (leading.equals(index.get("columns").get(0).get("columnId").asText())) return;
         }
 
@@ -290,11 +314,15 @@ public class ReverseContentAssembler {
             node.putNull("onUpdate");
         }
         if (column.defaultValue() != null && column.generatedExpression() == null) {
-            node.put("defaultValue", column.defaultValue());
+            // 빈 문자열 기본값은 따옴표째 둔다 — 따옴표 없는 빈 값은 "기본값 없음"으로 읽힌다(신고 44)
+            node.put("defaultValue", column.defaultValue().isEmpty() ? "''" : column.defaultValue());
         } else {
             node.putNull("defaultValue");
         }
         node.put("autoIncrement", column.autoIncrement());
+        if (column.autoIncrement() && column.identityAlways()) {
+            node.put("identityGeneration", "ALWAYS"); // 없으면 BY DEFAULT(v1.37)
+        }
         // 테이블과 같은 규칙 — DB 코멘트가 논리명이고, 없으면 물리명
         node.put("logicalName", column.comment() != null ? CommentLogicalName.of(column.comment()) : column.name());
         node.putNull("comment");

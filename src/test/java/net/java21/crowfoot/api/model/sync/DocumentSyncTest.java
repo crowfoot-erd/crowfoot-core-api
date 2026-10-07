@@ -442,4 +442,37 @@ class DocumentSyncTest {
         assertThat(again).isEqualTo(first).hasSize(64);
         assertThat(changed).isNotEqualTo(first);
     }
+
+    @Test
+    @DisplayName("특수 인덱스 — 조건·INCLUDE·연산자 클래스를 DB 값으로 맞추고, DB가 캐스트를 붙여 다시 쓴 같은 조건은 문서 원문을 지킨다(v1.37)")
+    void specialIndexSync() {
+        ObjectNode docOrders = docOrders();
+        ((ArrayNode) docOrders.get("indexes")).addObject().put("id", "t-i-active").put("name", "ix_orders_active")
+                .put("type", "BTREE").putNull("parser").put("where", "status = 'ACTIVE'")
+                .putArray("columns").addObject().put("columnId", "t-c-orders-user-id").put("order", "ASC");
+        ObjectNode dbOrders = dbOrders();
+        ObjectNode same = ((ArrayNode) dbOrders.get("indexes")).addObject().put("id", "db-i-active").put("name", "ix_orders_active")
+                .put("type", "BTREE").putNull("parser").put("where", "(status)::text = 'ACTIVE'::text");
+        same.putArray("columns").addObject().put("columnId", "db-c-orders-user-id").put("order", "ASC");
+
+        DocumentSync.Result unchanged = DocumentSync.sync(doc(List.of(docUsers(), docOrders), List.of(docRel())),
+                doc(List.of(dbUsers(), dbOrders), List.of(dbRel())), false);
+        assertThat(unchanged.items()).isEmpty();
+
+        // DB에만 있는 GIN 인덱스(연산자 클래스·INCLUDE) — 문서 컬럼 id로 바꿔 더한다
+        ObjectNode gin = ((ArrayNode) dbOrders.get("indexes")).addObject().put("id", "db-i-memo").put("name", "ix_orders_memo_trgm")
+                .put("type", "GIN").putNull("parser");
+        gin.putArray("columns").addObject().put("columnId", "db-c-orders-memo").put("order", "ASC").put("opclass", "gin_trgm_ops");
+        gin.putArray("include").add("db-c-orders-status");
+        same.put("where", "status = 'DONE'");
+
+        DocumentSync.Result result = DocumentSync.sync(doc(List.of(docUsers(), docOrders), List.of(docRel())),
+                doc(List.of(dbUsers(), dbOrders), List.of(dbRel())), false);
+        assertThat(describe(result.items())).containsExactly("index/update orders.ix_orders_active", "index/add orders.ix_orders_memo_trgm");
+        JsonNode indexes = tableNamed(result.merged(), "orders").path("indexes");
+        assertThat(indexes.get(0).path("where").asString()).isEqualTo("status = 'DONE'");
+        assertThat(indexes.get(1).path("columns").get(0).path("columnId").asString()).isEqualTo("t-c-orders-memo");
+        assertThat(indexes.get(1).path("columns").get(0).path("opclass").asString()).isEqualTo("gin_trgm_ops");
+        assertThat(indexes.get(1).path("include").get(0).asString()).isEqualTo("t-c-orders-status");
+    }
 }

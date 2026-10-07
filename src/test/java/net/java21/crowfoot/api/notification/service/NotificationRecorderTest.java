@@ -241,4 +241,24 @@ class NotificationRecorderTest {
         ReflectionTestUtils.setField(comment, "id", id);
         return comment;
     }
+
+    @Test
+    @DisplayName("커뮤니티 알림은 본류 커밋 뒤에 기록한다 — 커밋 전에는 방금 만든 게시글을 외래 키로 가리킬 수 없다, 롤백이면 남기지 않는다(v1.37)")
+    void communityNotificationsWaitForCommit() {
+        given(userRepository.findActiveAdminIds()).willReturn(java.util.List.of(2L));
+        org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
+        try {
+            recorder.notifyFeedbackPostCreated(45L, "제목", 25L);
+            recorder.notifyCommunityCommentCreated(45L, 25L, "제목", 2L, 9L);
+            then(notificationWriter).should(never()).insert(any());
+
+            for (org.springframework.transaction.support.TransactionSynchronization sync
+                    : org.springframework.transaction.support.TransactionSynchronizationManager.getSynchronizations()) {
+                sync.afterCommit();
+            }
+            then(notificationWriter).should(org.mockito.Mockito.times(2)).insert(any());
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
 }

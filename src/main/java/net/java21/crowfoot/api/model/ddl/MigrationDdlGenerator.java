@@ -222,6 +222,16 @@ public final class MigrationDdlGenerator {
                     autoIncrementUnsupported(target)));
             return;
         }
+        // IDENTITY 종류는 PostgreSQL만 ALTER로 바꾼다(SET GENERATED). IDENTITY가 아닌 방언(MySQL·SQL Server)에는 차이가 없다
+        boolean identityOnly = fields.size() == 1 && fields.contains(SchemaDiffer.FIELD_IDENTITY);
+        if (identityOnly && !"postgres".equals(dialect.id())) {
+            if ("oracle".equals(dialect.id())) {
+                warnings.add(new DdlGenerator.Warning(DdlGenerator.Warning.VALIDATION,
+                        ddl("ddl.identity-alter-unsupported", new Object[]{target},
+                                "IDENTITY 종류 변경은 이 DBMS의 ALTER 문으로 반영하지 않습니다: " + target)));
+            }
+            return;
+        }
         String statement = dialect.alterColumn(change.table(), change.before(), change.after());
         if (!statement.isBlank()) {
             alters.add(statement);

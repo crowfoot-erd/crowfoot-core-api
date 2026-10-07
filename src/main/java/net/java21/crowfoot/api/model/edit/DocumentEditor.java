@@ -14,6 +14,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import net.java21.crowfoot.api.model.edit.EditRequests.AreaItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckItem;
+import net.java21.crowfoot.api.model.edit.EditRequests.CheckRef;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnMappingItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnRef;
@@ -58,7 +59,10 @@ public final class DocumentEditor {
     /** 소수 초 자릿수(0~6)를 precision에 두는 타입 */
     static final Set<String> FRACTIONAL_TYPES = Set.of("TIME", "DATETIME", "TIMESTAMP");
 
-    static final Set<String> INDEX_TYPES = Set.of("BTREE", "FULLTEXT", "SPATIAL");
+    static final Set<String> INDEX_TYPES = Set.of("BTREE", "FULLTEXT", "SPATIAL", "HASH", "GIN", "GIST", "BRIN", "SPGIST");
+
+    /** 연산자 클래스 이름 — 스키마 한정 가능(public.gin_trgm_ops) */
+    private static final Pattern OPCLASS = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?");
     static final Set<String> PRECISION_TYPES = Set.of("DECIMAL", "NUMERIC");
     static final Set<String> INTEGER_TYPES = Set.of("INT", "BIGINT", "SMALLINT", "TINYINT");
     static final Set<String> STATUSES = Set.of("draft", "confirmed", "dropped");
@@ -70,6 +74,7 @@ public final class DocumentEditor {
             "ONE_TO_MANY", Set.of("ZERO_OR_MORE", "ONE_OR_MORE"));
     static final Set<String> REFERENTIAL_ACTIONS = Set.of("NO_ACTION", "RESTRICT", "CASCADE", "SET_NULL", "SET_DEFAULT");
     static final Set<String> COLORS = Set.of("default", "red", "orange", "amber", "yellow", "green", "teal", "sky", "blue", "violet", "pink");
+    static final Set<String> IDENTITY_GENERATIONS = Set.of("ALWAYS", "BY_DEFAULT");
     static final List<String> DOMAIN_FIELDS = List.of("dataType", "length", "precision", "scale", "nullable", "defaultValue");
 
     /** 변경 요약 한 줄 — 응답의 summary와 버전 기록의 changeSummary 항목이 된다 */
@@ -786,6 +791,22 @@ public final class DocumentEditor {
         if (item.autoIncrement() != null) {
             column.put("autoIncrement", item.autoIncrement());
         }
+        if (item.identityGeneration() != null) {
+            // IDENTITY 종류(v1.37) — ALWAYS면 값을 직접 넣을 수 없다. 빈 값·BY_DEFAULT는 기본(BY DEFAULT)으로 돌린다
+            String kind = item.identityGeneration().strip().toUpperCase(Locale.ROOT).replace(' ', '_');
+            if (!kind.isEmpty() && !IDENTITY_GENERATIONS.contains(kind)) {
+                error(at + ".identityGeneration", "IDENTITY 종류는 ALWAYS 또는 BY_DEFAULT입니다: " + item.identityGeneration());
+                return;
+            }
+            if ("ALWAYS".equals(kind)) {
+                column.put("identityGeneration", "ALWAYS");
+            } else {
+                column.remove("identityGeneration");
+            }
+        }
+        if (!column.path("autoIncrement").asBoolean(false)) {
+            column.remove("identityGeneration");
+        }
         if (item.onUpdate() != null) {
             if (item.onUpdate().length() > 255) {
                 error(at + ".onUpdate", "onUpdate는 255자 이하여야 합니다");
@@ -1082,16 +1103,42 @@ public final class DocumentEditor {
     }
 
     private void applyIndex(String at, ObjectNode table, IndexItem item) {
-        if (item == null || isEmpty(item.columns())) {
+        if (item == null) {
             error(at + ".columns", "인덱스의 컬럼이 있어야 합니다");
             return;
         }
-        String indexType = item.type() == null ? "BTREE" : item.type().toUpperCase(Locale.ROOT);
-        if (!INDEX_TYPES.contains(indexType)) {
-            error(at + ".type", "인덱스 종류는 BTREE·FULLTEXT·SPATIAL입니다: " + item.type());
+        String tableName = table.path("physicalName").asText();
+        // 이름이 같은 인덱스가 이 테이블에 있으면 그것을 고친다(v1.37 — 식·조건 인덱스는 컬럼으로 고를 수 없다)
+        ObjectNode named = null;
+        if (item.name() != null && !item.name().isBlank()) {
+            for (JsonNode index : table.path("indexes")) {
+                if (item.name().equalsIgnoreCase(index.path("name").asText(""))) {
+                    named = (ObjectNode) index;
+                }
+            }
+        }
+        String expression = item.expression() != null ? blankToNull(item.expression())
+                : named != null && isEmpty(item.columns()) ? textOrNull(named, "expression") : null;
+        if (expression != null && !isEmpty(item.columns())) {
+            error(at + ".expression", "expression과 columns는 함께 쓰지 않습니다 — 식이 든 키는 expression에 키 목록 전체를 적습니다");
             return;
         }
-        String parser = item.parser() == null || item.parser().isBlank() ? null : item.parser().strip();
+        if (expression == null && isEmpty(item.columns()) && (named == null || named.path("columns").isEmpty())) {
+            error(at + ".columns", "인덱스의 컬럼이 있어야 합니다");
+            return;
+        }
+        if (expression != null && expression.length() > 2000) {
+            error(at + ".expression", "식은 2000자 이하여야 합니다");
+            return;
+        }
+        String indexType = item.type() != null ? item.type().toUpperCase(Locale.ROOT)
+                : named != null ? named.path("type").asText("BTREE") : "BTREE";
+        if (!INDEX_TYPES.contains(indexType)) {
+            error(at + ".type", "인덱스 종류는 " + String.join("·", INDEX_TYPES.stream().sorted().toList()) + "입니다: " + item.type());
+            return;
+        }
+        String parser = item.parser() != null ? blankToNull(item.parser())
+                : named != null && "FULLTEXT".equals(indexType) ? textOrNull(named, "parser") : null;
         if (parser != null && !"FULLTEXT".equals(indexType)) {
             error(at + ".parser", "parser는 FULLTEXT 인덱스에만 넣습니다");
             return;
@@ -1100,64 +1147,137 @@ public final class DocumentEditor {
             error(at + ".parser", "parser는 파서 이름(영문·숫자·밑줄)입니다: " + parser);
             return;
         }
-        List<String> names = new ArrayList<>();
+        String where = item.where() != null ? blankToNull(stripOuterParens(item.where()))
+                : named != null ? textOrNull(named, "where") : null;
+        if (where != null && where.length() > 2000) {
+            error(at + ".where", "조건은 2000자 이하여야 합니다");
+            return;
+        }
+        boolean unique = item.unique() != null ? item.unique() : named != null && named.path("unique").asBoolean(false);
+        List<String> includeIds = null;
+        if (item.include() != null) {
+            includeIds = item.include().isEmpty() ? List.of() : resolveColumnIds(at + ".include", table, item.include());
+            if (includeIds == null) {
+                return;
+            }
+        }
+        // 키 컬럼 — 주지 않으면(이름으로 고친 인덱스) 그대로 둔다
+        List<String> columnIds = null;
         List<String> orders = new ArrayList<>();
-        for (int i = 0; i < item.columns().size(); i++) {
-            IndexColumnItem column = item.columns().get(i);
-            if (column == null || column.name() == null) {
-                error(at + ".columns[" + i + "].name", "인덱스 컬럼의 이름이 있어야 합니다");
+        List<String> opclasses = new ArrayList<>();
+        if (!isEmpty(item.columns())) {
+            List<String> names = new ArrayList<>();
+            for (int i = 0; i < item.columns().size(); i++) {
+                IndexColumnItem column = item.columns().get(i);
+                if (column == null || column.name() == null) {
+                    error(at + ".columns[" + i + "].name", "인덱스 컬럼의 이름이 있어야 합니다");
+                    return;
+                }
+                String order = column.order() == null ? "ASC" : column.order();
+                if (!order.equals("ASC") && !order.equals("DESC")) {
+                    error(at + ".columns[" + i + "].order", "정렬은 ASC 또는 DESC입니다: " + order);
+                    return;
+                }
+                String opclass = blankToNull(column.opclass());
+                if (opclass != null && !OPCLASS.matcher(opclass).matches()) {
+                    error(at + ".columns[" + i + "].opclass", "연산자 클래스 이름(영문·숫자·밑줄)입니다: " + opclass);
+                    return;
+                }
+                names.add(column.name());
+                orders.add(order);
+                opclasses.add(opclass);
+            }
+            columnIds = resolveColumnIds(at + ".columns", table, names);
+            if (columnIds == null) {
                 return;
             }
-            String order = column.order() == null ? "ASC" : column.order();
-            if (!order.equals("ASC") && !order.equals("DESC")) {
-                error(at + ".columns[" + i + "].order", "정렬은 ASC 또는 DESC입니다: " + order);
-                return;
-            }
-            names.add(column.name());
-            orders.add(order);
         }
-        List<String> columnIds = resolveColumnIds(at + ".columns", table, names);
-        if (columnIds == null) {
+
+        ObjectNode target = named;
+        if (target == null && columnIds != null && expression == null && where == null) {
+            // 이름 없이 컬럼으로 고른다 — 같은 컬럼 조합·같은 종류의 조건 없는 인덱스. title의 FULLTEXT와 BTREE는 함께 둘 수 있다
+            for (JsonNode index : table.path("indexes")) {
+                List<String> existing = new ArrayList<>();
+                index.path("columns").forEach(column -> existing.add(column.path("columnId").asText()));
+                if (existing.equals(columnIds) && indexType.equals(index.path("type").asText("BTREE"))
+                        && !index.hasNonNull("where") && !index.hasNonNull("expression")) {
+                    target = (ObjectNode) index;
+                }
+            }
+        }
+        if (target == null) {
+            String name = keyName(at, table, item.name(), unique ? "uk" : "idx", columnIds == null ? List.of() : columnIds);
+            if (name == null) {
+                return;
+            }
+            ObjectNode added = addIndex(table, name, columnIds == null ? List.of() : columnIds, orders);
+            writeIndex(added, indexType, parser, unique, expression, where, includeIds, columnIds == null ? null : opclasses);
+            changes.add(new Change("index", "add", tableName, name));
             return;
         }
-        String tableName = table.path("physicalName").asText();
-        for (JsonNode index : table.path("indexes")) {
-            List<String> existing = new ArrayList<>();
-            index.path("columns").forEach(column -> existing.add(column.path("columnId").asText()));
-            // 같은 컬럼이라도 종류가 다르면 다른 인덱스다 — title의 FULLTEXT와 BTREE는 함께 둘 수 있다
-            if (existing.equals(columnIds) && indexType.equals(index.path("type").asText("BTREE"))) {
-                // 같은 컬럼 조합 — 정렬만 맞춘다
-                boolean changed = false;
-                int i = 0;
-                for (JsonNode column : index.path("columns")) {
-                    if (!orders.get(i).equals(column.path("order").asText("ASC"))) {
-                        ((ObjectNode) column).put("order", orders.get(i));
-                        changed = true;
-                    }
-                    i++;
-                }
-                if (!indexType.equals(index.path("type").asText("BTREE"))) {
-                    ((ObjectNode) index).put("type", indexType);
-                    changed = true;
-                }
-                if (!java.util.Objects.equals(parser, index.path("parser").isTextual() ? index.path("parser").asText() : null)) {
-                    putText((ObjectNode) index, "parser", parser);
-                    changed = true;
-                }
-                if (changed) {
-                    changes.add(new Change("index", "update", tableName, index.path("name").asText()));
-                }
-                return;
+        String before = target.toString();
+        if (columnIds != null) {
+            ArrayNode columns = target.putArray("columns");
+            for (int i = 0; i < columnIds.size(); i++) {
+                columns.addObject().put("columnId", columnIds.get(i)).put("order", orders.get(i));
+            }
+        } else if (expression != null) {
+            target.putArray("columns");
+        }
+        writeIndex(target, indexType, parser, unique, expression, where, includeIds, columnIds == null ? null : opclasses);
+        if (!before.equals(target.toString())) {
+            changes.add(new Change("index", "update", tableName, target.path("name").asText()));
+        }
+    }
+
+    /** 인덱스 속성 쓰기 — v1.37 속성은 값이 있을 때만 둔다(없는 인덱스는 이전과 같은 모양). include·opclasses가 null이면 그대로 */
+    private static void writeIndex(ObjectNode index, String type, String parser, boolean unique, String expression,
+                                   String where, List<String> includeIds, List<String> opclasses) {
+        index.put("type", type);
+        putText(index, "parser", parser);
+        if (unique) {
+            index.put("unique", true);
+        } else {
+            index.remove("unique");
+        }
+        if (expression != null) {
+            index.put("expression", expression);
+        } else {
+            index.remove("expression");
+        }
+        if (where != null) {
+            index.put("where", where);
+        } else {
+            index.remove("where");
+        }
+        if (includeIds != null) {
+            if (includeIds.isEmpty()) {
+                index.remove("include");
+            } else {
+                ArrayNode include = index.putArray("include");
+                includeIds.forEach(include::add);
             }
         }
-        String name = keyName(at, table, item.name(), "idx", columnIds);
-        if (name == null) {
-            return;
+        if (opclasses != null) {
+            int i = 0;
+            for (JsonNode column : index.path("columns")) {
+                String opclass = i < opclasses.size() ? opclasses.get(i) : null;
+                if (opclass != null) {
+                    ((ObjectNode) column).put("opclass", opclass);
+                } else {
+                    ((ObjectNode) column).remove("opclass");
+                }
+                i++;
+            }
         }
-        ObjectNode added = addIndex(table, name, columnIds, orders);
-        added.put("type", indexType);
-        putText(added, "parser", parser);
-        changes.add(new Change("index", "add", tableName, name));
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        return node.path(field).isTextual() ? node.path(field).asText() : null;
     }
 
     private ObjectNode addIndex(ObjectNode table, String name, List<String> columnIds, List<String> orders) {
@@ -1291,7 +1411,34 @@ public final class DocumentEditor {
             error(at + ".child", "테이블이 없습니다: " + item.child());
             return;
         }
-        ObjectNode existing = relationship(parent.path("id").asText(), child.path("id").asText());
+        List<String> parentPk = primaryKeyIds(parent);
+        if (parentPk.isEmpty()) {
+            error(at + ".parent", "부모 테이블에 기본 키가 없어 관계를 만들 수 없습니다: " + item.parent());
+            return;
+        }
+        // 기존 컬럼을 외래 키로 쓰는 매핑 — 부모 PK 컬럼마다 자식 컬럼 하나
+        List<String[]> mapping = null;
+        if (item.columnMappings() != null) {
+            mapping = resolveMappings(at + ".columnMappings", parent, child, parentPk, item.columnMappings());
+            if (mapping == null) {
+                return;
+            }
+        }
+        List<ObjectNode> candidates = relationships(parent.path("id").asText(), child.path("id").asText());
+        String givenName = item.name() == null || item.name().isBlank() ? null : item.name().trim();
+        ObjectNode existing;
+        if (givenName != null) {
+            existing = candidates.stream().filter(r -> givenName.equalsIgnoreCase(r.path("fkName").asText(""))).findFirst().orElse(null);
+        } else if (candidates.size() <= 1) {
+            existing = candidates.isEmpty() ? null : candidates.get(0);
+        } else {
+            existing = mapping == null ? null : relationshipByChildColumns(candidates, mapping);
+            if (existing == null) {
+                error(at + ".name", "부모와 자식이 같은 관계가 여럿입니다 — name(외래 키 이름)으로 고르세요: "
+                        + String.join(", ", candidates.stream().map(r -> r.path("fkName").asText()).toList()));
+                return;
+            }
+        }
         String type = item.type() != null ? item.type() : existing != null ? existing.path("type").asText("ONE_TO_MANY") : "ONE_TO_MANY";
         if (!RELATIONSHIP_TYPES.contains(type)) {
             error(at + ".type", "관계 유형은 ONE_TO_MANY 또는 ONE_TO_ONE입니다. N:M은 연결 테이블과 1:N 두 개로 표현합니다: " + type);
@@ -1323,20 +1470,13 @@ public final class DocumentEditor {
             error(at + ".onUpdate", "참조 동작이 아닙니다: " + onUpdate);
             return;
         }
-        List<String> parentPk = primaryKeyIds(parent);
-        if (parentPk.isEmpty()) {
-            error(at + ".parent", "부모 테이블에 기본 키가 없어 관계를 만들 수 없습니다: " + item.parent());
-            return;
-        }
-        // 기존 컬럼을 외래 키로 쓰는 매핑 — 부모 PK 컬럼마다 자식 컬럼 하나
-        List<String[]> mapping = null;
-        if (item.columnMappings() != null) {
-            mapping = resolveMappings(at + ".columnMappings", parent, child, parentPk, item.columnMappings());
-            if (mapping == null) {
+        String name = "fk_" + lower(child.path("physicalName").asText()) + "_" + lower(parent.path("physicalName").asText());
+        if (existing == null && givenName != null) {
+            name = keyName(at, child, givenName, "fk", List.of());
+            if (name == null) {
                 return;
             }
         }
-        String name = "fk_" + lower(child.path("physicalName").asText()) + "_" + lower(parent.path("physicalName").asText());
         if (existing == null) {
             createRelationship(parent, child, parentPk, mapping, type, identifying, parentMultiplicity, childMultiplicity, onDelete, onUpdate, name);
         } else {
@@ -1538,7 +1678,12 @@ public final class DocumentEditor {
         }
         List<String> prevKey = sorted(prevFkIds);
         removeMatching((ArrayNode) table.get("uniques"), unique -> sorted(strings(unique.path("columnIds"))).equals(prevKey));
-        removeMatching((ArrayNode) table.get("indexes"), index -> sorted(indexColumnIds(index)).equals(prevKey));
+        removeMatching((ArrayNode) table.get("indexes"), index -> ownsForeignKey(index) && sorted(indexColumnIds(index)).equals(prevKey));
+    }
+
+    /** 외래 키를 맡는 인덱스가 될 수 있는지 — 부분·식·유니크 인덱스는 사용자가 따로 만든 것이다(v1.37) */
+    private static boolean ownsForeignKey(JsonNode index) {
+        return !index.hasNonNull("where") && !index.hasNonNull("expression") && !index.path("unique").asBoolean(false);
     }
 
     /** 걸기 — 식별 관계면 기본 키에 넣고 NOT NULL, 아니면 부모 기수로 NULL 허용을 정한다. 그 뒤 PK → FK → 일반 순서로 다시 놓는다 */
@@ -1599,13 +1744,13 @@ public final class DocumentEditor {
         }
         boolean ownedIndex = false;
         for (JsonNode index : indexes) {
-            ownedIndex |= sorted(indexColumnIds(index)).equals(fkKey);
+            ownedIndex |= ownsForeignKey(index) && sorted(indexColumnIds(index)).equals(fkKey);
         }
         boolean wantIndex = "ONE_TO_MANY".equals(type) && !identifying && !autoIndexesForeignKey();
         if (wantIndex && !ownedIndex) {
             addIndex(table, defaultKeyName(keyNames, table, "idx", fkIds), fkIds, null);
         } else if (!wantIndex && ownedIndex && !keepUnwanted) {
-            removeMatching(indexes, index -> sorted(indexColumnIds(index)).equals(fkKey));
+            removeMatching(indexes, index -> ownsForeignKey(index) && sorted(indexColumnIds(index)).equals(fkKey));
         }
     }
 
@@ -1756,8 +1901,13 @@ public final class DocumentEditor {
      * ===================================================================== */
 
     public void remove(List<String> tableNames, List<ColumnRef> columnRefs, List<RelationshipRef> relationshipRefs, List<String> requirementCodes) {
-        if (isEmpty(tableNames) && isEmpty(columnRefs) && isEmpty(relationshipRefs) && isEmpty(requirementCodes)) {
-            error("tables", "tables, columns, relationships, requirements 가운데 하나는 있어야 합니다");
+        remove(tableNames, columnRefs, relationshipRefs, requirementCodes, null);
+    }
+
+    public void remove(List<String> tableNames, List<ColumnRef> columnRefs, List<RelationshipRef> relationshipRefs, List<String> requirementCodes,
+                       List<CheckRef> checkRefs) {
+        if (isEmpty(tableNames) && isEmpty(columnRefs) && isEmpty(relationshipRefs) && isEmpty(requirementCodes) && isEmpty(checkRefs)) {
+            error("tables", "tables, columns, relationships, checks, requirements 가운데 하나는 있어야 합니다");
             return;
         }
         // 대상을 먼저 다 찾는다 — 하나라도 없으면 아무것도 지우지 않는다
@@ -1767,9 +1917,18 @@ public final class DocumentEditor {
                 RelationshipRef ref = relationshipRefs.get(i);
                 ObjectNode parent = ref == null || ref.parent() == null ? null : table(ref.parent());
                 ObjectNode child = ref == null || ref.child() == null ? null : table(ref.child());
-                ObjectNode relationship = parent == null || child == null ? null : relationship(parent.path("id").asText(), child.path("id").asText());
-                if (relationship == null) {
-                    error("relationships[" + i + "]", "관계가 없습니다: " + (ref == null ? null : ref.parent() + " → " + ref.child()));
+                List<ObjectNode> candidates = parent == null || child == null ? List.of()
+                        : relationships(parent.path("id").asText(), child.path("id").asText());
+                String name = ref == null || ref.name() == null || ref.name().isBlank() ? null : ref.name().trim();
+                ObjectNode relationship = name != null
+                        ? candidates.stream().filter(r -> name.equalsIgnoreCase(r.path("fkName").asText(""))).findFirst().orElse(null)
+                        : candidates.size() == 1 ? candidates.get(0) : null;
+                if (name == null && candidates.size() > 1) {
+                    error("relationships[" + i + "].name", "부모와 자식이 같은 관계가 여럿입니다 — name(외래 키 이름)으로 고르세요: "
+                            + String.join(", ", candidates.stream().map(r -> r.path("fkName").asText()).toList()));
+                } else if (relationship == null) {
+                    error("relationships[" + i + "]", "관계가 없습니다: " + (ref == null ? null : ref.parent() + " → " + ref.child()
+                            + (name == null ? "" : " (" + name + ")")));
                 } else {
                     relationshipIds.add(relationship.path("id").asText());
                 }
@@ -1799,6 +1958,26 @@ public final class DocumentEditor {
                 }
             }
         }
+        List<String[]> checkIds = new ArrayList<>();
+        if (checkRefs != null) {
+            for (int i = 0; i < checkRefs.size(); i++) {
+                CheckRef ref = checkRefs.get(i);
+                ObjectNode table = ref == null || ref.table() == null ? null : table(ref.table());
+                JsonNode check = null;
+                if (table != null && ref.name() != null) {
+                    for (JsonNode candidate : table.path("checks")) {
+                        if (ref.name().equalsIgnoreCase(candidate.path("name").asText(""))) {
+                            check = candidate;
+                        }
+                    }
+                }
+                if (check == null) {
+                    error("checks[" + i + "]", "CHECK 제약이 없습니다: " + (ref == null ? null : ref.table() + "." + ref.name()));
+                } else {
+                    checkIds.add(new String[] {table.path("id").asText(), check.path("id").asText()});
+                }
+            }
+        }
         if (requirementCodes != null) {
             for (int i = 0; i < requirementCodes.size(); i++) {
                 if (requirementCodes.get(i) == null || requirement(requirementCodes.get(i)) == null) {
@@ -1817,6 +1996,15 @@ public final class DocumentEditor {
                 String childName = tableById(relationship.path("childTableId").asText()).path("physicalName").asText();
                 removeRelationshipCascade(id);
                 changes.add(new Change("relationship", "remove", childName, name));
+            }
+        }
+        for (String[] ref : checkIds) {
+            ObjectNode table = (ObjectNode) tableById(ref[0]);
+            JsonNode check = checkById(table, ref[1]);
+            if (check != null) {
+                String name = check.path("name").asText();
+                removeMatching((ArrayNode) table.get("checks"), node -> ref[1].equals(node.path("id").asText()));
+                changes.add(new Change("check", "remove", table.path("physicalName").asText(), name));
             }
         }
         for (String[] ref : columnIds) {
@@ -1949,9 +2137,26 @@ public final class DocumentEditor {
         if (table == null) {
             return;
         }
+        JsonNode removed = columnById(table, columnId);
+        String columnName = removed == null ? null : removed.path("physicalName").asText(null);
         removeMatching((ArrayNode) table.get("columns"), column -> columnId.equals(column.path("id").asText()));
         if (table.path("primaryKey").isObject()) {
             shrinkPrimaryKey(table, List.of(columnId));
+        }
+        // 지운 컬럼을 쓰는 CHECK도 지운다 — 남기면 DDL이 없는 컬럼을 참조한다(신고 45). 무엇을 지웠는지 경고로 알린다
+        if (columnName != null && table.path("checks").isArray()) {
+            String tableName = table.path("physicalName").asText();
+            for (JsonNode check : table.path("checks")) {
+                if (CheckExpressions.references(check.path("expression").asText(""), columnName)) {
+                    String checkName = check.path("name").asText();
+                    changes.add(new Change("check", "remove", tableName, checkName));
+                    warnings.add(new Warning("CHECK_REMOVED_WITH_COLUMN", tableName + "." + checkName,
+                            "지운 컬럼 " + tableName + "." + columnName + "을 쓰는 CHECK 제약도 지웠습니다: " + checkName
+                                    + " (" + check.path("expression").asText("") + ")"));
+                }
+            }
+            removeMatching((ArrayNode) table.get("checks"),
+                    check -> CheckExpressions.references(check.path("expression").asText(""), columnName));
         }
         // 키에서 컬럼을 빼고, 남는 컬럼이 없으면 키를 지운다
         ArrayNode uniques = (ArrayNode) table.get("uniques");
@@ -1966,8 +2171,17 @@ public final class DocumentEditor {
         ArrayNode indexes = (ArrayNode) table.get("indexes");
         for (JsonNode index : indexes) {
             removeMatching((ArrayNode) index.get("columns"), column -> columnId.equals(column.path("columnId").asText()));
+            if (index.path("include").isArray()) {
+                removeMatching((ArrayNode) index.get("include"), id -> columnId.equals(id.asText()));
+                if (index.path("include").isEmpty()) {
+                    ((ObjectNode) index).remove("include");
+                }
+            }
         }
-        removeMatching(indexes, index -> index.path("columns").isEmpty());
+        // 식·조건이 지운 컬럼을 쓰는 인덱스도 지운다(v1.37 — CHECK와 같은 규칙). 식 인덱스는 컬럼 목록이 비어 있다
+        removeMatching(indexes, index -> (index.path("columns").isEmpty() && !index.hasNonNull("expression"))
+                || (columnName != null && (CheckExpressions.references(index.path("expression").asText(""), columnName)
+                        || CheckExpressions.references(index.path("where").asText(""), columnName))));
     }
 
     /* =====================================================================
@@ -2022,11 +2236,36 @@ public final class DocumentEditor {
         return null;
     }
 
-    private ObjectNode relationship(String parentTableId, String childTableId) {
+    /** 부모·자식이 같은 관계 전부 — 문서 순서 */
+    private List<ObjectNode> relationships(String parentTableId, String childTableId) {
+        List<ObjectNode> out = new ArrayList<>();
         for (JsonNode relationship : relationships) {
             if (parentTableId.equals(relationship.path("parentTableId").asText())
                     && childTableId.equals(relationship.path("childTableId").asText())) {
-                return (ObjectNode) relationship;
+                out.add((ObjectNode) relationship);
+            }
+        }
+        return out;
+    }
+
+    /** 외래 키 자식 컬럼 집합이 매핑과 같은 관계 — 없으면 null */
+    private static ObjectNode relationshipByChildColumns(List<ObjectNode> candidates, List<String[]> mapping) {
+        Set<String> wanted = new HashSet<>();
+        mapping.forEach(pair -> wanted.add(pair[1]));
+        for (ObjectNode relationship : candidates) {
+            Set<String> current = new HashSet<>();
+            relationship.path("columnMappings").forEach(node -> current.add(node.path("childColumnId").asText()));
+            if (current.equals(wanted)) {
+                return relationship;
+            }
+        }
+        return null;
+    }
+
+    private static JsonNode checkById(JsonNode table, String id) {
+        for (JsonNode check : table.path("checks")) {
+            if (id.equals(check.path("id").asText())) {
+                return check;
             }
         }
         return null;

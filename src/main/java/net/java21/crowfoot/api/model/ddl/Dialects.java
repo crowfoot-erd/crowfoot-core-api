@@ -2,7 +2,9 @@ package net.java21.crowfoot.api.model.ddl;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -74,13 +76,116 @@ public final class Dialects {
             return List.of();
         }
 
+        /** 이 방언이 받는 인덱스 종류 — 기본은 BTREE만(FULLTEXT·SPATIAL·HASH는 MySQL, GIN 등은 PostgreSQL) */
+        protected Set<String> indexTypes() {
+            return Set.of(DdlContent.Index.BTREE);
+        }
+
+        /** 식 키({@code lower(name)}) — PostgreSQL·Oracle·MySQL 8 */
+        protected boolean indexExpression() {
+            return false;
+        }
+
+        /** 부분 인덱스 조건(WHERE) — PostgreSQL·SQL Server */
+        protected boolean indexWhere() {
+            return false;
+        }
+
+        /** INCLUDE 컬럼 — PostgreSQL·SQL Server */
+        protected boolean indexInclude() {
+            return false;
+        }
+
+        /** 연산자 클래스 — PostgreSQL */
+        protected boolean indexOpclass() {
+            return false;
+        }
+
+        @Override
+        public String unsupportedIndexReason(DdlContent.Index index) {
+            String type = index.type() == null ? DdlContent.Index.BTREE : index.type();
+            if (!indexTypes().contains(type)) {
+                return type;
+            }
+            if (index.expression() != null && !indexExpression()) {
+                return "EXPRESSION";
+            }
+            // 유니크 인덱스에서 조건을 빼면 제약의 뜻이 바뀐다(부분 유니크 → 전체 유니크) — 인덱스째 뺀다
+            if (index.unique() && index.where() != null && !indexWhere()) {
+                return "UNIQUE WHERE";
+            }
+            return null;
+        }
+
+        @Override
+        public List<String> droppedIndexParts(DdlContent.Index index) {
+            if (unsupportedIndexReason(index) != null) {
+                return List.of();
+            }
+            List<String> parts = new ArrayList<>();
+            if (index.where() != null && !indexWhere()) {
+                parts.add("WHERE");
+            }
+            if (!index.includeColumnIds().isEmpty() && !indexInclude()) {
+                parts.add("INCLUDE");
+            }
+            if (!indexOpclass() && index.columns().stream().anyMatch(column -> column.opclass() != null)) {
+                parts.add("opclass");
+            }
+            return parts;
+        }
+
+        /** 이 방언이 표현하지 못하는 인덱스는 null — 생성기가 경고한다. 표현하지 못하는 부분(조건·INCLUDE·연산자 클래스)은
+         *  빼고 내며 생성기가 droppedIndexParts로 경고한다 */
         @Override
         public String createIndex(DdlContent.Table table, DdlContent.Index index) {
-            if (!index.btree()) {
-                return null; // FULLTEXT·SPATIAL은 MySQL만 — 생성기가 경고한다
+            if (unsupportedIndexReason(index) != null) {
+                return null;
             }
-            return "CREATE INDEX " + index.name() + " ON " + table.physicalName()
-                    + " (" + indexColumns(table, index, true) + ")";
+            StringBuilder statement = new StringBuilder("CREATE ");
+            if (index.unique()) {
+                statement.append("UNIQUE ");
+            }
+            statement.append(indexKeyword(index)).append(' ').append(index.name())
+                    .append(" ON ").append(table.physicalName()).append(indexMethodBeforeKeys(index))
+                    .append(" (").append(index.expression() != null ? indexExpressionKeys(index.expression())
+                            : indexColumns(table, index, index.btree(), indexOpclass())).append(')');
+            if (indexInclude() && !index.includeColumnIds().isEmpty()) {
+                List<String> include = new ArrayList<>();
+                for (String columnId : index.includeColumnIds()) {
+                    DdlContent.Column column = columnById(table, columnId);
+                    if (column != null) {
+                        include.add(column.physicalName());
+                    }
+                }
+                if (!include.isEmpty()) {
+                    statement.append(" INCLUDE (").append(String.join(", ", include)).append(')');
+                }
+            }
+            if (indexWhere() && index.where() != null) {
+                statement.append(" WHERE ").append(index.where());
+            }
+            return statement.append(indexSuffix(index)).toString();
+        }
+
+        /** {@code INDEX} 앞 수식 — MySQL은 FULLTEXT·SPATIAL을 붙인다 */
+        protected String indexKeyword(DdlContent.Index index) {
+            return "INDEX";
+        }
+
+        /** 키 목록 앞의 접근 방법 — PostgreSQL {@code USING gin} */
+        protected String indexMethodBeforeKeys(DdlContent.Index index) {
+            return "";
+        }
+
+        /** 문장 끝 — MySQL {@code USING HASH}·{@code WITH PARSER} */
+        protected String indexSuffix(DdlContent.Index index) {
+            return "";
+        }
+
+        /** 식 키 목록 — 원문 그대로. MySQL은 식 조각마다 괄호를 씌운다 */
+        protected String indexExpressionKeys(String expression) {
+            return expression;
         }
 
         /** 표준형 — {@code GENERATED ALWAYS AS (식) STORED|VIRTUAL} (MySQL·PostgreSQL) */
@@ -184,17 +289,42 @@ public final class Dialects {
         }
 
         @Override
-        public String createIndex(DdlContent.Table table, DdlContent.Index index) {
-            if (index.btree()) {
-                return super.createIndex(table, index);
-            }
-            // FULLTEXT·SPATIAL — 컬럼 정렬을 받지 않는다. 전문 검색 파서는 FULLTEXT에만 붙는다
-            String statement = "CREATE " + index.type() + " INDEX " + index.name() + " ON " + table.physicalName()
-                    + " (" + indexColumns(table, index, false) + ")";
+        protected Set<String> indexTypes() {
+            return Set.of(DdlContent.Index.BTREE, DdlContent.Index.FULLTEXT, DdlContent.Index.SPATIAL, DdlContent.Index.HASH);
+        }
+
+        /** 함수 키 조각(8.0.13+) — 조각마다 괄호로 감싼다 */
+        @Override
+        protected boolean indexExpression() {
+            return true;
+        }
+
+        /** FULLTEXT·SPATIAL — 컬럼 정렬을 받지 않는다(btree가 아니면 정렬을 빼는 공통 규칙) */
+        @Override
+        protected String indexKeyword(DdlContent.Index index) {
+            return DdlContent.Index.FULLTEXT.equals(index.type()) || DdlContent.Index.SPATIAL.equals(index.type())
+                    ? index.type() + " INDEX" : "INDEX";
+        }
+
+        /** 전문 검색 파서는 FULLTEXT에만, HASH는 {@code USING HASH}(MEMORY·NDB 엔진만 실제로 따른다) */
+        @Override
+        protected String indexSuffix(DdlContent.Index index) {
             if (DdlContent.Index.FULLTEXT.equals(index.type()) && index.parser() != null) {
-                statement += " WITH PARSER " + index.parser();
+                return " WITH PARSER " + index.parser();
             }
-            return statement;
+            return DdlContent.Index.HASH.equals(index.type()) ? " USING HASH" : "";
+        }
+
+        @Override
+        protected String indexExpressionKeys(String expression) {
+            List<String> parts = new ArrayList<>();
+            for (String part : splitTopLevel(expression)) {
+                String trimmed = part.trim();
+                // 컬럼 이름(정렬 포함)은 그대로, 식은 괄호로 — MySQL은 식 키 조각을 괄호로 감싸야 한다
+                parts.add(SIMPLE_KEY.matcher(trimmed).matches() || (trimmed.startsWith("(") && trimmed.endsWith(")"))
+                        ? trimmed : "(" + trimmed + ")");
+            }
+            return String.join(", ", parts);
         }
 
         @Override
@@ -251,6 +381,14 @@ public final class Dialects {
         }
     }
 
+    /** IDENTITY 절 — PostgreSQL·Oracle. 자동 증가가 아니면 null */
+    private static String identity(DdlContent.Column column) {
+        if (!column.autoIncrement()) {
+            return null;
+        }
+        return column.identityAlways() ? "GENERATED ALWAYS AS IDENTITY" : "GENERATED BY DEFAULT AS IDENTITY";
+    }
+
     private static final class PostgresDialect extends BaseDialect {
 
         /** PostgreSQL 생성 컬럼은 STORED만 — 가상형은 STORED로 내고 생성기가 경고한다 */
@@ -264,9 +402,39 @@ public final class Dialects {
         }
 
         @Override
+        protected Set<String> indexTypes() {
+            return Set.of(DdlContent.Index.BTREE, DdlContent.Index.HASH, "GIN", "GIST", "BRIN", "SPGIST");
+        }
+
+        @Override
+        protected boolean indexExpression() {
+            return true;
+        }
+
+        @Override
+        protected boolean indexWhere() {
+            return true;
+        }
+
+        @Override
+        protected boolean indexInclude() {
+            return true;
+        }
+
+        @Override
+        protected boolean indexOpclass() {
+            return true;
+        }
+
+        @Override
+        protected String indexMethodBeforeKeys(DdlContent.Index index) {
+            return index.btree() ? "" : " USING " + index.type().toLowerCase(Locale.ROOT);
+        }
+
+        @Override
         public String autoIncrementInline(DdlContent.Column column) {
-            // SERIAL 대신 IDENTITY — 시퀀스 객체 없이 컬럼 속성으로 실현된다 (PG 10+)
-            return column.autoIncrement() ? "GENERATED BY DEFAULT AS IDENTITY" : null;
+            // SERIAL 대신 IDENTITY — 시퀀스 객체 없이 컬럼 속성으로 실현된다 (PG 10+). 종류는 컬럼을 따른다(v1.37)
+            return identity(column);
         }
 
         @Override
@@ -291,6 +459,9 @@ public final class Dialects {
                         ? "ALTER COLUMN " + name + " DROP DEFAULT"
                         : "ALTER COLUMN " + name + " SET DEFAULT " + afterDefault);
             }
+            if (before.autoIncrement() && after.autoIncrement() && before.identityAlways() != after.identityAlways()) {
+                clauses.add("ALTER COLUMN " + name + " SET GENERATED " + (after.identityAlways() ? "ALWAYS" : "BY DEFAULT"));
+            }
             if (clauses.isEmpty()) {
                 // 반영 가능한 차이가 없다(예: AI만 변경) — 문장 없이 생성기 경고로 남긴다
                 return "";
@@ -314,6 +485,12 @@ public final class Dialects {
             super("oracle");
         }
 
+        /** 함수 기반 인덱스 */
+        @Override
+        protected boolean indexExpression() {
+            return true;
+        }
+
         /** Oracle 생성 컬럼은 VIRTUAL만 — 저장형은 VIRTUAL로 내고 생성기가 경고한다 */
         @Override
         protected String generatedStorage(DdlContent.Column column) {
@@ -323,7 +500,7 @@ public final class Dialects {
         @Override
         public String autoIncrementInline(DdlContent.Column column) {
             // 12c+ IDENTITY — 11g 시퀀스+트리거 방식은 후보
-            return column.autoIncrement() ? "GENERATED BY DEFAULT AS IDENTITY" : null;
+            return identity(column);
         }
 
         @Override
@@ -350,6 +527,17 @@ public final class Dialects {
 
         private MssqlDialect() {
             super("mssql");
+        }
+
+        /** 필터링된 인덱스 */
+        @Override
+        protected boolean indexWhere() {
+            return true;
+        }
+
+        @Override
+        protected boolean indexInclude() {
+            return true;
         }
 
         @Override
@@ -480,16 +668,54 @@ public final class Dialects {
         return "'" + value.replace("'", "''") + "'";
     }
 
-    /** 인덱스 컬럼 목록 표기 — 존재하는 컬럼만, 컬럼별 정렬 포함 */
-    private static String indexColumns(DdlContent.Table table, DdlContent.Index index, boolean withOrder) {
+    /** 인덱스 컬럼 목록 표기 — 존재하는 컬럼만, 연산자 클래스·컬럼별 정렬 포함(정렬은 BTREE만 받는다) */
+    private static String indexColumns(DdlContent.Table table, DdlContent.Index index, boolean withOrder, boolean withOpclass) {
         List<String> parts = new ArrayList<>();
         for (DdlContent.IndexColumn indexColumn : index.columns()) {
             DdlContent.Column column = columnById(table, indexColumn.columnId());
             if (column != null) {
-                parts.add(withOrder ? column.physicalName() + " " + indexColumn.order() : column.physicalName());
+                StringBuilder part = new StringBuilder(column.physicalName());
+                if (withOpclass && indexColumn.opclass() != null) {
+                    part.append(' ').append(indexColumn.opclass());
+                }
+                if (withOrder) {
+                    part.append(' ').append(indexColumn.order());
+                }
+                parts.add(part.toString());
             }
         }
         return String.join(", ", parts);
+    }
+
+    /** 컬럼 이름 하나(정렬 포함) — 식이 아닌 키 조각 */
+    private static final java.util.regex.Pattern SIMPLE_KEY =
+            java.util.regex.Pattern.compile("(?i)^[\\p{L}_][\\p{L}\\p{N}_$]*(\\s+(ASC|DESC))?$");
+
+    /** 괄호·따옴표 밖의 쉼표로 나눈다 — 식 키 목록의 조각 */
+    static List<String> splitTopLevel(String text) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        char quote = 0;
+        int start = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (quote != 0) {
+                if (ch == quote) {
+                    quote = 0;
+                }
+            } else if (ch == '\'' || ch == '"' || ch == '`') {
+                quote = ch;
+            } else if (ch == '(') {
+                depth++;
+            } else if (ch == ')') {
+                depth--;
+            } else if (ch == ',' && depth == 0) {
+                parts.add(text.substring(start, i));
+                start = i + 1;
+            }
+        }
+        parts.add(text.substring(start));
+        return parts;
     }
 
     /** 컬럼 id → 컬럼 조회 — 없으면 null(삭제 cascade 잔여 참조 등) */

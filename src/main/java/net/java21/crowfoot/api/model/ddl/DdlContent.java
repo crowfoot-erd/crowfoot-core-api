@@ -44,7 +44,8 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
     }
 
     /** 컬럼 — length는 CHAR·VARCHAR·BINARY·VARBINARY, precision/scale은 DECIMAL,
-     *  precision만은 TIME·DATETIME·TIMESTAMP의 소수 초 자릿수다 */
+     *  precision만은 TIME·DATETIME·TIMESTAMP의 소수 초 자릿수다. identityAlways는 자동 증가를 IDENTITY로
+     *  실현하는 방언(PostgreSQL·Oracle)에서 GENERATED ALWAYS — false면 BY DEFAULT(v1.37, 신고 44) */
     public record Column(
             String id,
             String physicalName,
@@ -57,7 +58,16 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
             boolean autoIncrement,
             String logicalName,
             Generated generated,
-            String onUpdate) {
+            String onUpdate,
+            boolean identityAlways) {
+
+        /** IDENTITY 종류가 없는 컬럼 — v1.36 이전 꼴(BY DEFAULT) */
+        public Column(String id, String physicalName, String dataType, Integer length, Integer precision,
+                      Integer scale, boolean nullable, String defaultValue, boolean autoIncrement,
+                      String logicalName, Generated generated, String onUpdate) {
+            this(id, physicalName, dataType, length, precision, scale, nullable, defaultValue,
+                    autoIncrement, logicalName, generated, onUpdate, false);
+        }
 
         /** 코멘트 비교 값 — 논리명이 없으면 물리명이다. 리버스가 코멘트 없는 객체를 논리명 = 물리명으로 읽는 것과 맞춘다(v1.36) */
         public String commentText() {
@@ -86,16 +96,31 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
     public record KeyConstraint(String name, List<String> columnIds) {
     }
 
-    /** 인덱스 — 컬럼별 정렬 포함. type은 BTREE·FULLTEXT·SPATIAL, parser는 MySQL 전문 검색 파서 */
-    public record Index(String name, List<IndexColumn> columns, String type, String parser) {
+    /**
+     * 인덱스 — 컬럼별 정렬 포함. type은 BTREE·FULLTEXT·SPATIAL·HASH·GIN·GIST·BRIN·SPGIST, parser는 MySQL 전문 검색 파서.
+     * v1.37(신고 44): unique는 유니크 인덱스(부분·식 유니크), expression은 식이 든 키 목록 원문(있으면 columns는 비고
+     * 키는 이 원문이다), where는 부분 인덱스 조건, includeColumnIds는 INCLUDE 컬럼이다.
+     */
+    public record Index(String name, List<IndexColumn> columns, String type, String parser,
+                        boolean unique, String expression, String where, List<String> includeColumnIds) {
 
         public static final String BTREE = "BTREE";
         public static final String FULLTEXT = "FULLTEXT";
         public static final String SPATIAL = "SPATIAL";
+        public static final String HASH = "HASH";
+
+        public Index {
+            includeColumnIds = includeColumnIds == null ? List.of() : List.copyOf(includeColumnIds);
+        }
 
         /** 일반(BTREE) 인덱스 — v1.34 이전 꼴 */
         public Index(String name, List<IndexColumn> columns) {
             this(name, columns, BTREE, null);
+        }
+
+        /** 식·조건·INCLUDE 없는 인덱스 — v1.36 이전 꼴 */
+        public Index(String name, List<IndexColumn> columns, String type, String parser) {
+            this(name, columns, type, parser, false, null, null, List.of());
         }
 
         public boolean btree() {
@@ -103,7 +128,12 @@ public record DdlContent(List<Table> tables, List<Relationship> relationships) {
         }
     }
 
-    public record IndexColumn(String columnId, String order) {
+    /** 인덱스 키 컬럼 — opclass는 PostgreSQL 연산자 클래스(gin_trgm_ops 등, v1.37) */
+    public record IndexColumn(String columnId, String order, String opclass) {
+
+        public IndexColumn(String columnId, String order) {
+            this(columnId, order, null);
+        }
     }
 
     /** 관계 = FK — parent가 참조되는(1쪽) 테이블, child가 FK 컬럼을 소유한(N쪽) 테이블 */

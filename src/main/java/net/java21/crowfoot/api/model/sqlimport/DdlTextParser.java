@@ -76,6 +76,7 @@ public class DdlTextParser {
         boolean nullable = true;
         String defaultValue;
         boolean autoIncrement;
+        boolean identityAlways;
         String comment;
         String generatedExpression;
         boolean generatedStored;
@@ -120,8 +121,25 @@ public class DdlTextParser {
         }
     }
 
-    /** 인덱스 키 조각 — 컬럼명·정렬·접두 길이(MySQL col(10), 문서는 표현하지 못해 버린다) */
-    private record KeyPart(String name, String order, String prefixLength) {
+    /** 인덱스 키 조각 — 컬럼명·정렬·접두 길이(MySQL col(10), 문서는 표현하지 못해 버린다)·연산자 클래스(v1.37).
+     *  name이 null이면 식 조각이다. raw는 조각 원문, ignored는 읽고 버린 수식(COLLATE·NULLS LAST) */
+    private record KeyPart(String name, String order, String prefixLength, String opclass, String raw, String ignored) {
+    }
+
+    /** 인덱스 접근 방법 — USING 뒤 이름 → 문서의 인덱스 종류 */
+    private static final Map<String, String> INDEX_METHODS = Map.of(
+            "btree", "BTREE", "hash", "HASH", "gin", "GIN", "gist", "GIST", "brin", "BRIN", "spgist", "SPGIST");
+
+    /** 키 조각 해석 결과 — 컬럼 목록 또는 식 원문(식 조각이 하나라도 있으면 목록 전체를 원문으로 담는다) */
+    private record IndexKeys(List<IntrospectedSchema.IndexColumn> columns, String expression) {
+
+        boolean plainColumns() {
+            return expression == null && columns.stream().allMatch(column -> column.opclass() == null);
+        }
+
+        List<String> names() {
+            return columns.stream().map(IntrospectedSchema.IndexColumn::name).toList();
+        }
     }
 
     public DdlParseResult parse(String ddl) {
@@ -168,7 +186,7 @@ public class DdlTextParser {
                 columns.add(new IntrospectedSchema.IntrospectedColumn(
                         column.name, column.typeName, column.length, column.precision, column.scale,
                         column.nullable, column.defaultValue, column.autoIncrement, column.comment,
-                        column.generatedExpression, column.generatedStored, column.onUpdate));
+                        column.generatedExpression, column.generatedStored, column.onUpdate, column.identityAlways));
             }
             List<IntrospectedSchema.IntrospectedUnique> uniques = new ArrayList<>();
             for (UniqueBuilder unique : table.uniques) {
@@ -363,7 +381,8 @@ public class DdlTextParser {
                 }
                 case "generated" -> { // GENERATED ALWAYS AS (식) [VIRTUAL|STORED] — IDENTITY는 자동 증가
                     c.next();
-                    if ("always".equals(c.peekWord(0)) || "by".equals(c.peekWord(0))) {
+                    boolean always = "always".equals(c.peekWord(0));
+                    if (always || "by".equals(c.peekWord(0))) {
                         c.next();
                         if ("default".equals(c.peekWord(0))) {
                             c.next();
@@ -373,6 +392,7 @@ public class DdlTextParser {
                         c.next();
                         c.next();
                         column.autoIncrement = true;
+                        column.identityAlways = always; // ALWAYS와 BY DEFAULT를 가른다(신고 44)
                         if ("(".equals(c.peekRaw(0))) {
                             c.nextParenRaw(); // 시퀀스 옵션
                         }
@@ -542,10 +562,17 @@ public class DdlTextParser {
                     c.next();
                 }
                 String name = constraintName != null ? constraintName : c.nextOptionalIndexName();
-                List<String> columns = keyPartNames(table, c.nextKeyParts(), item);
-                if (columns.isEmpty()) {
+                String method = readUsing(table, name, c);
+                IndexKeys keys = indexKeys(table, name, c.nextKeyParts());
+                if (keys.columns().isEmpty() && keys.expression() == null) {
                     throw new ParseException(summary("UNIQUE 컬럼 없음", item));
                 }
+                if (!keys.plainColumns()) {
+                    // MySQL 함수 키 조각 유니크 — 유니크 인덱스로 담는다(v1.37)
+                    putIndex(table, name, method != null ? method : "BTREE", null, keys, true, null, List.of());
+                    return;
+                }
+                List<String> columns = keys.names();
                 table.uniques.add(uniqueOf(
                         name != null ? name : "uk_" + table.name + "_" + String.join("_", columns), columns));
             }
@@ -590,17 +617,17 @@ public class DdlTextParser {
     /** 인덱스 — [이름] [USING 방식] (키 조각) [USING 방식] [WITH PARSER p] [COMMENT '…'] [VISIBLE] */
     private void addIndex(TableBuilder table, String type, String name, Cursor c, List<Token> item) {
         String indexName = name != null ? name : c.nextOptionalIndexName();
-        skipUsing(c);
-        List<KeyPart> parts = c.nextKeyParts();
-        List<String> columns = keyPartNames(table, parts, item);
-        if (columns.isEmpty()) {
+        String method = readUsing(table, indexName, c);
+        IndexKeys keys = indexKeys(table, indexName, c.nextKeyParts());
+        if (keys.columns().isEmpty() && keys.expression() == null) {
             throw new ParseException(summary("인덱스 컬럼 없음", item));
         }
         String parser = null;
         while (c.hasNext()) {
             String w = c.peekWord(0);
             if ("using".equals(w)) {
-                skipUsing(c);
+                String after = readUsing(table, indexName, c);
+                method = after != null ? after : method;
             } else if ("with".equals(w) && "parser".equals(c.peekWord(1))) {
                 c.next();
                 c.next();
@@ -612,47 +639,76 @@ public class DdlTextParser {
                 c.next(); // VISIBLE·KEY_BLOCK_SIZE …
             }
         }
-        putIndex(table, indexName, type, parser, parts);
+        putIndex(table, indexName, "BTREE".equals(type) && method != null ? method : type, parser, keys, false, null, List.of());
     }
 
-    private static void putIndex(TableBuilder table, String indexName, String type, String parser, List<KeyPart> parts) {
-        List<IntrospectedSchema.IndexColumn> columns = new ArrayList<>();
-        for (KeyPart part : parts) {
-            columns.add(new IntrospectedSchema.IndexColumn(part.name(), part.order()));
+    private static void putIndex(TableBuilder table, String indexName, String type, String parser, IndexKeys keys,
+                                 boolean unique, String where, List<String> include) {
+        String name = indexName != null ? indexName : (unique ? "uk_" : "idx_") + table.name + "_"
+                + (keys.expression() != null ? "expr" : String.join("_", keys.names()));
+        table.indexes.add(new IntrospectedSchema.IntrospectedIndex(name, keys.columns(), type, parser,
+                unique, keys.expression(), where, include));
+    }
+
+    /** USING 방식 — 문서의 인덱스 종류로. 모르는 방식은 BTREE로 읽고 경고한다. USING이 없으면 null */
+    private static String readUsing(TableBuilder table, String indexName, Cursor c) {
+        if (!"using".equals(c.peekWord(0))) {
+            return null;
         }
-        String name = indexName != null ? indexName : "idx_" + table.name + "_"
-                + String.join("_", parts.stream().map(KeyPart::name).toList());
-        table.indexes.add(new IntrospectedSchema.IntrospectedIndex(name, columns, type, parser));
-    }
-
-    /** USING BTREE|HASH|GIN … — 방식은 문서에 담지 않는다(BTREE 외는 경고) */
-    private static void skipUsing(Cursor c) {
-        if ("using".equals(c.peekWord(0))) {
-            c.next();
-            if (c.hasNext() && !"(".equals(c.peekRaw(0))) {
-                c.next();
-            }
+        c.next();
+        if (!c.hasNext() || "(".equals(c.peekRaw(0))) {
+            return null;
         }
+        String method = c.nextWord();
+        String type = method == null ? null : INDEX_METHODS.get(method);
+        if (type == null) {
+            table.warnings.add(table.name + "." + (indexName == null ? "?" : indexName) + ": USING "
+                    + (method == null ? "?" : method.toUpperCase(Locale.ROOT)) + " — BTREE 인덱스로 읽음");
+            return "BTREE";
+        }
+        return type;
     }
 
-    /** 키 조각에서 컬럼 이름만 — 접두 길이는 문서가 담지 못해 경고로 남긴다. 식 조각이 있으면 건너뛴다 */
+    /** 키 조각에서 컬럼 이름만(기본 키) — 접두 길이는 문서가 담지 못해 경고로 남긴다. 식 조각이 있으면 읽지 못한다 */
     private static List<String> keyPartNames(TableBuilder table, List<KeyPart> parts, List<Token> item) {
         List<String> names = new ArrayList<>();
         for (KeyPart part : parts) {
             if (part.name() == null) {
-                throw new ParseException(summary(table.name + " 식 인덱스 — 컬럼으로 표현할 수 없음", item));
+                throw new ParseException(summary(table.name + " 식 키 — 컬럼으로 표현할 수 없음", item));
             }
-            if (part.prefixLength() != null) {
-                table.warnings.add(table.name + "." + part.name() + ": 인덱스 접두 길이(" + part.prefixLength()
-                        + ") — 문서에 담지 않음");
-            }
+            warnKeyPart(table, part);
             names.add(part.name());
         }
         return names;
     }
 
-    /** CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX [CONCURRENTLY] [IF NOT EXISTS] 이름 ON 테이블 [USING 방식] (키 조각) …
-     *  — kind는 CREATE 다음 단어. 대상 테이블이 앞에서 만들어져 있어야 한다 */
+    private static void warnKeyPart(TableBuilder table, KeyPart part) {
+        if (part.prefixLength() != null) {
+            table.warnings.add(table.name + "." + part.name() + ": 인덱스 접두 길이(" + part.prefixLength()
+                    + ") — 문서에 담지 않음");
+        }
+        if (part.ignored() != null) {
+            table.warnings.add(table.name + "." + part.name() + ": 인덱스 키의 " + part.ignored() + " — 문서에 담지 않음");
+        }
+    }
+
+    /** 인덱스 키 — 컬럼 조각만이면 컬럼 목록(연산자 클래스 포함), 식 조각이 있으면 목록 전체를 원문으로 담는다(v1.37) */
+    private static IndexKeys indexKeys(TableBuilder table, String indexName, List<KeyPart> parts) {
+        if (parts.stream().anyMatch(part -> part.name() == null)) {
+            return new IndexKeys(List.of(), String.join(", ", parts.stream().map(KeyPart::raw).toList()));
+        }
+        List<IntrospectedSchema.IndexColumn> columns = new ArrayList<>();
+        for (KeyPart part : parts) {
+            warnKeyPart(table, part);
+            columns.add(new IntrospectedSchema.IndexColumn(part.name(), part.order(), part.opclass()));
+        }
+        return new IndexKeys(columns, null);
+    }
+
+    /** CREATE [UNIQUE|FULLTEXT|SPATIAL] INDEX [CONCURRENTLY] [IF NOT EXISTS] 이름 ON [ONLY] 테이블 [USING 방식] (키 조각)
+     *  [INCLUDE (…)] [NULLS [NOT] DISTINCT] [WITH (…)] [TABLESPACE t] [WHERE 조건] — kind는 CREATE 다음 단어.
+     *  대상 테이블이 앞에서 만들어져 있어야 한다. 컬럼만으로 된 유니크 인덱스는 유니크 키로, 조건·식·INCLUDE·방법·
+     *  연산자 클래스가 붙은 유니크 인덱스는 유니크 인덱스로 담는다(뜻이 바뀌지 않게 — 신고 44) */
     private void parseCreateIndex(String kind, Cursor c, List<Token> tokens, Map<String, TableBuilder> tables,
                                   List<String> skipped) {
         String type = "BTREE";
@@ -684,36 +740,60 @@ public class DdlTextParser {
             skipped.add(summary("CREATE INDEX (대상 테이블 없음)", tokens));
             return;
         }
-        if ("using".equals(c.peekWord(0))) {
-            c.next();
-            String method = c.nextWord();
-            if (method != null && !"btree".equals(method)) {
-                table.warnings.add(table.name + "." + (indexName == null ? "?" : indexName)
-                        + ": USING " + method.toUpperCase(Locale.ROOT) + " — BTREE 인덱스로 읽음");
-            }
+        String method = readUsing(table, indexName, c);
+        if (method != null && "BTREE".equals(type)) {
+            type = method;
         }
-        List<KeyPart> parts = c.nextKeyParts();
-        List<String> columns = keyPartNames(table, parts, tokens);
-        if (columns.isEmpty()) {
+        IndexKeys keys = indexKeys(table, indexName, c.nextKeyParts());
+        if (keys.columns().isEmpty() && keys.expression() == null) {
             skipped.add(summary("CREATE INDEX (컬럼 없음)", tokens));
             return;
         }
-        if (unique) {
+        String target = table.name + "." + (indexName == null ? "?" : indexName);
+        String parser = null;
+        String where = null;
+        List<String> include = new ArrayList<>();
+        while (c.hasNext()) {
+            String w = c.peekWord(0);
+            if ("with".equals(w) && "parser".equals(c.peekWord(1))) {
+                c.next();
+                c.next();
+                parser = c.nextIdentifier();
+            } else if ("include".equals(w) && "(".equals(c.peekRaw(1))) {
+                c.next();
+                include.addAll(c.nextIdentifierList());
+            } else if ("where".equals(w)) {
+                c.next();
+                where = stripOuterParens(joinExpression(c.rest()));
+            } else if ("using".equals(w)) {
+                String after = readUsing(table, indexName, c); // MySQL — 키 뒤의 USING HASH
+                if (after != null && "BTREE".equals(type)) {
+                    type = after;
+                }
+            } else if ("with".equals(w) && "(".equals(c.peekRaw(1))) {
+                c.next();
+                table.warnings.add(target + ": WITH (" + c.nextParenExpression() + ") — 문서에 담지 않음");
+            } else if ("nulls".equals(w)) {
+                c.next();
+                StringBuilder clause = new StringBuilder("NULLS");
+                while (c.hasNext() && ("not".equals(c.peekWord(0)) || "distinct".equals(c.peekWord(0)))) {
+                    clause.append(' ').append(c.nextWord().toUpperCase(Locale.ROOT));
+                }
+                table.warnings.add(target + ": " + clause + " — 문서에 담지 않음");
+            } else if ("tablespace".equals(w)) {
+                c.next();
+                c.next();
+            } else {
+                c.next(); // MySQL ALGORITHM·LOCK·COMMENT …
+            }
+        }
+        if (unique && keys.plainColumns() && where == null && include.isEmpty() && "BTREE".equals(type)) {
+            List<String> columns = keys.names();
             table.uniques.add(uniqueOf(indexName != null ? indexName
                     : "uk_" + table.name + "_" + String.join("_", columns), columns));
             return;
         }
-        String parser = null;
-        while (c.hasNext()) {
-            if ("with".equals(c.peekWord(0)) && "parser".equals(c.peekWord(1))) {
-                c.next();
-                c.next();
-                parser = c.nextIdentifier();
-            } else {
-                c.next();
-            }
-        }
-        putIndex(table, indexName, type, parser, parts);
+        putIndex(table, indexName, type, parser, keys, unique, where, include);
     }
 
     /** CREATE TABLE 닫는 괄호 뒤 — MySQL 테이블 옵션(COMMENT [=] 'x', ENGINE=…) */
@@ -734,7 +814,13 @@ public class DdlTextParser {
         Cursor c = new Cursor(tokens);
         expectWord(c, "alter");
         expectWord(c, "table");
+        if ("only".equals(c.peekWord(0)) && c.peek(1) != null && !"add".equals(c.peekWord(1))) {
+            c.next(); // pg_dump의 ALTER TABLE ONLY t — 상속 테이블에 퍼뜨리지 않는다는 표시일 뿐이다
+        }
         String tableName = c.nextQualifiedName();
+        if (tableName != null && "alter".equals(c.peekWord(0)) && parseAlterColumnIdentity(c, tables.get(tableName))) {
+            return;
+        }
         if (tableName == null || !"add".equals(c.peekWord(0))) {
             skipped.add(summary("ALTER TABLE (지원하지 않는 형태)", tokens));
             return;
@@ -810,6 +896,30 @@ public class DdlTextParser {
             default -> skipped.add(summary("ALTER TABLE ADD "
                     + (kind == null ? "?" : kind.toUpperCase(Locale.ROOT)) + " (지원하지 않는 추가)", tokens));
         }
+    }
+
+    /** ALTER COLUMN c ADD GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY [(…)] — pg_dump가 IDENTITY를 이렇게 낸다.
+     *  이 꼴이면 읽고 true, 아니면 커서를 건드리지 않은 채 false */
+    private static boolean parseAlterColumnIdentity(Cursor c, TableBuilder table) {
+        int column = "column".equals(c.peekWord(1)) ? 2 : 1;
+        if (!"add".equals(c.peekWord(column + 1)) || !"generated".equals(c.peekWord(column + 2))) {
+            return false;
+        }
+        c.next(); // ALTER
+        if (column == 2) {
+            c.next(); // COLUMN
+        }
+        String columnName = c.nextIdentifier();
+        c.next(); // ADD
+        c.next(); // GENERATED
+        boolean always = "always".equals(c.peekWord(0));
+        ColumnBuilder target = table == null || columnName == null ? null : table.columns.get(columnName);
+        if (target != null) {
+            target.autoIncrement = true;
+            target.identityAlways = always;
+            target.defaultValue = null;
+        }
+        return true;
     }
 
     /** COMMENT ON TABLE t IS '…' / COMMENT ON COLUMN t.c IS '…' (표준 PG) */
@@ -916,6 +1026,27 @@ public class DdlTextParser {
         if (!list.contains(value)) {
             list.add(value);
         }
+    }
+
+    /** 식 바깥 괄호 한 겹 — {@code (a > 0)}은 {@code a > 0}. {@code (a) OR (b)}는 그대로 */
+    static String stripOuterParens(String text) {
+        String trimmed = text == null ? null : text.trim();
+        if (trimmed == null || !trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+            return trimmed;
+        }
+        int depth = 0;
+        for (int i = 0; i < trimmed.length(); i++) {
+            char ch = trimmed.charAt(i);
+            if (ch == '(') {
+                depth++;
+            } else if (ch == ')') {
+                depth--;
+            }
+            if (depth == 0 && i < trimmed.length() - 1) {
+                return trimmed;
+            }
+        }
+        return trimmed.substring(1, trimmed.length() - 1).trim();
     }
 
     private static boolean isNumber(String value) {
@@ -1250,16 +1381,46 @@ public class DdlTextParser {
             if (Character.isDigit(ch) || (ch == '-' && i + 1 < statement.length()
                     && Character.isDigit(statement.charAt(i + 1)))) {
                 int start = i;
+                if (ch == '-') {
+                    i++; // 부호를 먼저 넘긴다 — 넘기지 않으면 제자리에서 빈 토큰을 끝없이 만든다
+                }
                 while (i < statement.length() && (Character.isDigit(statement.charAt(i)) || statement.charAt(i) == '.')) {
                     i++;
                 }
                 tokens.add(new PunctToken(statement.substring(start, i)));
                 continue;
             }
+            if (OPERATOR_RUN.indexOf(ch) >= 0) {
+                int end = operatorEnd(statement, i);
+                tokens.add(new PunctToken(statement.substring(i, end)));
+                i = end;
+                continue;
+            }
             tokens.add(new PunctToken(String.valueOf(ch)));
             i++;
         }
         return tokens;
+    }
+
+    /** 캐스트 타입 이름 뒤에 올 수 있는 컬럼 옵션 — 여기서 캐스트를 끝낸다 */
+    private static final Set<String> CAST_STOP_WORDS = Set.of("not", "null", "default", "constraint", "check",
+            "references", "primary", "unique", "collate", "generated", "on", "comment", "auto_increment");
+
+    /** 이어 쓰면 연산자 하나가 되는 기호 — PostgreSQL 연산자 문자(!~·~*·@>·->>·#>·@@ — 신고 44) */
+    private static final String OPERATOR_RUN = "+-*/<>=~!@#%^&|`?";
+
+    /** 붙은 기호 묶음 하나의 끝 — PostgreSQL 어휘 규칙을 따른다. 여러 글자 연산자는 ~ ! @ # % ^ & | ` ? 중
+     *  하나를 품지 않으면 + 나 - 로 끝날 수 없다({@code >-1}은 {@code >}와 {@code -1}) */
+    private static int operatorEnd(String statement, int start) {
+        int end = start;
+        while (end < statement.length() && OPERATOR_RUN.indexOf(statement.charAt(end)) >= 0) {
+            end++;
+        }
+        while (end - start > 1 && "+-".indexOf(statement.charAt(end - 1)) >= 0
+                && statement.substring(start, end).chars().noneMatch(c -> "~!@#%^&|`?".indexOf(c) >= 0)) {
+            end--;
+        }
+        return end;
     }
 
     /** 토큰 순회 — 식별자 목록·qualified name 같은 반복 패턴을 메서드로 제공한다 */
@@ -1394,18 +1555,40 @@ public class DdlTextParser {
             }
             Token token = next();
             if (token.isString()) {
+                skipCast();
                 return token.text();
             }
             if (token.isWord() && "null".equals(token.text())) {
+                skipCast();
                 return null;
             }
             if (token.isWord() && "(".equals(peekRaw(0))) {
                 return token.raw() + "(" + nextParenExpression() + ")";
             }
-            return token.isWord() ? token.raw() : token.text();
+            String value = token.isWord() ? token.raw() : token.text();
+            skipCast();
+            return value;
         }
 
-        /** ( 키 조각, … ) — 조각은 {@code 컬럼 [(길이)] [ASC|DESC]} 또는 식 {@code ((식))}(이름 null) */
+        /** 값 뒤의 PostgreSQL 캐스트({@code ''::character varying}) — 타입 단어를 컬럼 옵션으로 잘못 읽지 않게 넘긴다 */
+        private void skipCast() {
+            while (":".equals(peekRaw(0)) && ":".equals(peekRaw(1))) {
+                next();
+                next();
+                while (hasNext() && peek(0).isWord() && !CAST_STOP_WORDS.contains(peek(0).text())) {
+                    next();
+                    if ("(".equals(peekRaw(0))) {
+                        nextParenExpression();
+                    }
+                }
+                while ("[]".equals(peekRaw(0))) { // 배열 표기 — 토큰화가 quoted 식별자 한 개로 읽는다
+                    next();
+                }
+            }
+        }
+
+        /** ( 키 조각, … ) — 조각은 {@code 컬럼 [(길이)] [연산자 클래스] [COLLATE c] [ASC|DESC] [NULLS FIRST|LAST]}
+         *  또는 식 — {@code (식)}·{@code lower(name)} 같은 함수 호출(이름 null, 원문은 raw) */
         List<KeyPart> nextKeyParts() {
             if (!"(".equals(peekRaw(0))) {
                 return List.of();
@@ -1420,25 +1603,50 @@ public class DdlTextParser {
                 if (part.isEmpty()) {
                     continue;
                 }
+                String raw = joinExpression(part);
                 Token first = part.get(0);
-                if (!first.isIdentifier() || "(".equals(first.raw())) {
-                    parts.add(new KeyPart(null, "ASC", null));
+                boolean prefixLength = part.size() > 3 && "(".equals(part.get(1).raw())
+                        && isNumber(part.get(2).text()) && ")".equals(part.get(3).raw());
+                boolean call = part.size() > 1 && "(".equals(part.get(1).raw()) && !prefixLength;
+                if (!first.isIdentifier() || first.isString() || "(".equals(first.raw()) || call) {
+                    parts.add(new KeyPart(null, "ASC", null, null, raw, null));
                     continue;
                 }
-                String prefix = null;
+                String prefix = prefixLength ? part.get(2).text() : null;
                 String order = "ASC";
-                for (int i = 1; i < part.size(); i++) {
+                String opclass = null;
+                List<String> ignored = new ArrayList<>();
+                for (int i = prefixLength ? 4 : 1; i < part.size(); i++) {
                     Token t = part.get(i);
-                    if ("(".equals(t.raw()) && i + 1 < part.size()) {
-                        prefix = part.get(i + 1).text();
-                    } else if (t.isWord() && "desc".equals(t.text())) {
-                        order = "DESC";
+                    String w = t.isWord() ? t.text() : null;
+                    if ("desc".equals(w) || "asc".equals(w)) {
+                        order = w.toUpperCase(Locale.ROOT);
+                    } else if ("nulls".equals(w) && i + 1 < part.size()) {
+                        ignored.add("NULLS " + part.get(++i).raw().toUpperCase(Locale.ROOT));
+                    } else if ("collate".equals(w) && i + 1 < part.size()) {
+                        ignored.add("COLLATE " + part.get(++i).raw());
+                    } else if (t.isIdentifier() && !t.isString() && opclass == null) {
+                        // 연산자 클래스 — 스키마 한정(public.gin_trgm_ops)도 받는다
+                        StringBuilder name = new StringBuilder(t.raw());
+                        while (i + 2 < part.size() && ".".equals(part.get(i + 1).raw())) {
+                            name.append('.').append(part.get(i + 2).raw());
+                            i += 2;
+                        }
+                        opclass = name.toString();
                     }
                 }
-                parts.add(new KeyPart(first.text(), order, prefix));
+                parts.add(new KeyPart(first.text(), order, prefix, opclass, raw,
+                        ignored.isEmpty() ? null : String.join(", ", ignored)));
             }
             index = Math.min(close + 1, tokens.size());
             return parts;
+        }
+
+        /** 남은 토큰 전부 — 커서를 끝으로 옮긴다 */
+        List<Token> rest() {
+            List<Token> out = List.copyOf(tokens.subList(Math.min(index, tokens.size()), tokens.size()));
+            index = tokens.size();
+            return out;
         }
 
         /** ( a, b, c ) — 여는 괄호부터 닫는 괄호까지 식별자 목록 */

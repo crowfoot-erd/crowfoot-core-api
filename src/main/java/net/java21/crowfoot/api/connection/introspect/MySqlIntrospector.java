@@ -324,33 +324,17 @@ public class MySqlIntrospector implements SchemaIntrospector {
         }
     }
 
-    /** 일반 인덱스 — STATISTICS. 유니크(UK로 읽힘)·PRIMARY·FK가 만든 인덱스(FK 이름과 같은 이름)는 뺀다 */
+    /** 일반 인덱스 — STATISTICS. 유니크(UK로 읽힘)·PRIMARY·FK가 만든 인덱스(FK 이름과 같은 이름)는 뺀다.
+     *  v1.37: 함수 키 조각(8.0.13+ EXPRESSION)은 식 인덱스로, 식이 든 유니크 인덱스는 유니크 인덱스로, HASH는 HASH로 읽는다 */
     private static void readIndexes(Connection connection, String schema, Map<String, TableBuilder> builders,
                                     java.util.Set<String> foreignKeyNames) throws SQLException {
-        String sql = """
-                SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, COLLATION, INDEX_TYPE
-                FROM INFORMATION_SCHEMA.STATISTICS
-                WHERE TABLE_SCHEMA = ? AND NON_UNIQUE = 1
-                ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
-                """;
         Map<String, IndexBuilder> indexes = new LinkedHashMap<>();
-        try (PreparedStatement ps = connection.prepareStatement(sql)) {
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String table = rs.getString(1);
-                    String name = rs.getString(2);
-                    if (!builders.containsKey(table) || foreignKeyNames.contains(name)) {
-                        continue;
-                    }
-                    String indexType = rs.getString(5);
-                    IndexBuilder index = indexes.computeIfAbsent(table + ' ' + name,
-                            key -> new IndexBuilder(table, name, indexType));
-                    // 식 인덱스는 COLUMN_NAME이 null — 컬럼으로 표현하지 못한다
-                    index.columns.add(rs.getString(3) == null ? null
-                            : new IntrospectedSchema.IndexColumn(rs.getString(3), "D".equals(rs.getString(4)) ? "DESC" : "ASC"));
-                }
-            }
+        try {
+            readIndexRows(connection, schema, builders, foreignKeyNames, indexes, true);
+        } catch (SQLException noExpressionColumn) {
+            // EXPRESSION 열이 없는 서버(MySQL 8.0.13 이전·MariaDB) — 식 키 없이 다시 읽는다
+            indexes.clear();
+            readIndexRows(connection, schema, builders, foreignKeyNames, indexes, false);
         }
         java.util.Set<String> fulltextTables = new java.util.HashSet<>();
         for (IndexBuilder index : indexes.values()) {
@@ -371,12 +355,54 @@ public class MySqlIntrospector implements SchemaIntrospector {
             }
         }
         for (IndexBuilder index : indexes.values()) {
-            if (index.columns.contains(null)) {
+            boolean expression = index.parts.stream().anyMatch(part -> part == null);
+            if (index.unique && !expression) {
+                continue; // 컬럼만으로 된 유니크는 유니크 키로 읽었다
+            }
+            String type = "FULLTEXT".equals(index.type) || "SPATIAL".equals(index.type) || "HASH".equals(index.type)
+                    ? index.type : "BTREE";
+            if (expression) {
+                if (index.expressions.contains(null)) {
+                    continue; // 식을 읽지 못한 서버
+                }
+                builders.get(index.table).indexes.add(new IntrospectedSchema.IntrospectedIndex(index.name, List.of(), type,
+                        null, index.unique, String.join(", ", index.expressions), null, List.of()));
                 continue;
             }
-            String type = "FULLTEXT".equals(index.type) || "SPATIAL".equals(index.type) ? index.type : "BTREE";
             builders.get(index.table).indexes.add(new IntrospectedSchema.IntrospectedIndex(
-                    index.name, List.copyOf(index.columns), type, parsers.get(index.table + ' ' + index.name)));
+                    index.name, List.copyOf(index.parts), type, parsers.get(index.table + ' ' + index.name)));
+        }
+    }
+
+    private static void readIndexRows(Connection connection, String schema, Map<String, TableBuilder> builders,
+                                      java.util.Set<String> foreignKeyNames, Map<String, IndexBuilder> indexes,
+                                      boolean withExpression) throws SQLException {
+        String sql = "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, COLLATION, INDEX_TYPE, NON_UNIQUE"
+                + (withExpression ? ", EXPRESSION" : "")
+                + " FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = ? AND INDEX_NAME <> 'PRIMARY'"
+                + " ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String table = rs.getString(1);
+                    String name = rs.getString(2);
+                    if (!builders.containsKey(table) || foreignKeyNames.contains(name)) {
+                        continue;
+                    }
+                    String indexType = rs.getString(5);
+                    boolean unique = rs.getInt(6) == 0;
+                    IndexBuilder index = indexes.computeIfAbsent(table + ' ' + name,
+                            key -> new IndexBuilder(table, name, indexType, unique));
+                    String column = rs.getString(3);
+                    String order = "D".equals(rs.getString(4)) ? "DESC" : "ASC";
+                    // 식 키는 COLUMN_NAME이 null이고 EXPRESSION에 식이 있다 — 조각마다 괄호로 감싼다(MySQL 함수 키 조각 표기)
+                    String expression = withExpression ? rs.getString(7) : null;
+                    index.parts.add(column == null ? null : new IntrospectedSchema.IndexColumn(column, order));
+                    index.expressions.add(column != null ? column + ("DESC".equals(order) ? " DESC" : "")
+                            : expression == null ? null : "(" + expression + ")" + ("DESC".equals(order) ? " DESC" : ""));
+                }
+            }
         }
     }
 
@@ -385,12 +411,17 @@ public class MySqlIntrospector implements SchemaIntrospector {
         private final String table;
         private final String name;
         private final String type;
-        private final List<IntrospectedSchema.IndexColumn> columns = new ArrayList<>();
+        private final boolean unique;
+        /** 키 조각 — 식 조각은 null */
+        private final List<IntrospectedSchema.IndexColumn> parts = new ArrayList<>();
+        /** 키 조각 원문 — 식 인덱스의 키 목록. 식을 읽지 못한 조각은 null */
+        private final List<String> expressions = new ArrayList<>();
 
-        private IndexBuilder(String table, String name, String type) {
+        private IndexBuilder(String table, String name, String type, boolean unique) {
             this.table = table;
             this.name = name;
             this.type = type;
+            this.unique = unique;
         }
     }
 

@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.java21.crowfoot.api.model.edit.EditRequests.AreaItem;
+import net.java21.crowfoot.api.model.edit.EditRequests.CheckItem;
+import net.java21.crowfoot.api.model.edit.EditRequests.CheckRef;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnMappingItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnRef;
@@ -493,6 +495,190 @@ class DocumentEditorTest {
         assertThat(tableNode("users").path("primaryKey").isNull()).isTrue();
         assertThat(columnNames("orders")).containsExactly("id", "status");
         assertThat(root.path("model").path("relationships").isEmpty()).isTrue();
+    }
+
+    /** member(id)와 follow(follower_id, followee_id) — member → follow 식별 관계 둘, PK (follower_id, followee_id) */
+    private void seedFollow() {
+        DocumentEditor editor = editor("postgresql");
+        editor.applySchema(List.of(
+                table("member", List.of(column("id", "BIGINT")), List.of("id")),
+                table("follow", List.of(column("follower_id", "BIGINT"), column("followee_id", "BIGINT")), List.of("follower_id", "followee_id"))),
+                List.of(new RelationshipItem("member", "follow", null, true, null, null, null, null,
+                                List.of(new ColumnMappingItem("id", "follower_id")), "fk_follow_follower"),
+                        new RelationshipItem("member", "follow", null, true, null, null, null, null,
+                                List.of(new ColumnMappingItem("id", "followee_id")), "fk_follow_followee")),
+                null);
+        editor.throwIfInvalid();
+    }
+
+    private List<String> relationshipColumns() {
+        List<String> out = new ArrayList<>();
+        JsonNode follow = tableNode("follow");
+        for (JsonNode relationship : root.path("model").path("relationships")) {
+            String columnId = relationship.path("columnMappings").get(0).path("childColumnId").asText();
+            for (JsonNode column : follow.path("columns")) {
+                if (columnId.equals(column.path("id").asText())) {
+                    out.add(relationship.path("fkName").asText() + "=" + column.path("physicalName").asText());
+                }
+            }
+        }
+        return out;
+    }
+
+    private List<String> primaryKeyColumns(String table) {
+        JsonNode node = tableNode(table);
+        List<String> out = new ArrayList<>();
+        for (JsonNode id : node.path("primaryKey").path("columnIds")) {
+            for (JsonNode column : node.path("columns")) {
+                if (id.asText().equals(column.path("id").asText())) {
+                    out.add(column.path("physicalName").asText());
+                }
+            }
+        }
+        return out;
+    }
+
+    @Test
+    @DisplayName("부모·자식이 같은 관계가 둘 — name이나 columnMappings로 각자 고치고, 고를 수 없으면 아무것도 바꾸지 않는다(신고 45)")
+    void sameParentAndChildRelationships() {
+        seedFollow();
+        assertThat(relationshipColumns()).containsExactly("fk_follow_follower=follower_id", "fk_follow_followee=followee_id");
+        assertThat(primaryKeyColumns("follow")).containsExactly("follower_id", "followee_id");
+
+        // 신고 재현 — columnMappings로 각 관계를 고른다. 둘 다 첫 관계를 고치거나 PK가 줄면 안 된다
+        DocumentEditor byMapping = editor("postgresql");
+        byMapping.applySchema(null, List.of(
+                new RelationshipItem("member", "follow", "ONE_TO_MANY", true, null, null, "CASCADE", null, List.of(new ColumnMappingItem("id", "follower_id"))),
+                new RelationshipItem("member", "follow", "ONE_TO_MANY", true, null, null, null, null, List.of(new ColumnMappingItem("id", "followee_id")))), null);
+        byMapping.throwIfInvalid();
+        assertThat(relationshipColumns()).containsExactly("fk_follow_follower=follower_id", "fk_follow_followee=followee_id");
+        assertThat(primaryKeyColumns("follow")).containsExactly("follower_id", "followee_id");
+        assertThat(root.path("model").path("relationships").get(0).path("onDelete").asText()).isEqualTo("CASCADE");
+        assertThat(root.path("model").path("relationships").get(1).path("onDelete").asText()).isEqualTo("NO_ACTION");
+
+        // name으로 고른다
+        DocumentEditor byName = editor("postgresql");
+        byName.applySchema(null, List.of(new RelationshipItem("member", "follow", null, null, null, null, "CASCADE", null, null, "FK_FOLLOW_FOLLOWEE")), null);
+        byName.throwIfInvalid();
+        assertThat(root.path("model").path("relationships").get(1).path("onDelete").asText()).isEqualTo("CASCADE");
+
+        // 고를 수 없으면 오류 — 문서는 그대로
+        String before = root.toString();
+        DocumentEditor ambiguous = editor("postgresql");
+        ambiguous.applySchema(null, List.of(relationship("member", "follow")), null);
+        assertThat(fields(ambiguous)).containsExactly("relationships[0].name");
+        DocumentEditor ambiguousRemove = editor("postgresql");
+        ambiguousRemove.remove(null, null, List.of(new RelationshipRef("member", "follow")), null);
+        assertThat(fields(ambiguousRemove)).containsExactly("relationships[0].name");
+        assertThat(root.toString()).isEqualTo(before);
+
+        // 지울 때도 name으로 고른다 — 다른 관계와 그 FK 컬럼은 남는다
+        DocumentEditor remove = editor("postgresql");
+        remove.remove(null, null, List.of(new RelationshipRef("member", "follow", "fk_follow_follower")), null);
+        remove.throwIfInvalid();
+        assertThat(relationshipColumns()).containsExactly("fk_follow_followee=followee_id");
+        assertThat(columnNames("follow")).containsExactly("followee_id");
+    }
+
+    @Test
+    @DisplayName("없는 name을 주면 그 이름으로 관계를 하나 더 만든다")
+    void namedRelationshipIsCreated() {
+        seedFollow();
+        DocumentEditor editor = editor("postgresql");
+        editor.applySchema(List.of(table("blocked", List.of(column("member_id", "BIGINT"), column("target_id", "BIGINT")), List.of("member_id", "target_id"))),
+                List.of(new RelationshipItem("member", "blocked", null, true, null, null, null, null, List.of(new ColumnMappingItem("id", "member_id")), null),
+                        new RelationshipItem("member", "blocked", null, true, null, null, null, null, List.of(new ColumnMappingItem("id", "target_id")), "fk_blocked_target")),
+                null);
+        editor.throwIfInvalid();
+        assertThat(root.path("model").path("relationships")).extracting(r -> r.path("fkName").asText())
+                .containsExactly("fk_follow_follower", "fk_follow_followee", "fk_blocked_member", "fk_blocked_target");
+        assertThat(primaryKeyColumns("blocked")).containsExactly("member_id", "target_id");
+    }
+
+    @Test
+    @DisplayName("CHECK — 이름으로 지우고, 컬럼을 지우면 그 컬럼을 쓰는 CHECK도 지우고 경고한다(신고 45)")
+    void removeChecks() {
+        seed("postgresql");
+        DocumentEditor create = editor("postgresql");
+        create.applySchema(List.of(new TableItem("orders", null, null, null,
+                List.of(column("view_count", "INT"), column("like_count", "INT")), null, null, null, null,
+                List.of(new CheckItem("ck_counts", "view_count >= 0 AND like_count >= 0"),
+                        new CheckItem("ck_status", "status <> 'like_count'"),
+                        new CheckItem("ck_likes", "\"like_count\" < 1000"),
+                        new CheckItem("ck_extra", "status <> 'x'")))), null, null);
+        create.throwIfInvalid();
+
+        DocumentEditor missing = editor("postgresql");
+        missing.remove(null, null, null, null, List.of(new CheckRef("orders", "ck_nope")));
+        assertThat(fields(missing)).containsExactly("checks[0]");
+
+        DocumentEditor byName = editor("postgresql");
+        byName.remove(null, null, null, null, List.of(new CheckRef("orders", "CK_EXTRA")));
+        byName.throwIfInvalid();
+        assertThat(tableNode("orders").path("checks")).extracting(c -> c.path("name").asText()).containsExactly("ck_counts", "ck_status", "ck_likes");
+        assertThat(byName.changes()).extracting(c -> c.kind() + ":" + c.action() + ":" + c.name()).containsExactly("check:remove:ck_extra");
+
+        // 문자열 리터럴 안의 같은 글자는 참조가 아니다 — like_count를 지우면 ck_counts와 ck_likes만 지운다
+        DocumentEditor column = editor("postgresql");
+        column.remove(null, List.of(new ColumnRef("orders", "like_count")), null, null);
+        column.throwIfInvalid();
+        assertThat(tableNode("orders").path("checks")).extracting(c -> c.path("name").asText()).containsExactly("ck_status");
+        assertThat(column.warnings()).extracting(DocumentEditor.Warning::code)
+                .containsExactly("CHECK_REMOVED_WITH_COLUMN", "CHECK_REMOVED_WITH_COLUMN");
+        assertThat(column.warnings()).extracting(DocumentEditor.Warning::target).containsExactly("orders.ck_counts", "orders.ck_likes");
+    }
+
+    @Test
+    @DisplayName("특수 인덱스 — 식·부분 유니크·GIN 연산자 클래스·INCLUDE를 담고, 이름으로 고치고, 컬럼을 지우면 그 컬럼을 쓰는 인덱스를 지운다(신고 44)")
+    void specialIndexes() {
+        DocumentEditor create = editor("postgresql");
+        create.applySchema(List.of(new TableItem("member", null, null, null,
+                List.of(column("id", "BIGINT"), column("nickname", "VARCHAR"), column("purpose", "VARCHAR"),
+                        column("deleted_at", "DATETIME"), column("title", "VARCHAR")),
+                List.of("id"), null,
+                List.of(new IndexItem("uq_member_nickname", null, null, null, true, "lower(nickname)", null, null),
+                        new IndexItem("uq_member_profile", List.of(new IndexColumnItem("id", null)), null, null, true, null,
+                                "(purpose = 'PROFILE' AND deleted_at IS NULL)", List.of("title")),
+                        new IndexItem("ix_member_title_trgm", List.of(new IndexColumnItem("title", null, "gin_trgm_ops")), "GIN", null)),
+                null)), null, null);
+        create.throwIfInvalid();
+
+        JsonNode indexes = tableNode("member").path("indexes");
+        assertThat(indexes.get(0).path("expression").asText()).isEqualTo("lower(nickname)");
+        assertThat(indexes.get(0).path("columns").isEmpty()).isTrue();
+        assertThat(indexes.get(0).path("unique").asBoolean()).isTrue();
+        assertThat(indexes.get(1).path("where").asText()).isEqualTo("purpose = 'PROFILE' AND deleted_at IS NULL");
+        assertThat(indexes.get(1).path("include").size()).isEqualTo(1);
+        assertThat(indexes.get(2).path("type").asText()).isEqualTo("GIN");
+        assertThat(indexes.get(2).path("columns").get(0).path("opclass").asText()).isEqualTo("gin_trgm_ops");
+
+        // 이름으로 고른다 — 조건만 바꾸면 나머지는 그대로
+        DocumentEditor update = editor("postgresql");
+        update.applySchema(List.of(new TableItem("member", null, null, null, null, null, null,
+                List.of(new IndexItem("UQ_MEMBER_PROFILE", null, null, null, null, null, "purpose = 'AVATAR'", null)), null)), null, null);
+        update.throwIfInvalid();
+        assertThat(tableNode("member").path("indexes").get(1).path("where").asText()).isEqualTo("purpose = 'AVATAR'");
+        assertThat(tableNode("member").path("indexes").get(1).path("unique").asBoolean()).isTrue();
+        assertThat(update.changes()).extracting(c -> c.kind() + ":" + c.action()).contains("index:update").doesNotContain("index:add");
+
+        // 식과 컬럼을 함께 주면 오류
+        DocumentEditor both = editor("postgresql");
+        both.applySchema(List.of(new TableItem("member", null, null, null, null, null, null,
+                List.of(new IndexItem("ix_bad", List.of(new IndexColumnItem("id", null)), null, null, null, "lower(title)", null, null)), null)), null, null);
+        assertThat(fields(both)).containsExactly("tables[0].indexes[0].expression");
+
+        // nickname을 지우면 식이 nickname을 쓰는 uq_member_nickname이 지워진다. title을 지우면 INCLUDE에서 빠지고 GIN 인덱스는 지워진다
+        DocumentEditor remove = editor("postgresql");
+        remove.remove(null, List.of(new ColumnRef("member", "nickname"), new ColumnRef("member", "title")), null, null);
+        remove.throwIfInvalid();
+        assertThat(tableNode("member").path("indexes")).extracting(i -> i.path("name").asText()).containsExactly("uq_member_profile");
+        assertThat(tableNode("member").path("indexes").get(0).has("include")).isFalse();
+
+        // purpose를 지우면 조건이 purpose를 쓰는 인덱스도 지워진다
+        DocumentEditor removeWhere = editor("postgresql");
+        removeWhere.remove(null, List.of(new ColumnRef("member", "purpose")), null, null);
+        removeWhere.throwIfInvalid();
+        assertThat(tableNode("member").path("indexes").isEmpty()).isTrue();
     }
 
     /* ---------- 그 밖에 ---------- */

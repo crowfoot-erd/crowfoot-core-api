@@ -72,7 +72,8 @@ public final class DocumentSync {
 
     /** 컬럼 스칼라 비교 대상 — 웹 columnPatch와 같은 순서 */
     private static final List<String> COLUMN_FIELDS = List.of(
-            "dataType", "length", "precision", "scale", "nullable", "autoIncrement", "defaultValue", "generated", "onUpdate");
+            "dataType", "length", "precision", "scale", "nullable", "autoIncrement", "defaultValue", "generated", "onUpdate",
+            "identityGeneration");
 
     private DocumentSync() {
     }
@@ -371,6 +372,9 @@ public final class DocumentSync {
             column.put("nullable", dbColumn.path("nullable").asBoolean(true));
             column.set("defaultValue", normDefault(value(dbColumn, "defaultValue")).deepCopy());
             column.put("autoIncrement", dbColumn.path("autoIncrement").asBoolean(false));
+            if (dbColumn.path("identityGeneration").isTextual()) {
+                column.put("identityGeneration", dbColumn.path("identityGeneration").asText());
+            }
             column.putNull("comment");
             column.set("generated", value(dbColumn, "generated").deepCopy());
             column.set("onUpdate", value(dbColumn, "onUpdate").deepCopy());
@@ -466,7 +470,8 @@ public final class DocumentSync {
             table.set("uniques", next);
         }
 
-        /** 인덱스 — DB 인덱스를 이름으로 맞춰 추가·갱신한다. 문서에만 있는 인덱스는 지울 대상이다 */
+        /** 인덱스 — DB 인덱스를 이름으로 맞춰 추가·갱신한다. 문서에만 있는 인덱스는 지울 대상이다.
+         *  v1.37: 유니크·식 키·조건·INCLUDE·연산자 클래스도 맞춘다. 식·조건은 SchemaDiffer와 같은 정규화로 같으면 문서 원문을 지킨다 */
         private void syncIndexes(ObjectNode table, JsonNode dbTable, String tableName) {
             ArrayNode indexes = (ArrayNode) table.get("indexes");
             List<ObjectNode> own = objects(indexes);
@@ -480,23 +485,44 @@ public final class DocumentSync {
                         mappable = false;
                         break;
                     }
-                    columns.addObject().put("columnId", id).put("order", "DESC".equals(text(column, "order")) ? "DESC" : "ASC");
+                    ObjectNode columnNode = columns.addObject().put("columnId", id)
+                            .put("order", "DESC".equals(text(column, "order")) ? "DESC" : "ASC");
+                    if (column.path("opclass").isString()) {
+                        columnNode.put("opclass", text(column, "opclass"));
+                    }
                 }
-                if (!mappable || columns.isEmpty()) {
+                ArrayNode include = NODES.arrayNode();
+                for (JsonNode id : dbIndex.path("include")) {
+                    String mapped = columnIdByDbId.get(id.asString(""));
+                    if (mapped == null) {
+                        mappable = false;
+                        break;
+                    }
+                    include.add(mapped);
+                }
+                String expression = dbIndex.path("expression").isString() ? text(dbIndex, "expression") : null;
+                if (!mappable || (columns.isEmpty() && expression == null)) {
                     continue;
                 }
                 String type = dbIndex.path("type").isString() ? text(dbIndex, "type") : "BTREE";
                 JsonNode parser = value(dbIndex, "parser");
+                String where = dbIndex.path("where").isString() ? text(dbIndex, "where") : null;
+                boolean unique = dbIndex.path("unique").asBoolean(false);
                 String detail = indexColumnNames(dbTable, dbIndex);
                 ObjectNode match = matchByName(own, consumed, text(dbIndex, "name"));
                 if (match != null) {
                     consumed.add(match);
                     String currentType = match.path("type").isString() ? text(match, "type") : "BTREE";
+                    // 식·조건은 같은 뜻이면 문서 원문을 지킨다(DB는 캐스트를 붙여 다시 쓴다)
+                    String keptExpression = sameExpression(match, "expression", expression) ? textOrNull(match, "expression") : expression;
+                    String keptWhere = sameExpression(match, "where", where) ? textOrNull(match, "where") : where;
                     if (!columns.equals(match.get("columns")) || !type.equals(currentType)
-                            || !Objects.equals(parser, value(match, "parser"))) {
-                        match.set("columns", columns);
-                        match.put("type", type);
-                        match.set("parser", parser.deepCopy());
+                            || !Objects.equals(parser, value(match, "parser"))
+                            || unique != match.path("unique").asBoolean(false)
+                            || !Objects.equals(keptExpression, textOrNull(match, "expression"))
+                            || !Objects.equals(keptWhere, textOrNull(match, "where"))
+                            || !include.equals(match.path("include").isArray() ? match.get("include") : NODES.arrayNode())) {
+                        writeIndex(match, columns, type, parser, unique, keptExpression, keptWhere, include);
                         items.add(new Item("index", "update", tableName, text(match, "name"), detail));
                     }
                     continue;
@@ -506,9 +532,7 @@ public final class DocumentSync {
                 ObjectNode index = indexes.addObject();
                 index.put("id", UUID.randomUUID().toString());
                 index.put("name", name);
-                index.set("columns", columns);
-                index.put("type", type);
-                index.set("parser", parser.deepCopy());
+                writeIndex(index, columns, type, parser, unique, expression, where, include);
                 items.add(new Item("index", "add", tableName, name, detail));
             }
             for (ObjectNode index : own) {
@@ -518,6 +542,34 @@ public final class DocumentSync {
                         removeIdentical(indexes, index);
                     }
                 }
+            }
+        }
+
+        /** 인덱스 속성 쓰기 — v1.37 속성은 값이 있을 때만 둔다(없는 인덱스는 이전과 같은 모양) */
+        private void writeIndex(ObjectNode index, ArrayNode columns, String type, JsonNode parser, boolean unique,
+                                String expression, String where, ArrayNode include) {
+            index.set("columns", columns);
+            index.put("type", type);
+            index.set("parser", parser.deepCopy());
+            if (unique) {
+                index.put("unique", true);
+            } else {
+                index.remove("unique");
+            }
+            if (expression != null) {
+                index.put("expression", expression);
+            } else {
+                index.remove("expression");
+            }
+            if (where != null) {
+                index.put("where", where);
+            } else {
+                index.remove("where");
+            }
+            if (include.isEmpty()) {
+                index.remove("include");
+            } else {
+                index.set("include", include);
             }
         }
 
@@ -709,8 +761,14 @@ public final class DocumentSync {
                 // PK·UK는 DB 값으로 이미 바뀌었다. 인덱스는 DB 인덱스(DB 컬럼만 참조)와 지운 문서 전용 인덱스뿐이다 — 방어로 참조를 거른다
                 for (JsonNode index : table.get("indexes")) {
                     removeWhere((ArrayNode) index.get("columns"), column -> removed[1].equals(text(column, "columnId")));
+                    if (index.path("include").isArray()) {
+                        removeWhere((ArrayNode) index.get("include"), id -> removed[1].equals(id.asString("")));
+                        if (index.path("include").isEmpty()) {
+                            ((ObjectNode) index).remove("include");
+                        }
+                    }
                 }
-                removeWhere((ArrayNode) table.get("indexes"), index -> index.path("columns").isEmpty());
+                removeWhere((ArrayNode) table.get("indexes"), index -> index.path("columns").isEmpty() && !index.hasNonNull("expression"));
                 goneTargets.add("column:" + removed[0] + ":" + removed[1]);
                 changedTables.add(removed[0]);
             }
@@ -875,6 +933,16 @@ public final class DocumentSync {
         return !logicalName.isEmpty() && !logicalName.equals(text(node, "physicalName"));
     }
 
+    /** 인덱스 식·조건이 같은 뜻인지 — SchemaDiffer.expressionKey로 비교한다(캐스트·괄호·공백·대소문자 무시) */
+    private static boolean sameExpression(JsonNode node, String field, String dbValue) {
+        return Objects.equals(net.java21.crowfoot.api.model.ddl.SchemaDiffer.expressionKey(textOrNull(node, field)),
+                net.java21.crowfoot.api.model.ddl.SchemaDiffer.expressionKey(dbValue));
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        return node.path(field).isString() ? node.path(field).asString() : null;
+    }
+
     /** CHECK 식 비교 키 — SchemaDiffer.expressionKey와 같은 정규화(괄호·백틱·큰따옴표·공백·대소문자 무시) */
     private static String expressionKey(String expression) {
         if (expression == null || expression.isBlank()) {
@@ -930,7 +998,10 @@ public final class DocumentSync {
             names.add("DESC".equals(text(column, "order")) ? name + " DESC" : name);
         }
         String type = dbIndex.path("type").isString() ? text(dbIndex, "type") : "BTREE";
-        return "BTREE".equals(type) ? String.join(", ", names) : type + " " + String.join(", ", names);
+        String keys = dbIndex.path("expression").isString() ? text(dbIndex, "expression") : String.join(", ", names);
+        String where = dbIndex.path("where").isString() ? " WHERE " + text(dbIndex, "where") : "";
+        String unique = dbIndex.path("unique").asBoolean(false) ? "UNIQUE " : "";
+        return unique + ("BTREE".equals(type) ? keys : type + " " + keys) + where;
     }
 
     private static String dbColumnName(JsonNode dbTable, String columnId) {

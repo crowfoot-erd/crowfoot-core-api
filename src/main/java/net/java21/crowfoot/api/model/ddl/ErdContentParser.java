@@ -62,7 +62,8 @@ public final class ErdContentParser {
                 node.path("autoIncrement").asBoolean(false),
                 text(node, "logicalName"),
                 generated(node.path("generated")),
-                text(node, "onUpdate"));
+                text(node, "onUpdate"),
+                "ALWAYS".equals(text(node, "identityGeneration")));
     }
 
     /** 생성 컬럼 — 식이 있어야 의미가 있다 */
@@ -97,18 +98,29 @@ public final class ErdContentParser {
 
     private static DdlContent.Index index(JsonNode node) {
         String name = text(node, "name");
-        List<DdlContent.IndexColumn> columns = items(node.path("columns"), column -> {
+        String expression = text(node, "expression");
+        List<DdlContent.IndexColumn> columns = expression != null ? List.of() : items(node.path("columns"), column -> {
             String columnId = text(column, "columnId");
             return columnId == null ? null
-                    : new DdlContent.IndexColumn(columnId, column.path("order").asText("ASC"));
+                    : new DdlContent.IndexColumn(columnId, column.path("order").asText("ASC"), text(column, "opclass"));
         });
-        if (name == null || columns.isEmpty()) {
+        if (name == null || (columns.isEmpty() && expression == null)) {
             return null;
         }
         String type = text(node, "type");
+        List<String> include = new ArrayList<>();
+        node.path("include").forEach(id -> {
+            if (id.isTextual() && !id.asText().isBlank()) {
+                include.add(id.asText());
+            }
+        });
         return new DdlContent.Index(name, columns,
                 type == null ? DdlContent.Index.BTREE : type.toUpperCase(java.util.Locale.ROOT),
-                text(node, "parser"));
+                text(node, "parser"),
+                node.path("unique").asBoolean(false),
+                expression,
+                text(node, "where"),
+                include);
     }
 
     private static List<DdlContent.Relationship> relationships(JsonNode array) {

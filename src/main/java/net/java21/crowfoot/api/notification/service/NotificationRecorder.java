@@ -7,6 +7,8 @@ import net.java21.crowfoot.api.model.domain.ModelComment;
 import net.java21.crowfoot.api.notification.domain.Notification;
 import net.java21.crowfoot.api.notification.repository.NotificationRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 알림 발행 파사드 (08-core/11-notification.md Section 3) — 피드백 이벤트를 수신자별 알림으로 남긴다.
@@ -64,6 +66,11 @@ public class NotificationRecorder {
      *  자기 글에 단 자기 댓글은 알리지 않는다. 제목은 이벤트 시점 스냅샷(200자) */
     public void notifyCommunityCommentCreated(long postId, Long postAuthorId, String postTitle, long commenterId,
                                               long commentId) {
+        afterCommit(() -> writeCommunityCommentCreated(postId, postAuthorId, postTitle, commenterId, commentId));
+    }
+
+    private void writeCommunityCommentCreated(long postId, Long postAuthorId, String postTitle, long commenterId,
+                                              long commentId) {
         try {
             if (postAuthorId == null || postAuthorId == commenterId) {
                 return;
@@ -80,6 +87,10 @@ public class NotificationRecorder {
     /** "제안 및 신고" 새 글(FEEDBACK_POST_CREATED, Section 2.2) — 수신자 = 탈퇴하지 않은 관리자 전원.
      *  작성자가 관리자면 본인은 빼고 보낸다. 수신자마다 한 행(각자 읽음 처리) */
     public void notifyFeedbackPostCreated(long postId, String postTitle, long authorId) {
+        afterCommit(() -> writeFeedbackPostCreated(postId, postTitle, authorId));
+    }
+
+    private void writeFeedbackPostCreated(long postId, String postTitle, long authorId) {
         try {
             String title = postTitle == null ? "" : postTitle.length() > 200 ? postTitle.substring(0, 200) : postTitle;
             for (Long adminId : userRepository.findActiveAdminIds()) {
@@ -108,5 +119,24 @@ public class NotificationRecorder {
             log.warn("알림 발행 실패(type=OWNER_REPLIED, model={}) — 본류에는 영향 없음: {}",
                     model.getId(), ex.getMessage());
         }
+    }
+
+    /**
+     * 본류 트랜잭션이 커밋된 뒤에 기록한다 — 커뮤니티 알림은 같은 트랜잭션에서 방금 만든 게시글·댓글을 외래 키로
+     * 가리킨다(fk_notifications_post_id·comment_id). 알림은 별도 트랜잭션(REQUIRES_NEW)이라 커밋 전에는 그 행이
+     * 보이지 않아 외래 키 위반으로 실패했고, best-effort라 경고 로그만 남은 채 관리자 알림이 오지 않았다(v1.37 사용자 보고).
+     * 본류가 롤백되면 알림도 남기지 않는다. 트랜잭션 밖에서 부르면 바로 기록한다
+     */
+    private static void afterCommit(Runnable write) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            write.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                write.run();
+            }
+        });
     }
 }

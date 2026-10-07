@@ -117,7 +117,7 @@ public class PostgresIntrospector implements SchemaIntrospector {
         String columnSql = """
                 SELECT table_name, column_name, udt_name, character_maximum_length,
                        numeric_precision, numeric_scale, is_nullable, column_default, is_identity,
-                       datetime_precision, is_generated, generation_expression
+                       datetime_precision, is_generated, generation_expression, identity_generation
                 FROM information_schema.columns
                 WHERE table_schema = ?
                 ORDER BY table_name, ordinal_position
@@ -155,7 +155,8 @@ public class PostgresIntrospector implements SchemaIntrospector {
                             null,
                             generated ? stripOuterParens(rs.getString(12)) : null,
                             true, // PostgreSQL 생성 컬럼은 STORED만 있다
-                            null));
+                            null,
+                            "ALWAYS".equals(rs.getString(13))));
                 }
             }
         }
@@ -305,62 +306,112 @@ public class PostgresIntrospector implements SchemaIntrospector {
         }
     }
 
-    /** 일반 인덱스 — 제약이 만든 인덱스(PK·UK)·식 인덱스·btree 외 방식은 뺀다. 제약 없는 유니크 인덱스는 유니크 키로.
-     *  indoption 비트 1이 DESC다 */
+    /** 인덱스 접근 방법 → 문서의 인덱스 종류. 여기 없는 방법(bloom 등)의 인덱스는 읽지 않는다 */
+    private static final Map<String, String> INDEX_METHODS = Map.of(
+            "btree", "BTREE", "hash", "HASH", "gin", "GIN", "gist", "GIST", "brin", "BRIN", "spgist", "SPGIST");
+
+    /** 함수 호출 꼴 — 인덱스 키에서 괄호 없이 쓸 수 있는 식 */
+    private static final Pattern FUNCTION_CALL =
+            Pattern.compile("^[A-Za-z_][A-Za-z0-9_.]*\\(.*\\)$", Pattern.DOTALL);
+
+    /**
+     * 일반 인덱스 — 제약이 만든 인덱스(PK·UK)는 뺀다. 컬럼만으로 된 제약 없는 btree 유니크 인덱스는 유니크 키로 읽는다.
+     * v1.37(신고 44): 접근 방법(GIN 등)·식 키·부분 조건(WHERE)·INCLUDE·기본이 아닌 연산자 클래스를 읽는다. indoption 비트 1이 DESC다
+     */
     private static void readIndexes(Connection connection, String schema, Map<String, TableBuilder> builders)
             throws SQLException {
         String sql = """
-                SELECT t.relname, i.relname, a.attname, (ix.indoption[k.ord - 1] & 1) AS descending, ix.indisunique
+                SELECT t.relname, i.relname, am.amname, ix.indisunique, ix.indnkeyatts,
+                       pg_get_expr(ix.indpred, ix.indrelid), k.ord, a.attname, (ix.indoption[k.ord - 1] & 1),
+                       CASE WHEN k.ord <= ix.indnkeyatts AND NOT oc.opcdefault THEN oc.opcname END,
+                       pg_get_indexdef(ix.indexrelid, k.ord::int, true)
                 FROM pg_index ix
                 JOIN pg_class t ON t.oid = ix.indrelid
                 JOIN pg_class i ON i.oid = ix.indexrelid
                 JOIN pg_namespace n ON n.oid = t.relnamespace
                 JOIN pg_am am ON am.oid = i.relam
                 JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON true
-                LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-                WHERE n.nspname = ? AND NOT ix.indisprimary AND am.amname = 'btree'
+                LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum <> 0
+                LEFT JOIN pg_opclass oc ON oc.oid = ix.indclass[k.ord - 1]
+                WHERE n.nspname = ? AND NOT ix.indisprimary
                   AND NOT EXISTS (SELECT 1 FROM pg_constraint con WHERE con.conindid = ix.indexrelid)
                 ORDER BY t.relname, i.relname, k.ord
                 """;
-        Map<String, List<IntrospectedSchema.IndexColumn>> columnsByIndex = new LinkedHashMap<>();
-        Map<String, String> tableByIndex = new java.util.HashMap<>();
-        java.util.Set<String> uniqueIndexes = new java.util.HashSet<>();
-        java.util.Set<String> expressionIndexes = new java.util.HashSet<>();
+        Map<String, IndexRows> byIndex = new LinkedHashMap<>();
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, schema);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String table = rs.getString(1);
-                    String index = rs.getString(2);
-                    if (!builders.containsKey(table)) {
+                    String type = INDEX_METHODS.get(rs.getString(3));
+                    if (!builders.containsKey(table) || type == null) {
                         continue;
                     }
-                    tableByIndex.put(index, table);
-                    if (rs.getBoolean(5)) {
-                        uniqueIndexes.add(index); // 제약 없는 유니크 인덱스(CREATE UNIQUE INDEX) — 유니크 키로 읽는다
+                    boolean unique = rs.getBoolean(4);
+                    int keyCount = rs.getInt(5);
+                    String where = stripOuterParens(rs.getString(6));
+                    IndexRows rows = byIndex.computeIfAbsent(rs.getString(2),
+                            name -> new IndexRows(table, type, unique, keyCount, where));
+                    boolean key = rs.getInt(7) <= rows.keyCount;
+                    String column = rs.getString(8);
+                    if (!key) {
+                        if (column != null) {
+                            rows.include.add(column);
+                        }
+                        continue;
                     }
-                    List<IntrospectedSchema.IndexColumn> columns = columnsByIndex.computeIfAbsent(index, k -> new ArrayList<>());
-                    String column = rs.getString(3);
+                    String order = rs.getInt(9) == 1 ? "DESC" : "ASC";
+                    String opclass = rs.getString(10);
                     if (column == null) {
-                        expressionIndexes.add(index); // attnum 0 — 식 인덱스
-                        continue;
+                        rows.expression = true; // attnum 0 — 식 키
+                        String definition = rs.getString(11);
+                        String part = definition == null ? "" : FUNCTION_CALL.matcher(definition.trim()).matches()
+                                ? definition.trim() : "(" + definition.trim() + ")";
+                        rows.parts.add(part + (opclass == null ? "" : " " + opclass) + ("DESC".equals(order) ? " DESC" : ""));
+                    } else {
+                        rows.columns.add(new IntrospectedSchema.IndexColumn(column, order, opclass));
+                        rows.parts.add(column + (opclass == null ? "" : " " + opclass) + ("DESC".equals(order) ? " DESC" : ""));
                     }
-                    columns.add(new IntrospectedSchema.IndexColumn(column, rs.getInt(4) == 1 ? "DESC" : "ASC"));
                 }
             }
         }
-        for (Map.Entry<String, List<IntrospectedSchema.IndexColumn>> entry : columnsByIndex.entrySet()) {
-            if (expressionIndexes.contains(entry.getKey()) || entry.getValue().isEmpty()) {
-                continue;
-            }
-            TableBuilder builder = builders.get(tableByIndex.get(entry.getKey()));
-            if (uniqueIndexes.contains(entry.getKey())) {
+        for (Map.Entry<String, IndexRows> entry : byIndex.entrySet()) {
+            IndexRows rows = entry.getValue();
+            TableBuilder builder = builders.get(rows.table);
+            boolean plain = !rows.expression && rows.where == null && rows.include.isEmpty() && "BTREE".equals(rows.type)
+                    && rows.columns.stream().allMatch(column -> column.opclass() == null);
+            if (rows.unique && plain && !rows.columns.isEmpty()) {
                 builder.uniques.add(new IntrospectedSchema.IntrospectedUnique(entry.getKey(),
-                        entry.getValue().stream().map(IntrospectedSchema.IndexColumn::name).toList()));
+                        rows.columns.stream().map(IntrospectedSchema.IndexColumn::name).toList()));
                 continue;
             }
-            builder.indexes.add(new IntrospectedSchema.IntrospectedIndex(
-                    entry.getKey(), List.copyOf(entry.getValue()), "BTREE", null));
+            if (!rows.expression && rows.columns.isEmpty()) {
+                continue;
+            }
+            builder.indexes.add(new IntrospectedSchema.IntrospectedIndex(entry.getKey(),
+                    rows.expression ? List.of() : List.copyOf(rows.columns), rows.type, null, rows.unique,
+                    rows.expression ? String.join(", ", rows.parts) : null, rows.where, List.copyOf(rows.include)));
+        }
+    }
+
+    /** 인덱스 하나의 행 모음 — 키 조각(컬럼·식)과 INCLUDE 컬럼 */
+    private static final class IndexRows {
+        private final String table;
+        private final String type;
+        private final boolean unique;
+        private final int keyCount;
+        private final String where;
+        private final List<IntrospectedSchema.IndexColumn> columns = new ArrayList<>();
+        private final List<String> parts = new ArrayList<>();
+        private final List<String> include = new ArrayList<>();
+        private boolean expression;
+
+        private IndexRows(String table, String type, boolean unique, int keyCount, String where) {
+            this.table = table;
+            this.type = type;
+            this.unique = unique;
+            this.keyCount = keyCount;
+            this.where = where;
         }
     }
 
@@ -474,7 +525,7 @@ public class PostgresIntrospector implements SchemaIntrospector {
                     columns.set(i, new IntrospectedSchema.IntrospectedColumn(
                             column.name(), column.typeName(), column.length(), column.precision(), column.scale(),
                             column.nullable(), column.defaultValue(), column.autoIncrement(), comment,
-                            column.generatedExpression(), column.generatedStored(), column.onUpdate()));
+                            column.generatedExpression(), column.generatedStored(), column.onUpdate(), column.identityAlways()));
                     return;
                 }
             }

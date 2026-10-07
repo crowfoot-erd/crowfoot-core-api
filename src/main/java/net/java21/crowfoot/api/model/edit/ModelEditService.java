@@ -112,7 +112,7 @@ public class ModelEditService {
     @Transactional
     public EditResult remove(long userId, long workspaceId, long modelId, EditRequests.SchemaRemove request) {
         return edit(userId, workspaceId, modelId, request.baseVersion(), request.note(), "MODEL_SCHEMA_REMOVED",
-                editor -> editor.remove(request.tables(), request.columns(), request.relationships(), request.requirements()));
+                editor -> editor.remove(request.tables(), request.columns(), request.relationships(), request.requirements(), request.checks()));
     }
 
     /** 요구사항 동기화 계획 응답 (Section 3.5) */

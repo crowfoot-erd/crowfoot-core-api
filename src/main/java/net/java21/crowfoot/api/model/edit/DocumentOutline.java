@@ -186,6 +186,9 @@ public final class DocumentOutline {
                 item.put("nullable", column.path("nullable").asBoolean(true));
                 item.put("defaultValue", column.path("defaultValue").isTextual() ? column.path("defaultValue").asText() : null);
                 item.put("autoIncrement", column.path("autoIncrement").asBoolean(false));
+                if (column.path("autoIncrement").asBoolean(false) && "ALWAYS".equals(column.path("identityGeneration").asText(""))) {
+                    item.put("identityGeneration", "ALWAYS"); // 없으면 BY DEFAULT(v1.37)
+                }
                 if (column.path("generated").isObject()) {
                     Map<String, Object> generated = new LinkedHashMap<>();
                     generated.put("expression", column.path("generated").path("expression").asText(""));
@@ -214,6 +217,9 @@ public final class DocumentOutline {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("name", names.get(column.path("columnId").asText()));
                     item.put("order", column.path("order").asText("ASC"));
+                    if (column.path("opclass").isTextual()) {
+                        item.put("opclass", column.path("opclass").asText());
+                    }
                     indexColumns.add(item);
                 }
                 Map<String, Object> item = new LinkedHashMap<>();
@@ -221,6 +227,19 @@ public final class DocumentOutline {
                 item.put("columns", indexColumns);
                 item.put("type", index.path("type").asText("BTREE"));
                 item.put("parser", index.path("parser").isTextual() ? index.path("parser").asText() : null);
+                // v1.37 속성 — 있을 때만 보인다
+                if (index.path("unique").asBoolean(false)) {
+                    item.put("unique", true);
+                }
+                if (index.path("expression").isTextual()) {
+                    item.put("expression", index.path("expression").asText());
+                }
+                if (index.path("where").isTextual()) {
+                    item.put("where", index.path("where").asText());
+                }
+                if (index.path("include").isArray() && !index.path("include").isEmpty()) {
+                    item.put("include", names(index.path("include"), names));
+                }
                 indexes.add(item);
             }
             List<Map<String, Object>> checks = new ArrayList<>();
