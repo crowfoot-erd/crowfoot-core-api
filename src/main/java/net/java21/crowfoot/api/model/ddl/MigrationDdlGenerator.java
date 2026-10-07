@@ -4,8 +4,11 @@ import net.java21.crowfoot.common.i18n.ServerMessages;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 마이그레이션 DDL(SQL) 생성 (05-editor/04-dbms-engineering.md §3.3) — 버전 A→B·문서↔실제 DB 비교.
@@ -15,7 +18,7 @@ import java.util.Map;
  * 블록</b>(경고 배너 — FK drop → 제약 drop → 컬럼 drop → 인덱스 drop → 테이블 drop).
  * 파괴 연산을 뒤로 미루면 되돌릴 수 없는 변경이 스크립트 말미에 모여 검토 지점이 한 곳이 된다.
  *
- * <p>같은 이름의 제약·FK 재구성은 drop이 add보다 먼저 와야 한다(ADD가 기존 이름에 충돌) —
+ * <p>같은 이름의 제약·인덱스 재구성은 drop이 add보다 먼저 와야 한다(ADD·CREATE가 기존 이름에 충돌) —
  * 이 쌍만 예외로 drop을 add 바로 앞에 붙인다. 결과는 문장 리스트를 그대로 노출해서
  * 실행(§1.15)이 화면 검토와 같은 순서로 반영하게 하고, 경고(DESTRUCTIVE·NOT_INTROSPECTED)로
  * 리스크를 선표시한다.
@@ -82,6 +85,7 @@ public final class MigrationDdlGenerator {
 
         Map<String, DdlContent.Table> fromTables = tablesById(from);
         Map<String, DdlContent.Table> toTables = tablesById(to);
+        Map<String, DdlContent.Index> rebuiltIndexes = rebuiltIndexes(diff.changes());
 
         for (SchemaDiffer.Change change : diff.changes()) {
             switch (change) {
@@ -113,6 +117,11 @@ public final class MigrationDdlGenerator {
                 }
                 case SchemaDiffer.IndexAdded added -> {
                     String statement = dialect.createIndex(added.table(), added.index());
+                    DdlContent.Index before = rebuiltIndexes.get(indexKey(added.table(), added.index()));
+                    if (before != null && dialect.createIndex(added.table(), before) != null) {
+                        // 같은 이름 재구성 — 새 정의를 만들 수 없으면 기존 인덱스 삭제는 파괴 블록으로 보낸다
+                        (statement != null ? createsAdds : indexDrops).add(dialect.dropIndex(added.table(), before));
+                    }
                     if (statement != null) {
                         createsAdds.add(statement + ";");
                     }
@@ -139,8 +148,10 @@ public final class MigrationDdlGenerator {
                 case SchemaDiffer.ColumnDropped dropped -> columnDrops.add(
                         dialect.dropColumn(dropped.table(), dropped.column()));
                 case SchemaDiffer.IndexDropped dropped -> {
-                    // 이 방언이 만들지 못하는 종류는 DB에도 없다 — 삭제 문장도 내지 않는다
-                    if (dialect.createIndex(dropped.table(), dropped.index()) != null) {
+                    // 이 방언이 만들지 못하는 종류는 DB에도 없다 — 삭제 문장도 내지 않는다.
+                    // 같은 이름 재구성은 IndexAdded에서 CREATE 바로 앞에 낸다
+                    if (!rebuiltIndexes.containsKey(indexKey(dropped.table(), dropped.index()))
+                            && dialect.createIndex(dropped.table(), dropped.index()) != null) {
                         indexDrops.add(dialect.dropIndex(dropped.table(), dropped.index()));
                     }
                 }
@@ -265,6 +276,27 @@ public final class MigrationDdlGenerator {
     }
 
     /* ---------- 공용 헬퍼 ---------- */
+
+    /** 같은 테이블·같은 이름으로 drop과 add가 함께 나온 인덱스(정의 변경) — 키 → 기존 정의 */
+    private static Map<String, DdlContent.Index> rebuiltIndexes(List<SchemaDiffer.Change> changes) {
+        Set<String> added = new HashSet<>();
+        for (SchemaDiffer.Change change : changes) {
+            if (change instanceof SchemaDiffer.IndexAdded a) {
+                added.add(indexKey(a.table(), a.index()));
+            }
+        }
+        Map<String, DdlContent.Index> rebuilt = new HashMap<>();
+        for (SchemaDiffer.Change change : changes) {
+            if (change instanceof SchemaDiffer.IndexDropped d && added.contains(indexKey(d.table(), d.index()))) {
+                rebuilt.putIfAbsent(indexKey(d.table(), d.index()), d.index());
+            }
+        }
+        return rebuilt;
+    }
+
+    private static String indexKey(DdlContent.Table table, DdlContent.Index index) {
+        return (table.physicalName() + "." + index.name()).trim().toLowerCase(Locale.ROOT);
+    }
 
     private static Map<String, DdlContent.Table> tablesById(DdlContent content) {
         Map<String, DdlContent.Table> byId = new HashMap<>();

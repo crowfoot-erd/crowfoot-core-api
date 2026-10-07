@@ -129,11 +129,12 @@ public final class EditRequests {
     }
 
     public record SchemaRemove(Long baseVersion, String note, List<String> tables, List<ColumnRef> columns,
-                               List<RelationshipRef> relationships, List<String> requirements, List<CheckRef> checks) {
+                               List<RelationshipRef> relationships, List<String> requirements, List<CheckRef> checks,
+                               List<IndexRef> indexes) {
 
         public SchemaRemove(Long baseVersion, String note, List<String> tables, List<ColumnRef> columns,
                             List<RelationshipRef> relationships, List<String> requirements) {
-            this(baseVersion, note, tables, columns, relationships, requirements, null);
+            this(baseVersion, note, tables, columns, relationships, requirements, null, null);
         }
     }
 
@@ -150,6 +151,10 @@ public final class EditRequests {
 
     /** 지울 CHECK 제약 — 테이블 물리명과 제약 이름 */
     public record CheckRef(String table, String name) {
+    }
+
+    /** 지울 인덱스 — 테이블 물리명과 인덱스 이름(신고 47) */
+    public record IndexRef(String table, String name) {
     }
 
     /** 워크스페이스 도메인 타입 — 컬럼 입력의 domainType 이름으로 찾는다 */

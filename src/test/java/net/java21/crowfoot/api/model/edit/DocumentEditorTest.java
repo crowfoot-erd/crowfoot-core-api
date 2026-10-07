@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import net.java21.crowfoot.api.model.edit.EditRequests.AreaItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckRef;
+import net.java21.crowfoot.api.model.edit.EditRequests.IndexRef;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnMappingItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnRef;
@@ -626,6 +627,31 @@ class DocumentEditorTest {
         assertThat(column.warnings()).extracting(DocumentEditor.Warning::code)
                 .containsExactly("CHECK_REMOVED_WITH_COLUMN", "CHECK_REMOVED_WITH_COLUMN");
         assertThat(column.warnings()).extracting(DocumentEditor.Warning::target).containsExactly("orders.ck_counts", "orders.ck_likes");
+    }
+
+    @Test
+    @DisplayName("인덱스 — 테이블과 이름으로 지운다(대소문자 무시). 없는 이름이면 아무것도 지우지 않는다(신고 47)")
+    void removeIndexes() {
+        seed("mysql");
+        DocumentEditor create = editor("mysql");
+        create.applySchema(List.of(new TableItem("posts", null, null, null,
+                List.of(column("id", "BIGINT"), column("topic_id", "BIGINT")), List.of("id"), null,
+                List.of(new IndexItem("idx_posts_topic", List.of(new IndexColumnItem("topic_id", null))),
+                        new IndexItem("idx_posts_topic_id", List.of(new IndexColumnItem("topic_id", null), new IndexColumnItem("id", "DESC")))),
+                null, null)), null, null);
+        create.throwIfInvalid();
+
+        DocumentEditor missing = editor("mysql");
+        missing.remove(null, null, null, null, null, List.of(new IndexRef("posts", "idx_posts_topic"), new IndexRef("posts", "idx_nope")));
+        assertThat(fields(missing)).containsExactly("indexes[1]");
+        assertThat(tableNode("posts").path("indexes")).hasSize(2);
+
+        DocumentEditor byName = editor("mysql");
+        byName.remove(null, null, null, null, null, List.of(new IndexRef("posts", "IDX_POSTS_TOPIC")));
+        byName.throwIfInvalid();
+        assertThat(tableNode("posts").path("indexes")).extracting(i -> i.path("name").asText()).containsExactly("idx_posts_topic_id");
+        assertThat(byName.changes()).extracting(c -> c.kind() + ":" + c.action() + ":" + c.table() + "." + c.name())
+                .containsExactly("index:remove:posts.idx_posts_topic");
     }
 
     @Test

@@ -108,11 +108,12 @@ public class ModelEditService {
                 editor -> editor.applySchema(request.tables(), request.relationships(), request.areas()));
     }
 
-    /** 삭제(Editor 이상) — 테이블·컬럼·관계·요구사항 (Section 3.4) */
+    /** 삭제(Editor 이상) — 테이블·컬럼·관계·CHECK·인덱스·요구사항 (Section 3.4) */
     @Transactional
     public EditResult remove(long userId, long workspaceId, long modelId, EditRequests.SchemaRemove request) {
         return edit(userId, workspaceId, modelId, request.baseVersion(), request.note(), "MODEL_SCHEMA_REMOVED",
-                editor -> editor.remove(request.tables(), request.columns(), request.relationships(), request.requirements(), request.checks()));
+                editor -> editor.remove(request.tables(), request.columns(), request.relationships(), request.requirements(), request.checks(),
+                        request.indexes()));
     }
 
     /** 요구사항 동기화 계획 응답 (Section 3.5) */

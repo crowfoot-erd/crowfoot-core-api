@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 import net.java21.crowfoot.api.model.edit.EditRequests.AreaItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckRef;
+import net.java21.crowfoot.api.model.edit.EditRequests.IndexRef;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnMappingItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.ColumnRef;
@@ -1906,8 +1907,14 @@ public final class DocumentEditor {
 
     public void remove(List<String> tableNames, List<ColumnRef> columnRefs, List<RelationshipRef> relationshipRefs, List<String> requirementCodes,
                        List<CheckRef> checkRefs) {
-        if (isEmpty(tableNames) && isEmpty(columnRefs) && isEmpty(relationshipRefs) && isEmpty(requirementCodes) && isEmpty(checkRefs)) {
-            error("tables", "tables, columns, relationships, checks, requirements 가운데 하나는 있어야 합니다");
+        remove(tableNames, columnRefs, relationshipRefs, requirementCodes, checkRefs, null);
+    }
+
+    public void remove(List<String> tableNames, List<ColumnRef> columnRefs, List<RelationshipRef> relationshipRefs, List<String> requirementCodes,
+                       List<CheckRef> checkRefs, List<IndexRef> indexRefs) {
+        if (isEmpty(tableNames) && isEmpty(columnRefs) && isEmpty(relationshipRefs) && isEmpty(requirementCodes) && isEmpty(checkRefs)
+                && isEmpty(indexRefs)) {
+            error("tables", "tables, columns, relationships, checks, indexes, requirements 가운데 하나는 있어야 합니다");
             return;
         }
         // 대상을 먼저 다 찾는다 — 하나라도 없으면 아무것도 지우지 않는다
@@ -1978,6 +1985,26 @@ public final class DocumentEditor {
                 }
             }
         }
+        List<String[]> indexIds = new ArrayList<>();
+        if (indexRefs != null) {
+            for (int i = 0; i < indexRefs.size(); i++) {
+                IndexRef ref = indexRefs.get(i);
+                ObjectNode table = ref == null || ref.table() == null ? null : table(ref.table());
+                JsonNode index = null;
+                if (table != null && ref.name() != null) {
+                    for (JsonNode candidate : table.path("indexes")) {
+                        if (ref.name().trim().equalsIgnoreCase(candidate.path("name").asText(""))) {
+                            index = candidate;
+                        }
+                    }
+                }
+                if (index == null) {
+                    error("indexes[" + i + "]", "인덱스가 없습니다: " + (ref == null ? null : ref.table() + "." + ref.name()));
+                } else {
+                    indexIds.add(new String[] {table.path("id").asText(), index.path("id").asText()});
+                }
+            }
+        }
         if (requirementCodes != null) {
             for (int i = 0; i < requirementCodes.size(); i++) {
                 if (requirementCodes.get(i) == null || requirement(requirementCodes.get(i)) == null) {
@@ -2005,6 +2032,18 @@ public final class DocumentEditor {
                 String name = check.path("name").asText();
                 removeMatching((ArrayNode) table.get("checks"), node -> ref[1].equals(node.path("id").asText()));
                 changes.add(new Change("check", "remove", table.path("physicalName").asText(), name));
+            }
+        }
+        for (String[] ref : indexIds) {
+            ObjectNode table = (ObjectNode) tableById(ref[0]);
+            ArrayNode indexes = (ArrayNode) table.get("indexes");
+            for (JsonNode index : indexes) {
+                if (ref[1].equals(index.path("id").asText())) {
+                    String name = index.path("name").asText();
+                    removeMatching(indexes, node -> ref[1].equals(node.path("id").asText()));
+                    changes.add(new Change("index", "remove", table.path("physicalName").asText(), name));
+                    break;
+                }
             }
         }
         for (String[] ref : columnIds) {

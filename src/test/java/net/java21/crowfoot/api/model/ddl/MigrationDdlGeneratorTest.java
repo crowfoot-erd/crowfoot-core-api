@@ -233,6 +233,30 @@ class MigrationDdlGeneratorTest {
         assertThat(sql.indexOf("-- ⚠")).isNegative(); // 파괴 블록 없음 — 인라인 drop이 전부다
     }
 
+    @Test
+    @DisplayName("같은 이름의 인덱스 컬럼 변경 — DROP INDEX가 CREATE INDEX 바로 앞에 붙고 기본 실행에 들어간다")
+    void sameNameIndexRebuildIsAdjacent() {
+        DdlContent.Table from = new DdlContent.Table("t1", "posts", null,
+                List.of(col("c1", "id", "BIGINT", null, false, null, null),
+                        col("c2", "topic_id", "BIGINT", null, false, null, null)),
+                null, List.of(), List.of(new DdlContent.Index("idx_posts_topic", List.of(
+                        new DdlContent.IndexColumn("c2", "ASC")))));
+        DdlContent.Table to = new DdlContent.Table("t1", "posts", null,
+                List.of(col("x1", "id", "BIGINT", null, false, null, null),
+                        col("x2", "topic_id", "BIGINT", null, false, null, null)),
+                null, List.of(), List.of(new DdlContent.Index("idx_posts_topic", List.of(
+                        new DdlContent.IndexColumn("x2", "ASC"), new DdlContent.IndexColumn("x1", "DESC")))));
+
+        MigrationDdlGenerator.Result result = generate(single(from), single(to), "mysql");
+
+        assertThat(result.statements()).containsExactly(
+                "DROP INDEX idx_posts_topic ON posts;",
+                "CREATE INDEX idx_posts_topic ON posts (topic_id ASC, id DESC);");
+        assertThat(result.destructive()).isEmpty();
+        assertThat(result.safeStatements()).hasSize(2);
+        assertThat(hasWarning(result, DdlGenerator.Warning.DESTRUCTIVE)).isFalse();
+    }
+
     /* ---------- 경고·빈 차이 ---------- */
 
     @Test
