@@ -257,7 +257,7 @@ public class ShareService {
      * 링크 기간 판정 — 시작일 null은 즉시, 종료일 null은 무제한. 피드백 경로(1.10.6·1.10.7)가
      * 같은 판정(404/410)으로 재사용한다.
      */
-    static boolean isActive(ModelShare share, Instant now) {
+    public static boolean isActive(ModelShare share, Instant now) {
         return (share.getStartsAt() == null || !now.isBefore(share.getStartsAt()))
                 && (share.getEndsAt() == null || !now.isAfter(share.getEndsAt()));
     }

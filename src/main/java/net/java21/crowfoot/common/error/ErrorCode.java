@@ -73,6 +73,11 @@ public enum ErrorCode {
     SHARE_INACTIVE(HttpStatus.GONE, "SHARE_INACTIVE", "공유 기간이 아니거나 만료되었습니다"),
     MODEL_COMMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "MODEL_COMMENT_NOT_FOUND", "문서 댓글을 찾을 수 없습니다"),
 
+    // 사이트 쇼케이스 (08-core/19-site-showcase.md Section 5)
+    SITE_URL_BLOCKED(HttpStatus.BAD_REQUEST, "SITE_URL_BLOCKED", "내부망 주소는 등록할 수 없습니다"),
+    SITE_SHOWCASE_NOT_FOUND(HttpStatus.NOT_FOUND, "SITE_SHOWCASE_NOT_FOUND", "등록한 사이트를 찾을 수 없습니다"),
+    SITE_CAPTURE_TOO_SOON(HttpStatus.TOO_MANY_REQUESTS, "SITE_CAPTURE_TOO_SOON", "사이트는 1분에 한 번만 다시 가져올 수 있습니다"),
+
     // Notification (08-core/11-notification.md Section 5)
     NOTIFICATION_NOT_FOUND(HttpStatus.NOT_FOUND, "NOTIFICATION_NOT_FOUND", "알림을 찾을 수 없습니다"),
 

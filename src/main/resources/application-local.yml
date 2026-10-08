@@ -27,6 +27,8 @@ logging:
 crowfoot:
   auth:
     base-url: http://localhost:8081   # 로컬 인증 서버 (운영은 k8s Service DNS — application.yml)
+  capture:
+    base-url: http://localhost:8086   # 로컬 캡처 서비스 (08-core/19-site-showcase.md Section 4)
 
 server:
   port: 8082   # 로컬 개발 — 프로세스별 포트 분리(운영은 전부 8080)

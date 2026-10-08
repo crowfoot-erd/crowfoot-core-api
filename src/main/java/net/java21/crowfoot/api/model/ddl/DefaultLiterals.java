@@ -96,7 +96,7 @@ public final class DefaultLiterals {
     }
 
     /** 비교 키 — 바깥 작은따옴표를 벗기고 '' 이스케이프를 푼다 */
-    static String comparisonKey(String value) {
+    public static String comparisonKey(String value) {
         if (value == null || value.isEmpty()) {
             return null;
         }

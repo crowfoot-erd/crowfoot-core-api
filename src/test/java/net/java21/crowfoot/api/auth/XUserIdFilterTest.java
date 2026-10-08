@@ -29,6 +29,29 @@ class XUserIdFilterTest {
     private XUserIdFilter filter;
 
     @Test
+    @DisplayName("사이트 쇼케이스 — 목록·썸네일은 헤더 없이 통과, 신고(POST .../reports)는 회원전용(19-site-showcase §4)")
+    void showcasePathsOptionalAuthAndReportRequiresMember() throws Exception {
+        for (String path : new String[] {"/core/showcase/sites", "/core/showcase/sites/12/thumbnail"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request, response, filterChain);
+            verify(filterChain).doFilter(request, response);
+        }
+
+        MockHttpServletRequest anonymous = new MockHttpServletRequest("POST", "/core/showcase/sites/12/reports");
+        MockHttpServletResponse rejected = new MockHttpServletResponse();
+        filter.doFilter(anonymous, rejected, filterChain);
+        verify(filterChain, never()).doFilter(anonymous, rejected);
+        assertThat(rejected.getStatus()).isEqualTo(401);
+
+        MockHttpServletRequest member = new MockHttpServletRequest("POST", "/core/showcase/sites/12/reports");
+        member.addHeader("X-USER-ID", "7");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(member, response, filterChain);
+        verify(filterChain).doFilter(member, response);
+    }
+
+    @Test
     @DisplayName("/core/shares/{token}은 X-USER-ID 없이도 체인을 통과한다 — 토큰이 자격")
     void sharesPathSkipsAuthentication() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/core/shares/tok123");

@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import net.java21.crowfoot.api.model.ddl.DefaultLiterals;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -346,6 +347,12 @@ public final class DocumentSync {
                     // ''≡null 정규화 — 드리프트 방지
                     current = normDefault(current);
                     target = normDefault(target);
+                    // 바깥 따옴표만 다른 값은 같다 — 변경 계획(DefaultLiterals.sameDefault)과 같은 규칙(신고 50:
+                    // 따옴표째 저장된 리버스 문서와 따옴표 없이 적는 규칙의 문서가 서로 바꾸자고 하지 않게)
+                    if (current.isString() && target.isString() && Objects.equals(
+                            DefaultLiterals.comparisonKey(current.asString()), DefaultLiterals.comparisonKey(target.asString()))) {
+                        continue;
+                    }
                 }
                 if (!Objects.equals(current, target)) {
                     fields.add(field + ": " + display(current) + " → " + display(target));

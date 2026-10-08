@@ -75,6 +75,12 @@ public final class DocumentEditor {
             "ONE_TO_MANY", Set.of("ZERO_OR_MORE", "ONE_OR_MORE"));
     static final Set<String> REFERENTIAL_ACTIONS = Set.of("NO_ACTION", "RESTRICT", "CASCADE", "SET_NULL", "SET_DEFAULT");
     static final Set<String> COLORS = Set.of("default", "red", "orange", "amber", "yellow", "green", "teal", "sky", "blue", "violet", "pink");
+
+    /**
+     * 새 그룹의 자동 색 순서(v1.40) — 색을 주지 않고 만든 그룹은 문서에서 아직 쓰지 않은 첫 색을 받는다. 다 쓰면 그룹 수로 돈다.
+     * 이웃한 색이 비슷하지 않게 섞은 순서다. 웹 nextAreaColor(model/changes.ts)와 같다(05-editor/02-ui.md Section 6)
+     */
+    static final List<String> AREA_PALETTE = List.of("blue", "green", "amber", "violet", "red", "teal", "pink", "orange", "sky", "yellow");
     static final Set<String> IDENTITY_GENERATIONS = Set.of("ALWAYS", "BY_DEFAULT");
     static final List<String> DOMAIN_FIELDS = List.of("dataType", "length", "precision", "scale", "nullable", "defaultValue");
 
@@ -491,13 +497,30 @@ public final class DocumentEditor {
     }
 
     private ObjectNode newArea(String name) {
+        String color = nextAreaColor();
         ObjectNode area = areas.addObject();
         area.put("id", ids.get());
         area.put("name", name);
         area.put("description", "");
-        area.put("color", "default");
+        area.put("color", color);
         area.putArray("tableIds");
         return area;
+    }
+
+    /** 문서에서 아직 쓰지 않은 첫 팔레트 색. 다 쓰였으면 그룹 수로 돈다 */
+    private String nextAreaColor() {
+        Set<String> used = new HashSet<>();
+        int count = 0;
+        for (JsonNode area : areas) {
+            used.add(area.path("color").asText("default"));
+            count++;
+        }
+        for (String color : AREA_PALETTE) {
+            if (!used.contains(color)) {
+                return color;
+            }
+        }
+        return AREA_PALETTE.get(count % AREA_PALETTE.size());
     }
 
     /** 테이블 물리명 목록 → id 목록. 없는 이름이 있으면 사유를 남기고 null */

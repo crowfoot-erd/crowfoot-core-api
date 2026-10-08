@@ -52,7 +52,7 @@ public class XUserIdFilter extends OncePerRequestFilter {
                 || path.startsWith("/core/templates")            // 템플릿 공개 목록 — GET만 Gateway 화이트리스트
                 || path.startsWith("/core/metrics")              // 접속 비콘 수집(POST visit) — 무인증, 관리자 /core/admin/metrics는 별도
                 || "OPTIONS".equalsIgnoreCase(request.getMethod());
-        // /core/shares/**는 제외하지 않는다 — doFilterInternal이 3계층(선택 인증·회원전용)으로 판정한다
+        // /core/shares/**·/core/showcase/**는 제외하지 않는다 — doFilterInternal이 3계층(선택 인증·회원전용)으로 판정한다
     }
 
     @Override
@@ -121,13 +121,16 @@ public class XUserIdFilter extends OncePerRequestFilter {
         }
     }
 
+    /** 공유 공개 경로와 사이트 쇼케이스 공개 경로(08-core/19-site-showcase.md Section 4) — 같은 선택 인증으로 다룬다 */
     private static boolean isSharePath(HttpServletRequest request) {
-        return request.getRequestURI().startsWith("/core/shares");
+        String path = request.getRequestURI();
+        return path.startsWith("/core/shares") || path.startsWith("/core/showcase");
     }
 
-    /** 반응 토글(1.10.6)은 회원전용 — X-USER-ID 필수 경로다 */
+    /** 반응 토글(1.10.6)과 사이트 신고(19-site-showcase 3.7)는 회원전용 — X-USER-ID 필수 경로다 */
     private static boolean isMemberOnlySharePath(HttpServletRequest request) {
-        return "POST".equalsIgnoreCase(request.getMethod()) && request.getRequestURI().endsWith("/reactions");
+        String path = request.getRequestURI();
+        return "POST".equalsIgnoreCase(request.getMethod()) && (path.endsWith("/reactions") || path.endsWith("/reports"));
     }
 
     private void writeUnauthorized(HttpServletResponse response) throws IOException {

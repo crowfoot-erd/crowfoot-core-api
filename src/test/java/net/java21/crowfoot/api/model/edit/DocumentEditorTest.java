@@ -646,6 +646,25 @@ class DocumentEditorTest {
     }
 
     @Test
+    @DisplayName("새 그룹은 색을 주지 않으면 문서에서 아직 쓰지 않은 팔레트 색을 받는다 — 요구사항 도메인·areas 모두, 준 색은 그대로(v1.40)")
+    void newAreasGetDistinctColors() {
+        seed("mysql");
+        DocumentEditor first = editor("mysql");
+        first.applyRequirements(List.of(
+                new RequirementItem(null, "회원 가입", "", "confirmed", null, "회원", null),
+                new RequirementItem(null, "주문 생성", "", "confirmed", null, "주문", null)));
+        first.applySchema(null, null, List.of(new AreaItem("결제", null, "violet", null, null), new AreaItem("배송", null, null, null, null)));
+        first.throwIfInvalid();
+
+        Map<String, String> colors = new LinkedHashMap<>();
+        root.path("diagram").path("areas").forEach(area -> colors.put(area.path("name").asText(), area.path("color").asText()));
+        // 회원·주문은 팔레트 앞에서부터(blue·green), 결제는 준 색(violet), 배송은 남은 첫 색(amber)
+        assertThat(colors).containsExactly(Map.entry("회원", "blue"), Map.entry("주문", "green"),
+                Map.entry("결제", "violet"), Map.entry("배송", "amber"));
+        assertThat(colors.values()).doesNotHaveDuplicates().doesNotContain("default");
+    }
+
+    @Test
     @DisplayName("요구사항 도메인 그룹 — 그룹이 없는 테이블을 연결하면 그 도메인 그룹에 넣고, 다른 그룹에 있는 테이블은 옮기지 않는다(v1.39)")
     void linkedTableJoinsRequirementArea() {
         seed("mysql");

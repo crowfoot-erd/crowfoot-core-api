@@ -176,6 +176,24 @@ class DocumentSyncTest {
     }
 
     @Test
+    @DisplayName("기본값은 바깥 따옴표만 다르면 같다 — 문서 insight ≡ DB 'insight'(신고 50), 값이 다르면 바꾼다")
+    void defaultQuotesAreEquivalent() {
+        ObjectNode docOrders = docOrders();
+        ((ObjectNode) docOrders.get("columns").get(2)).put("defaultValue", "insight");
+        ((ObjectNode) docOrders.get("columns").get(3)).put("defaultValue", "'memo'");
+        ObjectNode dbOrders = dbOrders();
+        ((ObjectNode) dbOrders.get("columns").get(2)).put("defaultValue", "'insight'");
+        ((ObjectNode) dbOrders.get("columns").get(3)).put("defaultValue", "note");
+
+        DocumentSync.Result result = DocumentSync.sync(doc(List.of(docUsers(), docOrders), List.of(docRel())),
+                doc(List.of(dbUsers(), dbOrders), List.of(dbRel())), false);
+
+        assertThat(result.items()).extracting(DocumentSync.Item::name, DocumentSync.Item::detail)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("memo", "defaultValue: 'memo' → note"));
+        assertThat(columnNamed(tableNamed(result.merged(), "orders"), "status").path("defaultValue").asString()).isEqualTo("insight");
+    }
+
+    @Test
     @DisplayName("컬럼 타입·길이가 바뀌면 DB 값으로 덮고 컬럼 id·comment는 지킨다")
     void columnTypeChange() {
         ObjectNode dbOrders = dbOrders();

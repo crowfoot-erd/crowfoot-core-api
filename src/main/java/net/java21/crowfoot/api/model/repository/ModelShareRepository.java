@@ -28,6 +28,9 @@ public interface ModelShareRepository extends JpaRepository<ModelShare, Long> {
     /** 문서의 링크 목록 — 최근 발급순 */
     List<ModelShare> findByModelIdOrderByCreatedAtDescIdDesc(Long modelId);
 
+    /** 여러 문서의 링크 — 최근 발급순. 사이트 쇼케이스 카드의 "ERD 보기" 토큰 고르기(08-core/19-site-showcase.md Section 3.5) */
+    List<ModelShare> findByModelIdInOrderByCreatedAtDescIdDesc(Collection<Long> modelIds);
+
     /** 토큰→문서명(관리자 트래픽 share 차원 표기 — 08-core/10-metrics.md §5.2). 행 배열: [shareToken, modelName] */
     @Query("""
             select s.shareToken, m.name

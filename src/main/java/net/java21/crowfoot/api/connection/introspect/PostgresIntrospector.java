@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -62,9 +61,6 @@ public class PostgresIntrospector implements SchemaIntrospector {
             Map.entry("double", "DOUBLE"),
             Map.entry("double precision", "DOUBLE"),
             Map.entry("boolean", "BOOLEAN"));
-
-    /** PG 기본값 표현의 캐스트 접미사 — {@code '0'::integer}, {@code now()::timestamp(6)} */
-    private static final Pattern CAST_SUFFIX = Pattern.compile("^(.*?)::[a-zA-Z][a-zA-Z0-9_ ()]*$");
 
     @Override
     public String dbmsType() {
@@ -134,7 +130,7 @@ public class PostgresIntrospector implements SchemaIntrospector {
                     boolean autoIncrement = "YES".equals(rs.getString(9))
                             || (rawDefault != null && rawDefault.startsWith("nextval("));
                     // serial의 nextval 기본값은 자동 증가로 흡수 — DEFAULT로 남기면 DDL 재생성 시 identity와 충돌
-                    String defaultValue = autoIncrement ? null : stripCastSuffix(rawDefault);
+                    String defaultValue = autoIncrement ? null : PgDefaultNormalizer.normalize(rawDefault);
                     String udtName = rs.getString(3);
                     // 날짜시간의 소수 초는 precision에 — PostgreSQL 기본값 6은 null로 둔다
                     Integer precision = getInteger(rs, 5);
@@ -486,15 +482,6 @@ public class PostgresIntrospector implements SchemaIntrospector {
 
     private static String normalizeComment(String comment) {
         return comment == null || comment.isBlank() ? null : comment;
-    }
-
-    /** {@code '0'::integer} → {@code '0'} — 표기 정리. 내부 따옴표 그대로 둔다 */
-    private static String stripCastSuffix(String defaultValue) {
-        if (defaultValue == null) {
-            return null;
-        }
-        Matcher matcher = CAST_SUFFIX.matcher(defaultValue.trim());
-        return matcher.matches() ? matcher.group(1) : defaultValue.trim();
     }
 
     private static Integer getInteger(ResultSet rs, int index) throws SQLException {
