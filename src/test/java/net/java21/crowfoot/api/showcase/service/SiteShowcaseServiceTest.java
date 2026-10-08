@@ -175,6 +175,25 @@ class SiteShowcaseServiceTest {
     }
 
     @Test
+    @DisplayName("주소를 바꿀 때 예전 제목·설명이 그대로 오면 새로 가져온 값을 쓴다 — 화면이 입력 칸을 미리 채워 보낸다(v1.41)")
+    void changedUrlIgnoresCarriedOverTitle() {
+        given(captureClient.capture("https://www.broken.example")).willThrow(new CaptureException("CAPTURE_FAILED", "연결 실패"));
+        service.save(2L, 77L, 501L, new SaveSiteRequest("https://www.broken.example", null, null));
+        assertThat(stored.getTitle()).isEqualTo("broken.example");
+
+        given(captureClient.capture("https://github.com")).willReturn(captured("GitHub"));
+        SiteResponse moved = service.save(2L, 77L, 501L, new SaveSiteRequest("https://github.com", "broken.example", null));
+        assertThat(moved.title()).isEqualTo("GitHub");
+        assertThat(moved.description()).isEqualTo("개발 이야기");
+
+        // 사용자가 새 제목을 적었으면 그 값이 이긴다
+        willReturn(captured("Other")).given(captureClient).capture("https://other.example");
+        SiteResponse renamed = service.save(2L, 77L, 501L, new SaveSiteRequest("https://other.example", "내 사이트", "개발 이야기"));
+        assertThat(renamed.title()).isEqualTo("내 사이트");
+        assertThat(renamed.description()).isEqualTo("개발 이야기");
+    }
+
+    @Test
     @DisplayName("다시 가져오기는 1분에 한 번, 실패하면 이전 그림을 두고 사유만 바꾼다")
     void recapture() {
         given(captureClient.capture("https://blog.example.com")).willReturn(captured("캡처 제목"));

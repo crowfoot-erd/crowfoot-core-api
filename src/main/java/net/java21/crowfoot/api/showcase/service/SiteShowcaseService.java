@@ -43,6 +43,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -87,13 +88,21 @@ public class SiteShowcaseService {
     /** 등록·수정 — Editor 이상. 처음이거나 주소가 바뀌면 캡처한다 */
     public SiteResponse save(long userId, long workspaceId, long modelId, SaveSiteRequest request) {
         String url = normalizeUrl(request.url());
-        String title = blankToNull(request.title());
         SiteShowcase existing = transactionTemplate.execute(status -> {
             roleChecker.requireEditor(userId, workspaceId);
             requireModel(workspaceId, modelId);
             return showcaseRepository.findByModelId(modelId).orElse(null);
         });
         boolean newUrl = existing == null || !existing.getUrl().equals(url);
+        // 주소가 바뀌었는데 지금 제목·설명이 그대로 왔으면 손대지 않은 값이다 — 화면이 입력 칸을 미리 채워 보낸다.
+        // 예전 사이트의 값이므로 새로 가져온 값을 쓴다(v1.41 — 첫 캡처 실패로 남은 호스트 제목이 github.com에 붙었던 일)
+        boolean carriedOver = newUrl && existing != null;
+        String title = carriedOver && Objects.equals(blankToNull(request.title()), existing.getTitle())
+                ? null : blankToNull(request.title());
+        // description은 null(생략)과 ""(지움)이 다르다 — 예전 사이트의 설명이 그대로 왔을 때만 생략으로 본다
+        String description = carriedOver && request.description() != null
+                && Objects.equals(blankToNull(request.description()), existing.getDescription())
+                && existing.getDescription() != null ? null : request.description();
         CaptureResult captured = null;
         String captureError = null;
         if (newUrl) {
@@ -118,20 +127,20 @@ public class SiteShowcaseService {
                 if (result != null) {
                     applyCapture(site, result, now);
                     site.setTitle(firstNonNull(title, truncate(result.title(), 200), hostOf(url)));
-                    site.setDescription(request.description() != null ? blankToNull(request.description())
+                    site.setDescription(description != null ? blankToNull(description)
                             : truncate(result.description(), 500));
                 } else {
                     site.clearCapture();
                     site.setCaptureError(truncate(error, 300));
                     site.setTitle(firstNonNull(title, hostOf(url)));
-                    site.setDescription(blankToNull(request.description()));
+                    site.setDescription(blankToNull(description));
                 }
             } else {
                 if (title != null) {
                     site.setTitle(title);
                 }
-                if (request.description() != null) {
-                    site.setDescription(blankToNull(request.description()));
+                if (description != null) {
+                    site.setDescription(blankToNull(description));
                 }
             }
             return showcaseRepository.save(site);
