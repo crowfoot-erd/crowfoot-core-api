@@ -291,6 +291,7 @@ public final class DocumentEditor {
             applyCriteria(at, node, item.criteria());
         }
         changes.add(new Change("requirement", "add", "", code));
+        placeInRequirementArea(node, tableIds);
     }
 
     /**
@@ -422,6 +423,7 @@ public final class DocumentEditor {
         }
         if (changed) {
             changes.add(new Change("requirement", "update", "", node.path("code").asText()));
+            placeInRequirementArea(node, strings(node.path("tableIds")));
         }
     }
 
@@ -1383,7 +1385,39 @@ public final class DocumentEditor {
         if (changed && changes.stream().noneMatch(change -> "requirement".equals(change.kind()) && code.equals(change.name()))) {
             changes.add(new Change("requirement", "update", "", code));
         }
+        placeInRequirementArea(requirement, List.of(tableId));
         return true;
+    }
+
+    /**
+     * 그룹이 없는 테이블을 요구사항 도메인의 그룹에 넣는다(v1.39 — 08-core/17-model-edit.md Section 2.2).
+     * 이미 다른 그룹에 있는 테이블은 옮기지 않는다. 같은 요청의 areas가 뒤에 적용되므로 명시한 그룹이 이긴다
+     */
+    private void placeInRequirementArea(ObjectNode requirement, List<String> tableIds) {
+        String areaId = requirement.path("areaId").isTextual() ? requirement.path("areaId").asText() : null;
+        ObjectNode area = null;
+        Set<String> grouped = new HashSet<>();
+        for (JsonNode node : areas) {
+            if (node.path("id").asText().equals(areaId)) {
+                area = (ObjectNode) node;
+            }
+            grouped.addAll(strings(node.path("tableIds")));
+        }
+        if (area == null) {
+            return;
+        }
+        ArrayNode members = area.get("tableIds") instanceof ArrayNode existing ? existing : area.putArray("tableIds");
+        boolean added = false;
+        for (String tableId : tableIds) {
+            if (grouped.add(tableId)) {
+                members.add(tableId);
+                added = true;
+            }
+        }
+        String name = area.path("name").asText();
+        if (added && changes.stream().noneMatch(change -> "area".equals(change.kind()) && name.equals(change.name()))) {
+            changes.add(new Change("area", "update", "", name));
+        }
     }
 
     private boolean isTraced(String tableId) {

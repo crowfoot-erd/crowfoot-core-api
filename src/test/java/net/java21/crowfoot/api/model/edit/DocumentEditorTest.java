@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -391,7 +393,8 @@ class DocumentEditorTest {
         link.applySchema(List.of(new TableItem("orders", null, null, null, null, null, null, null, List.of("REQ-001"))), null, null);
         link.throwIfInvalid();
         assertThat(DocumentOutline.state(requirementNode("REQ-001"))).isEqualTo("APPLIED");
-        assertThat(link.changes()).extracting(DocumentEditor.Change::kind).containsExactly("requirement");
+        // 그룹이 없던 orders는 요구사항 도메인(주문) 그룹에 들어간다(v1.39)
+        assertThat(link.changes()).extracting(DocumentEditor.Change::kind).containsExactly("requirement", "area");
 
         DocumentEditor revise = editor("postgresql");
         revise.applyRequirements(List.of(new RequirementItem("REQ-001", null, "회원은 상품을 주문한다. 배송지는 여러 개다", null, null, null, null)));
@@ -627,6 +630,58 @@ class DocumentEditorTest {
         assertThat(column.warnings()).extracting(DocumentEditor.Warning::code)
                 .containsExactly("CHECK_REMOVED_WITH_COLUMN", "CHECK_REMOVED_WITH_COLUMN");
         assertThat(column.warnings()).extracting(DocumentEditor.Warning::target).containsExactly("orders.ck_counts", "orders.ck_likes");
+    }
+
+    /** 그룹 이름 → 멤버 테이블 물리명 */
+    private Map<String, List<String>> areaMembers() {
+        Map<String, String> names = new HashMap<>();
+        root.path("model").path("tables").forEach(t -> names.put(t.path("id").asText(), t.path("physicalName").asText()));
+        Map<String, List<String>> members = new LinkedHashMap<>();
+        for (JsonNode area : root.path("diagram").path("areas")) {
+            List<String> tables = new ArrayList<>();
+            area.path("tableIds").forEach(id -> tables.add(names.get(id.asText())));
+            members.put(area.path("name").asText(), tables);
+        }
+        return members;
+    }
+
+    @Test
+    @DisplayName("요구사항 도메인 그룹 — 그룹이 없는 테이블을 연결하면 그 도메인 그룹에 넣고, 다른 그룹에 있는 테이블은 옮기지 않는다(v1.39)")
+    void linkedTableJoinsRequirementArea() {
+        seed("mysql");
+        DocumentEditor requirements = editor("mysql");
+        requirements.applyRequirements(List.of(
+                new RequirementItem(null, "주문 생성", "", "confirmed", null, "주문", null),
+                new RequirementItem(null, "회원 가입", "", "confirmed", null, "회원", List.of("users"))));
+        requirements.throwIfInvalid();
+        // 요구사항에 테이블을 직접 연결해도 그룹에 들어간다
+        assertThat(areaMembers()).containsEntry("주문", List.of()).containsEntry("회원", List.of("users"));
+
+        DocumentEditor link = editor("mysql");
+        link.applySchema(List.of(new TableItem("orders", null, null, null, null, null, null, null, List.of("REQ-001")),
+                new TableItem("users", null, null, null, null, null, null, null, List.of("REQ-001"))), null, null);
+        link.throwIfInvalid();
+        assertThat(areaMembers()).containsEntry("주문", List.of("orders")).containsEntry("회원", List.of("users"));
+        assertThat(link.changes()).extracting(c -> c.kind() + ":" + c.action() + ":" + c.name()).contains("area:update:주문");
+
+        // 같은 요청의 areas가 이긴다 — 새 테이블은 요구사항 도메인(주문)이 아니라 명시한 그룹(배송)에 들어간다
+        DocumentEditor explicit = editor("mysql");
+        explicit.applySchema(List.of(new TableItem("shipments", null, null, null,
+                        List.of(column("id", "BIGINT")), List.of("id"), null, null, List.of("REQ-001"))), null,
+                List.of(new AreaItem("배송", null, null, null, List.of("shipments"))));
+        explicit.throwIfInvalid();
+        assertThat(areaMembers()).containsEntry("주문", List.of("orders")).containsEntry("배송", List.of("shipments"));
+
+        // 도메인을 나중에 붙여도 연결된 테이블 가운데 그룹이 없는 것만 들어간다
+        DocumentEditor later = editor("mysql");
+        later.applySchema(List.of(new TableItem("coupons", null, null, null,
+                List.of(column("id", "BIGINT")), List.of("id"), null, null, null)), null, null);
+        later.applyRequirements(List.of(new RequirementItem(null, "쿠폰", "", "confirmed", null, null, List.of("coupons", "orders"))));
+        later.throwIfInvalid();
+        DocumentEditor domain = editor("mysql");
+        domain.applyRequirements(List.of(new RequirementItem("REQ-003", null, null, null, null, "혜택", null)));
+        domain.throwIfInvalid();
+        assertThat(areaMembers()).containsEntry("혜택", List.of("coupons")).containsEntry("주문", List.of("orders"));
     }
 
     @Test
