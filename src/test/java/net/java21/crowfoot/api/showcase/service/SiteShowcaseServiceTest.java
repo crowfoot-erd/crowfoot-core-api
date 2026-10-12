@@ -97,6 +97,17 @@ class SiteShowcaseServiceTest {
         ReflectionTestUtils.setField(model, "id", 501L);
         given(modelRepository.findByIdAndWorkspaceId(501L, 77L)).willReturn(Optional.of(model));
         given(showcaseRepository.findByModelId(501L)).willAnswer(inv -> Optional.ofNullable(stored));
+        given(showcaseRepository.findById(anyLong())).willAnswer(inv -> Optional.ofNullable(stored));
+        // 선점 — DB의 조건부 UPDATE를 흉내 낸다(마지막 시도가 retryBefore 이전이면 시각을 바꾸고 1)
+        given(showcaseRepository.claimCapture(anyLong(), any(), any())).willAnswer(inv -> {
+            Instant now = inv.getArgument(1);
+            Instant retryBefore = inv.getArgument(2);
+            if (stored == null || (stored.getCaptureAttemptedAt() != null && !stored.getCaptureAttemptedAt().isBefore(retryBefore))) {
+                return 0;
+            }
+            stored.setCaptureAttemptedAt(now);
+            return 1;
+        });
         given(showcaseRepository.save(any(SiteShowcase.class))).willAnswer(inv -> {
             stored = inv.getArgument(0);
             if (stored.getId() == null) {
@@ -224,6 +235,26 @@ class SiteShowcaseServiceTest {
         assertThat(response.title()).isEqualTo("예제 블로그");
         assertThat(response.description()).isEqualTo("개발 이야기");
         assertThat(response.captureError()).isNull();
+    }
+
+    @Test
+    @DisplayName("정기 다시 찍기 — 후보를 선점해 찍고 썸네일을 바꾼다. 다른 인스턴스가 이미 선점했으면 건너뛴다(v1.42)")
+    void refreshStale() {
+        given(captureClient.capture("https://blog.example.com")).willReturn(captured("캡처 제목"));
+        service.save(2L, 77L, 501L, new SaveSiteRequest("https://blog.example.com", "내 제목", null));
+        stored.setCaptureAttemptedAt(NOW.minus(java.time.Duration.ofDays(8)));
+        stored.setCapturedAt(NOW.minus(java.time.Duration.ofDays(8)));
+        given(showcaseRepository.findRefreshCandidates(any(), any(), any())).willReturn(List.of(12L));
+        willReturn(new CaptureResult("https://blog.example.com/", "새 제목", "새 설명", "Example", null, "image/jpeg",
+                new byte[] {(byte) 0xFF, (byte) 0xD8, 9})).given(captureClient).capture("https://blog.example.com");
+
+        assertThat(service.refreshStale(10)).isEqualTo(1);
+        assertThat(stored.getThumbnail()).containsExactly((byte) 0xFF, (byte) 0xD8, 9);
+        assertThat(stored.getCapturedAt()).isEqualTo(NOW);
+        assertThat(stored.getTitle()).isEqualTo("내 제목"); // 사용자 제목은 그대로 둔다
+
+        // 방금 시도했으므로 같은 후보가 다시 와도 선점에 실패해 찍지 않는다
+        assertThat(service.refreshStale(10)).isZero();
     }
 
     @Test

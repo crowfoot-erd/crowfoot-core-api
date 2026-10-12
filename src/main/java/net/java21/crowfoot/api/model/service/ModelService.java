@@ -25,6 +25,7 @@ import net.java21.crowfoot.api.model.repository.ModelQueryRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository.ModelRow;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
+import net.java21.crowfoot.api.showcase.repository.SiteShowcaseRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.ListApiResponse;
 import net.java21.crowfoot.common.error.BusinessException;
@@ -34,8 +35,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * ERD 문서 실체 API (08-core/02-model.md Section 1) — 목록·상세·생성·메타 변경·삭제·content 저장.
@@ -69,6 +72,7 @@ public class ModelService {
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
     private final ObjectMapper objectMapper;
+    private final SiteShowcaseRepository siteShowcaseRepository;
 
     /** 목록(Viewer 이상) — keyword·offset 페이징, 정렬 updatedAt desc */
     @Transactional(readOnly = true)
@@ -85,10 +89,12 @@ public class ModelService {
         if (totalCount == 0) {
             return ListApiResponse.paged(List.of(), normalizedPage, normalizedSize, 0);
         }
-        List<ModelSummaryResponse> responses = modelQueryRepository
-                .search(workspaceId, trimmed, normalizedPage, normalizedSize)
-                .stream()
-                .map(ModelService::toSummary)
+        List<ModelRow> rows = modelQueryRepository.search(workspaceId, trimmed, normalizedPage, normalizedSize);
+        // 사이트 아이콘 표시 — 이 쪽 문서의 사이트 유무를 IN 한 번으로 본다(v1.42, N+1 금지 — code-conventions §4)
+        Set<Long> withSite = new HashSet<>(siteShowcaseRepository.findModelIdsIn(
+                rows.stream().map(ModelRow::id).toList()));
+        List<ModelSummaryResponse> responses = rows.stream()
+                .map(row -> toSummary(row, withSite.contains(row.id())))
                 .toList();
         return ListApiResponse.paged(responses, normalizedPage, normalizedSize, totalCount);
     }
@@ -283,10 +289,11 @@ public class ModelService {
                 (int) model.getVersion(),
                 createdBy,
                 model.getCreatedAt(),
-                model.getUpdatedAt());
+                model.getUpdatedAt(),
+                siteShowcaseRepository.existsByModelId(model.getId()));
     }
 
-    private static ModelSummaryResponse toSummary(ModelRow row) {
+    private static ModelSummaryResponse toSummary(ModelRow row, boolean hasSite) {
         UserRefResponse createdBy = row.createdById() == null
                 ? null
                 : new UserRefResponse(Long.toString(row.createdById()), row.createdByName());
@@ -300,7 +307,8 @@ public class ModelService {
                 (int) row.version(),
                 createdBy,
                 row.createdAt(),
-                row.updatedAt());
+                row.updatedAt(),
+                hasSite);
     }
 
     private ModelResponse toResponse(Model model) {

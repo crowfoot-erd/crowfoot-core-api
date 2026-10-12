@@ -81,4 +81,28 @@ class SiteShowcaseRepositoryTest {
         assertThat(repository.incrementReportCount(withImage.getId())).isEqualTo(1);
         assertThat(repository.findById(withImage.getId()).orElseThrow().getReportCount()).isEqualTo(1);
     }
+
+    @Test
+    @DisplayName("사이트 유무 IN 조회, 정기 다시 찍기 후보(오래된·못 찍은, 숨김·최근 시도 제외), 선점은 한 번만 성공(v1.42)")
+    void refreshQueries() {
+        Instant now = Instant.parse("2026-10-12T10:00:00Z");
+        SiteShowcase stale = site(1L, "stale", false, 0, new byte[] {1});
+        stale.setCapturedAt(now.minusSeconds(8 * 86400));
+        stale.setCaptureAttemptedAt(now.minusSeconds(8 * 86400));
+        SiteShowcase fresh = site(2L, "fresh", false, 0, new byte[] {1});
+        fresh.setCapturedAt(now.minusSeconds(3600));
+        SiteShowcase never = site(3L, "never", false, 0, null);
+        SiteShowcase triedToday = site(4L, "tried", false, 0, null);
+        triedToday.setCaptureAttemptedAt(now.minusSeconds(3600));
+        SiteShowcase hidden = site(5L, "hidden", true, 3, null);
+        repository.saveAllAndFlush(java.util.List.of(stale, fresh, never, triedToday, hidden));
+
+        assertThat(repository.findModelIdsIn(java.util.List.of(1L, 2L, 99L))).containsExactlyInAnyOrder(1L, 2L);
+        assertThat(repository.findRefreshCandidates(now.minusSeconds(7 * 86400), now.minusSeconds(86400), PageRequest.of(0, 10)))
+                .containsExactly(never.getId(), stale.getId());
+
+        Instant retryBefore = now.minusSeconds(86400);
+        assertThat(repository.claimCapture(stale.getId(), now, retryBefore)).isEqualTo(1);
+        assertThat(repository.claimCapture(stale.getId(), now.plusSeconds(1), retryBefore)).isZero();
+    }
 }

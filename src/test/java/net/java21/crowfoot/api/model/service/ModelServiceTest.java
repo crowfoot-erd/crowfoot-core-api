@@ -19,6 +19,7 @@ import net.java21.crowfoot.api.model.repository.ModelDiagramRepository;
 import net.java21.crowfoot.api.model.repository.ModelQueryRepository;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
+import net.java21.crowfoot.api.showcase.repository.SiteShowcaseRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.ListApiResponse;
 import tools.jackson.databind.ObjectMapper;
@@ -79,6 +80,8 @@ class ModelServiceTest {
     private RoleChecker roleChecker;
     @Mock
     private AuditRecorder auditRecorder;
+    @Mock
+    private SiteShowcaseRepository siteShowcaseRepository;
 
     private ModelService modelService;
 
@@ -87,7 +90,7 @@ class ModelServiceTest {
         // ObjectMapper는 실물 — JSON 파싱 검증 자체가 테스트 대상이다
         modelService = new ModelService(modelRepository, modelDiagramRepository, modelQueryRepository,
                 databaseTypeRepository, modelVersionRepository, modelVersionPruner, userRepository,
-                connectionRepository, roleChecker, auditRecorder, new ObjectMapper());
+                connectionRepository, roleChecker, auditRecorder, new ObjectMapper(), siteShowcaseRepository);
     }
 
 
@@ -202,11 +205,15 @@ class ModelServiceTest {
                 new ModelQueryRepository.ModelRow(502L, 77L, "회원 서비스 ERD", null, "mysql",
                         null, 1L, 8L, "jenny", Instant.parse("2026-09-03T00:00:00Z"), Instant.parse("2026-09-03T00:00:00Z"))));
 
+        given(siteShowcaseRepository.findModelIdsIn(List.of(501L, 502L))).willReturn(List.of(502L));
+
         // when
         ListApiResponse<ModelSummaryResponse> response = modelService.list(7L, 77L, null, null, null);
 
         // then
         assertThat(response.totalCount()).isEqualTo(2);
+        // 사이트 유무 — 쪽 문서 id를 IN 한 번으로 본다(v1.42)
+        assertThat(response.responses()).extracting(ModelSummaryResponse::hasSite).containsExactly(false, true);
         assertThat(response.responses()).hasSize(2);
         ModelSummaryResponse first = response.responses().get(0);
         assertThat(first.modelId()).isEqualTo("501");

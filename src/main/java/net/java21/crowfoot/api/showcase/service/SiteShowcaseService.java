@@ -59,6 +59,10 @@ public class SiteShowcaseService {
 
     /** 다시 가져오기 간격(Section 3.3) */
     static final Duration CAPTURE_INTERVAL = Duration.ofMinutes(1);
+    /** 정기 다시 찍기 — 찍은 지 이만큼 지나면 다시 찍는다(Section 3.10) */
+    static final Duration REFRESH_AGE = Duration.ofDays(7);
+    /** 정기 다시 찍기 — 실패한 사이트를 다시 보는 간격 */
+    static final Duration REFRESH_RETRY = Duration.ofDays(1);
     private static final int MAX_PUBLIC_SIZE = 48;
     private static final int MAX_ADMIN_SIZE = 100;
     private static final String THUMBNAIL_PATH = "/api/v1/core/showcase/sites/%d/thumbnail?v=%d";
@@ -157,27 +161,61 @@ public class SiteShowcaseService {
      * 제목이 대체값(호스트)이거나 설명이 비어 있으면 캡처 값으로 채운다
      */
     public SiteResponse recapture(long userId, long workspaceId, long modelId) {
+        Instant now = clock.instant();
         SiteShowcase site = transactionTemplate.execute(status -> {
             roleChecker.requireEditor(userId, workspaceId);
             requireModel(workspaceId, modelId);
-            return showcaseRepository.findByModelId(modelId)
+            SiteShowcase found = showcaseRepository.findByModelId(modelId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.SITE_SHOWCASE_NOT_FOUND));
+            // 1분 제한을 원자적으로 판정한다 — 정기 다시 찍기와 같은 선점(v1.42)
+            if (showcaseRepository.claimCapture(found.getId(), now, now.minus(CAPTURE_INTERVAL)) == 0) {
+                throw BusinessException.of(ErrorCode.SITE_CAPTURE_TOO_SOON, "detail.showcase.capture-too-soon");
+            }
+            return found;
         });
+        return toResponse(captureAndApply(site.getId(), site.getUrl(), now));
+    }
+
+    /**
+     * 정기 다시 찍기(v1.42 — 08-core/19-site-showcase.md Section 3.10). 찍은 지 {@link #REFRESH_AGE}가 지났거나 아직 못 찍은
+     * 사이트를 limit개까지 찍는다. 실패한 사이트는 {@link #REFRESH_RETRY} 뒤에 다시 본다. 사이트마다 선점해 core 레플리카가
+     * 같은 사이트를 함께 찍지 않는다. 처리한 수를 돌려준다
+     */
+    public int refreshStale(int limit) {
         Instant now = clock.instant();
-        if (site.getCaptureAttemptedAt() != null && site.getCaptureAttemptedAt().plus(CAPTURE_INTERVAL).isAfter(now)) {
-            throw BusinessException.of(ErrorCode.SITE_CAPTURE_TOO_SOON, "detail.showcase.capture-too-soon");
+        Instant retryBefore = now.minus(REFRESH_RETRY);
+        List<Long> candidates = showcaseRepository.findRefreshCandidates(now.minus(REFRESH_AGE), retryBefore,
+                PageRequest.of(0, limit));
+        int refreshed = 0;
+        for (Long siteId : candidates) {
+            Instant attempt = clock.instant();
+            Boolean claimed = transactionTemplate.execute(status ->
+                    showcaseRepository.claimCapture(siteId, attempt, retryBefore) == 1);
+            if (!Boolean.TRUE.equals(claimed)) {
+                continue; // 다른 인스턴스가 맡았다
+            }
+            showcaseRepository.findById(siteId).ifPresent(site -> captureAndApply(siteId, site.getUrl(), attempt));
+            refreshed++;
         }
+        return refreshed;
+    }
+
+    /**
+     * 캡처하고 결과를 반영한다(다시 가져오기·정기 다시 찍기 공용). 제목·설명은 두고 썸네일·캡처 메타만 바꾸되,
+     * 제목이 대체값(호스트)이거나 설명이 비어 있으면 캡처 값으로 채운다. 실패하면 사유만 남기고 이전 그림을 둔다
+     */
+    private SiteShowcase captureAndApply(Long siteId, String url, Instant now) {
         CaptureResult captured = null;
         String captureError = null;
         try {
-            captured = captureClient.capture(site.getUrl());
+            captured = captureClient.capture(url);
         } catch (CaptureException e) {
             captureError = e.getMessage();
         }
         CaptureResult result = captured;
         String error = captureError;
-        SiteShowcase saved = transactionTemplate.execute(status -> {
-            SiteShowcase current = showcaseRepository.findByModelId(modelId)
+        return transactionTemplate.execute(status -> {
+            SiteShowcase current = showcaseRepository.findById(siteId)
                     .orElseThrow(() -> new BusinessException(ErrorCode.SITE_SHOWCASE_NOT_FOUND));
             current.setCaptureAttemptedAt(now);
             if (result != null) {
@@ -194,7 +232,6 @@ public class SiteShowcaseService {
             }
             return showcaseRepository.save(current);
         });
-        return toResponse(saved);
     }
 
     /** 삭제 — Editor 이상. 신고 기록도 함께 지운다 */
