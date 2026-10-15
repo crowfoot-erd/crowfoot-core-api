@@ -137,7 +137,7 @@ class ModelVersionRepositoryTest {
     }
 
     @Test
-    @DisplayName("deleteByModelIdAndVersionLessThanEqual — 경계 버전은 지우고 cutoff+1부터 남긴다(보존 정책)")
+    @DisplayName("deleteByModelIdAndVersionLessThanEqualAndTagIsNull — 경계 버전은 지우고 cutoff+1부터 남긴다(보존 정책)")
     void deletePrunesBelowCutoffOnly() {
         snapshot(1L, null, null);
         snapshot(49L, null, null);
@@ -145,7 +145,7 @@ class ModelVersionRepositoryTest {
         snapshot(51L, null, null);
         snapshot(52L, null, null);
 
-        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(modelId, 50L);
+        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqualAndTagIsNull(modelId, 50L);
 
         assertThat(deleted).isEqualTo(3); // v1·v49·v50
         assertThat(modelVersionRepository.findByModelIdAndVersion(modelId, 50L)).isEmpty();
@@ -160,9 +160,58 @@ class ModelVersionRepositoryTest {
         modelVersionRepository.save(new ModelVersion(999L, 1L, "{}", null, null,
                 marcoId, Instant.now()));
 
-        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(modelId, 1L);
+        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqualAndTagIsNull(modelId, 1L);
 
         assertThat(deleted).isEqualTo(1);
         assertThat(modelVersionRepository.findByModelIdAndVersion(999L, 1L)).isPresent();
+    }
+
+    private ModelVersion tagged(long version, String tag) {
+        ModelVersion snapshot = snapshot(version, null, null);
+        snapshot.setTag(tag);
+        snapshot.setTagDescription("1차 오픈");
+        return modelVersionRepository.saveAndFlush(snapshot);
+    }
+
+    @Test
+    @DisplayName("보존 정책 삭제는 태그가 붙은 버전을 남긴다(13-model-versions.md 1.7)")
+    void deleteKeepsTaggedVersions() {
+        snapshot(1L, null, null);
+        tagged(2L, "1.0");
+        snapshot(3L, null, null);
+
+        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqualAndTagIsNull(modelId, 3L);
+
+        assertThat(deleted).isEqualTo(2); // v1·v3
+        assertThat(modelVersionRepository.findByModelIdAndVersion(modelId, 2L))
+                .get().extracting(ModelVersion::getTag).isEqualTo("1.0");
+    }
+
+    @Test
+    @DisplayName("UNIQUE(model_id, tag) — 같은 문서에서 태그는 겹치지 않고, 태그 없는 버전은 여럿이어도 된다")
+    void rejectsDuplicateTagInModel() {
+        snapshot(1L, null, null);
+        snapshot(2L, null, null);
+        tagged(3L, "1.0");
+
+        assertThat(modelVersionRepository.existsByModelIdAndTagAndVersionNot(modelId, "1.0", 3L)).isFalse();
+        assertThat(modelVersionRepository.existsByModelIdAndTagAndVersionNot(modelId, "1.0", 4L)).isTrue();
+        // 서비스 검사를 건너뛰어도 DB 제약이 막는다(실패한 flush 뒤에는 세션을 더 쓰지 않는다)
+        assertThatThrownBy(() -> tagged(4L, "1.0"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("keyword는 태그도 잡고, 목록 행에 태그와 설명이 실린다")
+    void searchMatchesTagAndProjectsIt() {
+        snapshot(1L, null, null);
+        tagged(2L, "v1.0");
+
+        List<VersionRow> hits = modelVersionQueryRepository.search(modelId, "V1", 1, 20);
+
+        assertThat(hits).extracting(VersionRow::version).containsExactly(2L);
+        assertThat(hits.get(0).tag()).isEqualTo("v1.0");
+        assertThat(hits.get(0).tagDescription()).isEqualTo("1차 오픈");
+        assertThat(modelVersionQueryRepository.count(modelId, "v1")).isEqualTo(1);
     }
 }

@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 문서 버전 기록 API (08-core/02-model.md Section 1.11) — 구현 경로 /core/**
- * (Gateway URL Rewrite 후 — 외부 계약은 /api/v1/core/*). 목록·상세·메모 편집·복원.
+ * (Gateway URL Rewrite 후 — 외부 계약은 /api/v1/core/*). 목록·상세·메모 편집·태그·복원.
  */
 @RestController
 @RequiredArgsConstructor
@@ -62,6 +62,17 @@ public class ModelVersionController {
             @PathVariable("version") long version,
             @RequestBody JsonNode body) {
         return ApiResponse.success(modelVersionService.updateMemo(
+                CurrentUserHolder.get().userId(), workspaceId, modelId, version, body));
+    }
+
+    /** 버전 태그 붙이기·고치기·지우기(tag null=지우기) — Editor, 갱신된 목록 행을 응답 (13-model-versions.md 1.7) */
+    @PatchMapping("/core/workspaces/{workspace-id}/models/{model-id}/versions/{version}/tag")
+    public ApiResponse<ModelVersionEntryResponse> updateTag(
+            @PathVariable("workspace-id") long workspaceId,
+            @PathVariable("model-id") long modelId,
+            @PathVariable("version") long version,
+            @RequestBody JsonNode body) {
+        return ApiResponse.success(modelVersionService.updateTag(
                 CurrentUserHolder.get().userId(), workspaceId, modelId, version, body));
     }
 

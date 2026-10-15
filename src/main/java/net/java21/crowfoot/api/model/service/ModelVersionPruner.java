@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * 버전 기록 보존 정책(1.11.6) — 문서당 최근 {@link #KEEP_COUNT}개만 보존하고
+ * 버전 기록 보존 정책(1.11.6) — 문서당 최근 {@link #KEEP_COUNT}개만 보존하고(태그가 붙은 버전은 늘 남긴다 — 13-model-versions.md 1.7)
  * 초과분은 스냅샷을 남기는 쓰기(저장·생성·리버스·복원)와 같은 트랜잭션에서 바로 지운다.
  * 별도 배치가 아니라 "그 쓰기가 유발한 정리"로 감사 액터도 쓰기 사용자를 따른다.
  * 삭제가 일어난 경우에만 감사를 남긴다 — 초기 100 저장까지 매번 0건 감사가 쌓이는 잡음 방지.
@@ -30,7 +30,7 @@ public class ModelVersionPruner {
      */
     public void prune(Long modelId, long newVersion, Long actorUserId) {
         long cutoff = newVersion - KEEP_COUNT;
-        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(modelId, cutoff);
+        long deleted = modelVersionRepository.deleteByModelIdAndVersionLessThanEqualAndTagIsNull(modelId, cutoff);
         if (deleted > 0) {
             auditRecorder.record(actorUserId, "MODEL_VERSION_PRUNED", "MODEL",
                     Long.toString(modelId), Map.of("pruned", deleted, "keptFrom", cutoff + 1));

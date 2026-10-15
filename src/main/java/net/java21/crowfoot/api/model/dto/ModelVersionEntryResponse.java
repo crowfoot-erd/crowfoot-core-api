@@ -12,6 +12,8 @@ public record ModelVersionEntryResponse(
         int version,
         String changeSummary,
         String memo,
+        String tag,
+        String tagDescription,
         UserRefResponse createdBy,
         Instant createdAt
 ) {

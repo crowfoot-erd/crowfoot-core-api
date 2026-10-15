@@ -35,6 +35,8 @@ import java.util.Map;
 public class ModelVersionService {
 
     private static final int MAX_MEMO_LENGTH = 500;
+    private static final int MAX_TAG_LENGTH = 50;
+    private static final int MAX_TAG_DESCRIPTION_LENGTH = 200;
 
     private final ModelRepository modelRepository;
     private final ModelVersionRepository modelVersionRepository;
@@ -65,7 +67,8 @@ public class ModelVersionService {
                 .search(modelId, trimmed, normalizedPage, normalizedSize)
                 .stream()
                 .map(row -> new ModelVersionEntryResponse((int) row.version(), row.changeSummary(),
-                        row.memo(), userRef(row.createdById(), row.createdByName()), row.createdAt()))
+                        row.memo(), row.tag(), row.tagDescription(),
+                        userRef(row.createdById(), row.createdByName()), row.createdAt()))
                 .toList();
         return ListApiResponse.paged(responses, normalizedPage, normalizedSize, totalCount);
     }
@@ -78,7 +81,7 @@ public class ModelVersionService {
         ModelVersion snapshot = modelVersionRepository.findByModelIdAndVersion(modelId, version)
                 .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_VERSION_NOT_FOUND));
         return new ModelVersionDetailResponse((int) snapshot.getVersion(), snapshot.getContent(),
-                snapshot.getChangeSummary(), snapshot.getMemo(),
+                snapshot.getChangeSummary(), snapshot.getMemo(), snapshot.getTag(), snapshot.getTagDescription(),
                 createdByRef(snapshot.getCreatedBy()), snapshot.getCreatedAt());
     }
 
@@ -103,8 +106,61 @@ public class ModelVersionService {
         }
         auditRecorder.record(userId, "MODEL_VERSION_MEMO_UPDATED", "MODEL",
                 Long.toString(modelId), Map.of("version", version));
+        return entryOf(snapshot);
+    }
+
+    /**
+     * 태그 붙이기·고치기·지우기(Editor 이상 — 13-model-versions.md Section 1.7).
+     * tag는 필수 필드 — null이면 태그와 설명을 함께 지운다. 버전 하나에 태그 하나, 문서 안에서 겹치지 않는다.
+     * 메모와 같이 버전을 올리지 않는 기록 보강이라 낙관적 잠금 대상이 아니다.
+     */
+    @Transactional
+    public ModelVersionEntryResponse updateTag(long userId, long workspaceId, long modelId,
+                                               long version, JsonNode body) {
+        roleChecker.requireEditor(userId, workspaceId);
+        requireModelInWorkspace(modelId, workspaceId);
+        ModelVersion snapshot = modelVersionRepository.findByModelIdAndVersion(modelId, version)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MODEL_VERSION_NOT_FOUND));
+        if (!body.has("tag")) {
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.tag.length");
+        }
+        String tag = body.get("tag").isNull() ? null : body.get("tag").asText().trim();
+        if (tag == null) {
+            snapshot.setTag(null);
+            snapshot.setTagDescription(null);
+        } else {
+            if (tag.isEmpty() || tag.length() > MAX_TAG_LENGTH) {
+                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.tag.length");
+            }
+            if (modelVersionRepository.existsByModelIdAndTagAndVersionNot(modelId, tag, version)) {
+                throw BusinessException.of(ErrorCode.DUPLICATED_NAME, "detail.tag.duplicated");
+            }
+            snapshot.setTag(tag);
+            snapshot.setTagDescription(tagDescriptionOf(body));
+        }
+        auditRecorder.record(userId, "MODEL_VERSION_TAG_UPDATED", "MODEL", Long.toString(modelId),
+                tag == null ? Map.of("version", version) : Map.of("version", version, "tag", tag));
+        return entryOf(snapshot);
+    }
+
+    /** 태그 설명 — 생략·null·빈 문자열은 설명 없음(null) */
+    private static String tagDescriptionOf(JsonNode body) {
+        JsonNode node = body.get("tagDescription");
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        String description = node.asText().trim();
+        if (description.length() > MAX_TAG_DESCRIPTION_LENGTH) {
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.tag.description.length");
+        }
+        return description.isEmpty() ? null : description;
+    }
+
+    /** 갱신 응답 — 목록 행과 같은 모양 */
+    private ModelVersionEntryResponse entryOf(ModelVersion snapshot) {
         return new ModelVersionEntryResponse((int) snapshot.getVersion(), snapshot.getChangeSummary(),
-                snapshot.getMemo(), createdByRef(snapshot.getCreatedBy()), snapshot.getCreatedAt());
+                snapshot.getMemo(), snapshot.getTag(), snapshot.getTagDescription(),
+                createdByRef(snapshot.getCreatedBy()), snapshot.getCreatedAt());
     }
 
     /**

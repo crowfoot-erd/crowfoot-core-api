@@ -50,9 +50,9 @@ class ModelVersionControllerWebTest {
     @DisplayName("목록은 최신순 요약 행(content 없음)을 페이징 포맷으로 응답한다")
     void listReturnsPagedEntries() throws Exception {
         given(modelVersionService.list(7L, 77L, 501L, null, 1, 20)).willReturn(ListApiResponse.paged(List.of(
-                new ModelVersionEntryResponse(3, "{\"items\":[]}", "member 테이블 추가",
+                new ModelVersionEntryResponse(3, "{\"items\":[]}", "member 테이블 추가", "1.0", "1차 오픈",
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z")),
-                new ModelVersionEntryResponse(2, null, null,
+                new ModelVersionEntryResponse(2, null, null, null, null,
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-19T05:00:00Z"))),
                 1, 20, 2));
 
@@ -62,6 +62,8 @@ class ModelVersionControllerWebTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.responses[0].version").value(3))
                 .andExpect(jsonPath("$.responses[0].memo").value("member 테이블 추가"))
+                .andExpect(jsonPath("$.responses[0].tag").value("1.0"))
+                .andExpect(jsonPath("$.responses[0].tagDescription").value("1차 오픈"))
                 .andExpect(jsonPath("$.responses[0].createdBy.name").value("marco"))
                 .andExpect(jsonPath("$.responses[0].content").doesNotExist())
                 .andExpect(jsonPath("$.totalCount").value(2))
@@ -73,7 +75,7 @@ class ModelVersionControllerWebTest {
     void listBindsKeywordParam() throws Exception {
         // page·size 정규화(1·20)는 서비스 몫 — 컨트롤러는 null 그대로 넘긴다
         given(modelVersionService.list(7L, 77L, 501L, "grade", null, null)).willReturn(ListApiResponse.paged(List.of(
-                new ModelVersionEntryResponse(1, null, "grade 컬럼 추가",
+                new ModelVersionEntryResponse(1, null, "grade 컬럼 추가", null, null,
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z"))),
                 1, 20, 1));
 
@@ -89,7 +91,7 @@ class ModelVersionControllerWebTest {
     @DisplayName("상세는 해당 시점 content 전문을 응답한다")
     void detailReturnsContent() throws Exception {
         given(modelVersionService.detail(7L, 77L, 501L, 2L)).willReturn(new ModelVersionDetailResponse(
-                2, "{\"schemaVersion\":1}", "{\"items\":[]}", "초안",
+                2, "{\"schemaVersion\":1}", "{\"items\":[]}", "초안", null, null,
                 new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z")));
 
         mockMvc.perform(get("/core/workspaces/77/models/501/versions/2").header("X-USER-ID", "7"))
@@ -114,7 +116,7 @@ class ModelVersionControllerWebTest {
     @DisplayName("메모 편집은 갱신된 목록 행을 응답한다 — 명시적 null은 삭제")
     void updateMemoReturnsUpdatedEntry() throws Exception {
         given(modelVersionService.updateMemo(eq(7L), eq(77L), eq(501L), eq(2L), any()))
-                .willReturn(new ModelVersionEntryResponse(2, null, null,
+                .willReturn(new ModelVersionEntryResponse(2, null, null, null, null,
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z")));
 
         mockMvc.perform(patch("/core/workspaces/77/models/501/versions/2/memo")
@@ -124,6 +126,36 @@ class ModelVersionControllerWebTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.response.version").value(2))
                 .andExpect(jsonPath("$.response.memo").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("태그 편집은 갱신된 목록 행(태그·설명)을 응답한다")
+    void updateTagReturnsUpdatedEntry() throws Exception {
+        given(modelVersionService.updateTag(eq(7L), eq(77L), eq(501L), eq(2L), any()))
+                .willReturn(new ModelVersionEntryResponse(2, null, null, "1.1", "결제 테이블 추가",
+                        new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z")));
+
+        mockMvc.perform(patch("/core/workspaces/77/models/501/versions/2/tag")
+                        .header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"tag\":\"1.1\",\"tagDescription\":\"결제 테이블 추가\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.response.tag").value("1.1"))
+                .andExpect(jsonPath("$.response.tagDescription").value("결제 테이블 추가"));
+    }
+
+    @Test
+    @DisplayName("태그 편집은 겹치는 태그면 409 DUPLICATED_NAME이다")
+    void updateTagReturns409ForDuplicate() throws Exception {
+        willThrow(BusinessException.of(ErrorCode.DUPLICATED_NAME, "detail.tag.duplicated"))
+                .given(modelVersionService).updateTag(eq(7L), eq(77L), eq(501L), eq(3L), any());
+
+        mockMvc.perform(patch("/core/workspaces/77/models/501/versions/3/tag")
+                        .header("X-USER-ID", "7")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"tag\":\"1.0\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.header.resultCode").value("DUPLICATED_NAME"));
     }
 
     @Test

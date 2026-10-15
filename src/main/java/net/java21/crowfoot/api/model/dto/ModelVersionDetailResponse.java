@@ -10,6 +10,8 @@ public record ModelVersionDetailResponse(
         String content,
         String changeSummary,
         String memo,
+        String tag,
+        String tagDescription,
         UserRefResponse createdBy,
         Instant createdAt
 ) {

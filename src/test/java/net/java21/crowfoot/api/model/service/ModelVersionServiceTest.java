@@ -45,7 +45,7 @@ import static org.mockito.Mockito.verify;
 
 /**
  * 버전 기록 API 단위 테스트 (08-core/02-model.md Section 1.11) —
- * 목록(content 제외 페이징)·상세·메모 편집(PATCH 의미론·500자 가드)·복원(새 버전 저장·409)을 검증한다.
+ * 목록(content 제외 페이징)·상세·메모 편집(PATCH 의미론·500자 가드)·태그(중복 409·지우기)·복원(새 버전 저장·409)을 검증한다.
  */
 @ExtendWith(MockitoExtension.class)
 class ModelVersionServiceTest {
@@ -102,9 +102,9 @@ class ModelVersionServiceTest {
         stubModelInWorkspace();
         given(modelVersionQueryRepository.count(501L, null)).willReturn(3L);
         given(modelVersionQueryRepository.search(501L, null, 1, 2)).willReturn(List.of(
-                new VersionRow(3L, "{\"layoutOnly\":true}", null, 7L, "marco",
+                new VersionRow(3L, "{\"layoutOnly\":true}", null, "1.0", "1차 오픈", 7L, "marco",
                         Instant.parse("2026-09-20T05:00:00Z")),
-                new VersionRow(2L, null, "초안 메모", 7L, "marco",
+                new VersionRow(2L, null, "초안 메모", null, null, 7L, "marco",
                         Instant.parse("2026-09-19T05:00:00Z"))));
 
         ListApiResponse<ModelVersionEntryResponse> response = service.list(7L, 77L, 501L, null, 1, 2);
@@ -114,6 +114,8 @@ class ModelVersionServiceTest {
         assertThat(response.responses()).hasSize(2);
         assertThat(response.responses().get(0).version()).isEqualTo(3);
         assertThat(response.responses().get(0).createdBy().name()).isEqualTo("marco");
+        assertThat(response.responses().get(0).tag()).isEqualTo("1.0");
+        assertThat(response.responses().get(0).tagDescription()).isEqualTo("1차 오픈");
         assertThat(response.responses().get(1).memo()).isEqualTo("초안 메모");
         // 페이지 정규화 — 미지정은 1·20, 상한 100
         service.list(7L, 77L, 501L, null, null, null);
@@ -126,7 +128,7 @@ class ModelVersionServiceTest {
         stubModelInWorkspace();
         given(modelVersionQueryRepository.count(501L, "등급")).willReturn(1L);
         given(modelVersionQueryRepository.search(501L, "등급", 1, 20)).willReturn(List.of(
-                new VersionRow(1L, null, "등급 컬럼 추가", 7L, "marco",
+                new VersionRow(1L, null, "등급 컬럼 추가", null, null, 7L, "marco",
                         Instant.parse("2026-09-20T05:00:00Z"))));
 
         service.list(7L, 77L, 501L, "  등급  ", 1, 20);
@@ -224,6 +226,74 @@ class ModelVersionServiceTest {
                 jsonNode("{\"memo\":\"" + "x".repeat(501) + "\"}")))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+    }
+
+    @Test
+    @DisplayName("태그 편집은 태그·설명을 붙이고(앞뒤 공백 제거) 감사를 남긴다 — 다시 보내면 바꾼다")
+    void updateTagSetsTagAndDescription() {
+        stubModelInWorkspace();
+        ModelVersion snapshot = snapshot(2L);
+        given(modelVersionRepository.findByModelIdAndVersion(501L, 2L)).willReturn(Optional.of(snapshot));
+
+        ModelVersionEntryResponse response = service.updateTag(7L, 77L, 501L, 2L,
+                jsonNode("{\"tag\":\" 1.0 \",\"tagDescription\":\"1차 오픈\"}"));
+
+        assertThat(snapshot.getTag()).isEqualTo("1.0");
+        assertThat(response.tag()).isEqualTo("1.0");
+        assertThat(response.tagDescription()).isEqualTo("1차 오픈");
+        verify(roleChecker).requireEditor(7L, 77L);
+        verify(modelVersionRepository).existsByModelIdAndTagAndVersionNot(501L, "1.0", 2L);
+        verify(auditRecorder).record(eq(7L), eq("MODEL_VERSION_TAG_UPDATED"), eq("MODEL"),
+                eq("501"), any());
+
+        service.updateTag(7L, 77L, 501L, 2L, jsonNode("{\"tag\":\"1.1\",\"tagDescription\":\"\"}"));
+        assertThat(snapshot.getTag()).isEqualTo("1.1");
+        assertThat(snapshot.getTagDescription()).isNull(); // 빈 설명은 설명 없음
+    }
+
+    @Test
+    @DisplayName("태그 null은 태그와 설명을 함께 지운다")
+    void updateTagNullClearsTagAndDescription() {
+        stubModelInWorkspace();
+        ModelVersion snapshot = snapshot(2L);
+        snapshot.setTag("1.0");
+        snapshot.setTagDescription("1차 오픈");
+        given(modelVersionRepository.findByModelIdAndVersion(501L, 2L)).willReturn(Optional.of(snapshot));
+
+        service.updateTag(7L, 77L, 501L, 2L, jsonNode("{\"tag\":null,\"tagDescription\":\"무시\"}"));
+
+        assertThat(snapshot.getTag()).isNull();
+        assertThat(snapshot.getTagDescription()).isNull();
+        verify(modelVersionRepository, never()).existsByModelIdAndTagAndVersionNot(anyLong(), anyString(), anyLong());
+    }
+
+    @Test
+    @DisplayName("같은 문서의 다른 버전이 쓰는 태그는 409 DUPLICATED_NAME이다")
+    void updateTagRejectsDuplicate() {
+        stubModelInWorkspace();
+        ModelVersion snapshot = snapshot(3L);
+        given(modelVersionRepository.findByModelIdAndVersion(501L, 3L)).willReturn(Optional.of(snapshot));
+        given(modelVersionRepository.existsByModelIdAndTagAndVersionNot(501L, "1.0", 3L)).willReturn(true);
+
+        assertThatThrownBy(() -> service.updateTag(7L, 77L, 501L, 3L, jsonNode("{\"tag\":\"1.0\"}")))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATED_NAME));
+        assertThat(snapshot.getTag()).isNull();
+    }
+
+    @Test
+    @DisplayName("tag 필드 없음·빈 태그·51자 태그·201자 설명은 400 INVALID_REQUEST다")
+    void updateTagRejectsInvalidInput() {
+        stubModelInWorkspace();
+        given(modelVersionRepository.findByModelIdAndVersion(501L, 2L)).willReturn(Optional.of(snapshot(2L)));
+
+        for (String body : List.of("{}", "{\"tag\":\"  \"}", "{\"tag\":\"" + "x".repeat(51) + "\"}",
+                "{\"tag\":\"1.0\",\"tagDescription\":\"" + "x".repeat(201) + "\"}")) {
+            assertThatThrownBy(() -> service.updateTag(7L, 77L, 501L, 2L, jsonNode(body)))
+                    .as(body.length() > 60 ? body.substring(0, 60) : body)
+                    .isInstanceOfSatisfying(BusinessException.class, e ->
+                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+        }
     }
 
     @Test

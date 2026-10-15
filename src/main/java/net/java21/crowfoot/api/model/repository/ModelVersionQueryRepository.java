@@ -24,18 +24,21 @@ public class ModelVersionQueryRepository {
             long version,
             String changeSummary,
             String memo,
+            String tag,
+            String tagDescription,
             Long createdById,
             String createdByName,
             Instant createdAt
     ) {
     }
 
-    /** 버전 기록 목록 — 정렬 version desc(최신 먼저). keyword는 메모 부분 일치(대소문자 무시) */
+    /** 버전 기록 목록 — 정렬 version desc(최신 먼저). keyword는 메모·태그 부분 일치(대소문자 무시) */
     public List<VersionRow> search(long modelId, String keyword, int page, int size) {
         QModelVersion version = QModelVersion.modelVersion;
         QUser creator = QUser.user;
         return query.select(Projections.constructor(VersionRow.class,
                         version.version, version.changeSummary, version.memo,
+                        version.tag, version.tagDescription,
                         version.createdBy, creator.name, version.createdAt))
                 .from(version)
                 .leftJoin(creator).on(version.createdBy.eq(creator.id))
@@ -55,11 +58,12 @@ public class ModelVersionQueryRepository {
                 .fetchFirst(), 0L);
     }
 
-    /** 메모 검색 조건 — null이면 조건 없음(전체). memo가 NULL인 행은 키워드 지정 시 제외된다 */
+    /** 메모·태그 검색 조건 — null이면 조건 없음(전체). 메모와 태그가 모두 NULL인 행은 키워드 지정 시 제외된다 */
     private static BooleanExpression memoLike(String keyword) {
         if (keyword == null || keyword.isBlank()) {
             return null;
         }
-        return QModelVersion.modelVersion.memo.containsIgnoreCase(keyword);
+        QModelVersion version = QModelVersion.modelVersion;
+        return version.memo.containsIgnoreCase(keyword).or(version.tag.containsIgnoreCase(keyword));
     }
 }

@@ -40,13 +40,13 @@ class ModelVersionPrunerTest {
     void pruneDeletesAtCutoffBoundary() {
         pruner.prune(501L, 150L, 7L);
 
-        verify(modelVersionRepository).deleteByModelIdAndVersionLessThanEqual(501L, 50L);
+        verify(modelVersionRepository).deleteByModelIdAndVersionLessThanEqualAndTagIsNull(501L, 50L);
     }
 
     @Test
     @DisplayName("삭제가 일어난 경우에만 감사 MODEL_VERSION_PRUNED를 남긴다 — pruned·keptFrom 상세")
     void pruneAuditsOnlyWhenDeleted() {
-        given(modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(501L, 50L)).willReturn(3L);
+        given(modelVersionRepository.deleteByModelIdAndVersionLessThanEqualAndTagIsNull(501L, 50L)).willReturn(3L);
 
         pruner.prune(501L, 150L, 7L);
 
@@ -57,7 +57,7 @@ class ModelVersionPrunerTest {
     @Test
     @DisplayName("삭제 0건(초기 100 저장)은 감사를 남기지 않는다 — 0건 감사 잡음 방지")
     void pruneSkipsAuditWhenNothingDeleted() {
-        given(modelVersionRepository.deleteByModelIdAndVersionLessThanEqual(anyLong(), anyLong()))
+        given(modelVersionRepository.deleteByModelIdAndVersionLessThanEqualAndTagIsNull(anyLong(), anyLong()))
                 .willReturn(0L);
 
         pruner.prune(501L, 99L, 7L);

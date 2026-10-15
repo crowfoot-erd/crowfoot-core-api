@@ -16,13 +16,15 @@ import java.time.Instant;
 /**
  * 문서 버전 기록 실체 (08-core/02-model.md Section 1.11) — content 저장마다 1:1 스냅샷.
  * change_summary는 웹 에디터가 만든 변경 요약 JSON(자동 메모), memo는 사용자 자유 메모.
+ * tag·tagDescription은 버전 태그(08-core/13-model-versions.md Section 1.7) — 붙은 버전은 프루닝에서 빠진다.
  * createdAt은 생성자 주입 — 저장(1.5) bulk UPDATE가 기록하는 models.updated_at과
  * 같은 시각으로 맞춰 목록 정렬·표기가 어긋나지 않게 한다(@CreationTimestamp 미사용).
  */
 @Entity
 @Table(name = "model_versions", schema = "crowfoot_core",
-        uniqueConstraints = @UniqueConstraint(name = "uq_model_versions_model_version",
-                columnNames = {"model_id", "version"}),
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uq_model_versions_model_version", columnNames = {"model_id", "version"}),
+                @UniqueConstraint(name = "uq_model_versions_model_tag", columnNames = {"model_id", "tag"})},
         indexes = @Index(name = "ix_model_versions_model_id", columnList = "model_id"))
 @Getter
 @Setter
@@ -46,6 +48,12 @@ public class ModelVersion {
 
     /** 사용자 메모(≤500자) — 자동 요약과 별개 */
     private String memo;
+
+    /** 버전 태그(≤50자, 예: 1.0) — 문서 안에서 유일, 없으면 null */
+    private String tag;
+
+    /** 태그 설명(≤200자) — 태그가 없으면 null */
+    private String tagDescription;
 
     private Long createdBy;
 
