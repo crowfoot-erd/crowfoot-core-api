@@ -17,6 +17,7 @@
         <!-- 중첩 record를 묶는 네임스페이스 클래스(XxxDtos·XxxRequests)를 오탐한다 -->
         <exclude name="MissingStaticMethodInNonInstantiatableClass"/>
         <exclude name="AssignmentInOperand"/>
+        <exclude name="CloseResource"/>
     </rule>
 
     <!-- 손으로 쓴 파서의 s.charAt(i++)·while ((line = r.readLine()) != null) 관용구는 허용한다 -->
@@ -24,6 +25,14 @@
         <properties>
             <property name="allowIncrementDecrement" value="true"/>
             <property name="allowWhile" value="true"/>
+        </properties>
+    </rule>
+
+    <!-- finally에서 닫기 실패를 무시하고 닫는 closeQuietly(...)도 닫는 메서드로 본다.
+         클래스로 한정한 호출은 "클래스.메서드" 이름으로 비교하므로 따로 적는다(database-manager TargetDatabase) -->
+    <rule ref="category/java/errorprone.xml/CloseResource">
+        <properties>
+            <property name="closeTargets" value="closeQuietly,TargetDatabase.closeQuietly"/>
         </properties>
     </rule>
 </ruleset>
