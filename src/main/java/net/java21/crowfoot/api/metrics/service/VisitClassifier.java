@@ -152,8 +152,8 @@ public class VisitClassifier {
         if (path.length() > 1 && path.endsWith("/")) {
             path = path.substring(0, path.length() - 1);
         }
-        if (path.equals("/") || path.equals("/login") || path.equals("/terms")
-                || path.equals("/workspaces") || path.equals("/community")) {
+        if ("/".equals(path) || "/login".equals(path) || "/terms".equals(path)
+                || "/workspaces".equals(path) || "/community".equals(path)) {
             return new PathInfo(path, null);
         }
         if (path.startsWith("/workspaces/")) {
@@ -161,7 +161,7 @@ public class VisitClassifier {
             int slash = rest.indexOf('/');
             if (slash > 0) {
                 String after = rest.substring(slash + 1);          // {models|connections|terms|memberships}/...
-                if (after.startsWith("models/") || after.equals("models")) {
+                if (after.startsWith("models/") || "models".equals(after)) {
                     return new PathInfo("/workspaces/*/models/*", null);
                 }
             }

@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 
 /**
  * 방언 레지스트리 — 신규 DBMS는 여기에 구현을 추가한다.

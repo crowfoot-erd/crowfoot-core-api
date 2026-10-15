@@ -25,7 +25,7 @@ public enum CommunityBoard {
         try {
             return valueOf(value.trim());
         } catch (IllegalArgumentException ex) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.board.unknown", value);
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, ex, "detail.board.unknown", value);
         }
     }
 }

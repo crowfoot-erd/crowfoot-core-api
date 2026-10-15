@@ -3,7 +3,6 @@ package net.java21.crowfoot.api.term.service;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.domaintype.repository.WorkspaceDomainTypeRepository;
-import net.java21.crowfoot.api.model.domain.DatabaseType;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.WorkspaceTerm;
 import net.java21.crowfoot.api.term.dto.TermResponse;
@@ -14,15 +13,13 @@ import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 워크스페이스 용어 사전 API (08-core/01-workspace.md Section 4) — 목록·upsert·삭제.
@@ -62,7 +59,7 @@ public class TermService {
         String term = normalizeTerm(request.term());
         String label = request.label().trim();
         Map<String, String> types = normalizeTypes(request.types());
-        String typesJson = types == null ? null : writeMap(types);
+        String typesJson = types.isEmpty() ? null : writeMap(types);
         Long domainTypeId = resolveDomainType(workspaceId, request.domainTypeId());
 
         WorkspaceTerm entity = termRepository.findByWorkspaceIdAndTerm(workspaceId, term).orElse(null);
@@ -81,7 +78,7 @@ public class TermService {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("term", term);
         detail.put("label", label);
-        if (types != null) {
+        if (!types.isEmpty()) {
             detail.put("types", types);
         }
         if (domainTypeId != null) {
@@ -118,56 +115,23 @@ public class TermService {
 
     /** 물리명 토큰 정규화 — trim + 소문자. 토큰에는 공백이 없다(추론이 '_', camelCase로만 분해한다) */
     private String normalizeTerm(String raw) {
-        String term = raw == null ? "" : raw.trim().toLowerCase();
+        String term = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         if (term.isEmpty() || term.chars().anyMatch(Character::isWhitespace)) {
             throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.token");
         }
         return term;
     }
 
-    /** DBMS 종류별 타입 맵 검증·정규화 — SystemTermService와 같은 규칙(키는 database_types 등록 코드,
-     *  값 trim 후 빈 값은 버린다, 전부 비면 null) */
     private Map<String, String> normalizeTypes(Map<String, String> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return null;
-        }
-        Set<String> codes = databaseTypeRepository.findAllByOrderByCodeAsc().stream()
-                .map(DatabaseType::getCode)
-                .collect(Collectors.toSet());
-        Map<String, String> types = new LinkedHashMap<>();
-        raw.forEach((code, value) -> {
-            String key = code == null ? "" : code.trim();
-            String type = value == null ? "" : value.trim();
-            if (type.isEmpty()) {
-                return;
-            }
-            if (key.isEmpty() || !codes.contains(key)) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                        "지원하지 않는 데이터베이스 종류입니다: " + key);
-            }
-            if (type.length() > 100) {
-                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.datatype.length");
-            }
-            types.put(key, type);
-        });
-        return types.isEmpty() ? null : types;
+        return TermTypeMaps.normalizeTypes(raw, databaseTypeRepository);
     }
 
     private String writeMap(Map<String, String> map) {
-        try {
-            return objectMapper.writeValueAsString(map);
-        } catch (Exception ex) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.value.unsavable");
-        }
+        return TermTypeMaps.writeMap(objectMapper, map);
     }
 
     private Map<String, String> readMap(String json) {
-        try {
-            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
-            });
-        } catch (Exception ex) {
-            throw new IllegalStateException("용어 사전 맵 파싱 실패: " + json, ex);
-        }
+        return TermTypeMaps.readMap(objectMapper, json, "용어 사전");
     }
 
     private TermResponse toResponse(WorkspaceTerm term) {

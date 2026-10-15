@@ -6,6 +6,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Function;
@@ -28,7 +29,7 @@ public class Introspectors {
 
     /** 등록된 전략이 없으면 null — 호출부가 INVALID_DBMS_TYPE로 판정한다 */
     public SchemaIntrospector forDbmsType(String dbmsType) {
-        return byDbmsType.get(dbmsType == null ? "" : dbmsType.trim().toLowerCase());
+        return byDbmsType.get(dbmsType == null ? "" : dbmsType.trim().toLowerCase(Locale.ROOT));
     }
 
     /** 전략에 맞는 URL·타임아웃으로 접속을 연다 — 자격 증명(평문 복호화본)은 호출부가 넘긴다 */

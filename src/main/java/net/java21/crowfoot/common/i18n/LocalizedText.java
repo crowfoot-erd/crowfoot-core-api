@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.SequencedMap;
 
 /**
  * 다국어 텍스트 요청 값 (08-core/08-community.md §2.1 쓰기 다형) — JSON에서 문자열 또는
@@ -16,9 +17,9 @@ import java.util.Map;
  */
 public final class LocalizedText {
 
-    private final LinkedHashMap<String, String> values;
+    private final SequencedMap<String, String> values;
 
-    private LocalizedText(LinkedHashMap<String, String> values) {
+    private LocalizedText(SequencedMap<String, String> values) {
         this.values = values;
     }
 
@@ -26,14 +27,14 @@ public final class LocalizedText {
     @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
     public static LocalizedText of(Object raw) {
         if (raw instanceof String text) {
-            LinkedHashMap<String, String> single = new LinkedHashMap<>();
+            SequencedMap<String, String> single = new LinkedHashMap<>();
             if (!text.isBlank()) {
                 single.put("ko", text);
             }
             return new LocalizedText(single);
         }
         if (raw instanceof Map<?, ?> map) {
-            LinkedHashMap<String, String> converted = new LinkedHashMap<>();
+            Map<String, String> converted = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : map.entrySet()) {
                 if (entry.getKey() instanceof String lang && entry.getValue() instanceof String value) {
                     converted.put(lang, value);

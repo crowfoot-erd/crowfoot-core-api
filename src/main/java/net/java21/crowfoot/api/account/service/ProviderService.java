@@ -1,7 +1,6 @@
 package net.java21.crowfoot.api.account.service;
 
 import lombok.RequiredArgsConstructor;
-import net.java21.crowfoot.api.account.domain.Provider;
 import net.java21.crowfoot.api.account.dto.ProviderResponse;
 import net.java21.crowfoot.api.account.repository.ProviderRepository;
 import org.springframework.stereotype.Service;

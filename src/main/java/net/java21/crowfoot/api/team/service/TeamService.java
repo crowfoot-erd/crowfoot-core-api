@@ -222,7 +222,7 @@ public class TeamService {
         try {
             return Long.parseLong(userId);
         } catch (NumberFormatException e) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.user-id.numeric");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, e, "detail.user-id.numeric");
         }
     }
 

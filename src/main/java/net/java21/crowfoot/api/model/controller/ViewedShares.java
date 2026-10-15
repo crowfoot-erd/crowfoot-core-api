@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SequencedMap;
 
 /**
  * 최근 조회한 공유 문서 쿠키(crowfoot_share_views)의 값 (08-core/02-model.md Section 1.10.4) —
@@ -20,7 +21,7 @@ final class ViewedShares {
     /** 쿠키 크기 상한 — 최근 50문서까지만 기억하고 오래된 순으로 버린다 */
     private static final int MAX_ENTRIES = 50;
 
-    private final LinkedHashMap<String, Instant> viewedAt = new LinkedHashMap<>();
+    private final SequencedMap<String, Instant> viewedAt = new LinkedHashMap<>();
 
     private ViewedShares() {}
 

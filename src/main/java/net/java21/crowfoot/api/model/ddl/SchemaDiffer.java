@@ -1,9 +1,12 @@
 package net.java21.crowfoot.api.model.ddl;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -121,7 +124,7 @@ public final class SchemaDiffer {
                 changes.add(new TableDropped(fromTable));
             }
         }
-        diffForeignKeys(from, fromTablesByName, tablesById(from.tables()), to, toTablesByName,
+        diffForeignKeys(from, tablesById(from.tables()), to, toTablesByName,
                 tablesById(to.tables()), changes);
         return new Result(List.copyOf(changes), skippedIndexes);
     }
@@ -229,7 +232,7 @@ public final class SchemaDiffer {
 
     private static boolean sameGenerated(DdlContent.Generated before, DdlContent.Generated after) {
         if (before == null || after == null) {
-            return before == after;
+            return before == null && after == null;
         }
         return before.stored() == after.stored()
                 && Objects.equals(expressionKey(before.expression()), expressionKey(after.expression()));
@@ -241,7 +244,7 @@ public final class SchemaDiffer {
         if (expression == null || expression.isBlank()) {
             return null;
         }
-        String text = expression.toLowerCase(java.util.Locale.ROOT);
+        String text = expression.toLowerCase(Locale.ROOT);
         // PostgreSQL은 식을 다시 써서 돌려준다 — 캐스트(::text, ::character varying(20), ::text[])를 지우고
         // "= ANY (ARRAY[a, b])"를 "IN (a, b)"로 되돌린다(status IN ('A','B') ≡ (status)::text = ANY (ARRAY['A'::…]))
         text = PG_CAST.matcher(text).replaceAll("");
@@ -250,8 +253,15 @@ public final class SchemaDiffer {
         return text.replaceAll("[()`\"\\s]", "");
     }
 
-    private static final java.util.regex.Pattern PG_CAST = java.util.regex.Pattern.compile(
-            "::(?:character varying|double precision|timestamp(?: with(?:out)? time zone)?|[a-z_][a-z0-9_]*)(?:\\(\\d+(?:,\\s*\\d+)?\\))?(?:\\[\\])?");
+    private static final java.util.regex.Pattern PG_CAST = pgCastPattern();
+
+    /** 정규식은 메서드에서 컴파일한다 — ReDoS 검토 결과를 이 정규식에만 한정해 억제하려고(필드 단위 억제는 SpotBugs가 받지 않는다) */
+    @SuppressFBWarnings(value = "REDOS",
+            justification = "반복이 중첩되지 않는다(선택 그룹 안 \\d+는 괄호·쉼표로 경계가 정해진다) — 매치 위치마다 선형")
+    private static java.util.regex.Pattern pgCastPattern() {
+        return java.util.regex.Pattern.compile(
+                "::(?:character varying|double precision|timestamp(?: with(?:out)? time zone)?|[a-z_][a-z0-9_]*)(?:\\(\\d+(?:,\\s*\\d+)?\\))?(?:\\[\\])?");
+    }
 
     private static final java.util.regex.Pattern PG_ANY_ARRAY = java.util.regex.Pattern.compile(
             "=\\s*any\\s*\\(+\\s*array\\s*\\[");
@@ -280,7 +290,7 @@ public final class SchemaDiffer {
 
     /* ---------- FK — 문서 전체 단위 매칭 ---------- */
 
-    private static void diffForeignKeys(DdlContent from, Map<String, DdlContent.Table> fromTablesByName,
+    private static void diffForeignKeys(DdlContent from,
                                         Map<String, DdlContent.Table> fromTablesById, DdlContent to,
                                         Map<String, DdlContent.Table> toTablesByName,
                                         Map<String, DdlContent.Table> toTablesById, List<Change> changes) {
@@ -372,7 +382,7 @@ public final class SchemaDiffer {
     /* ---------- 공용 헬퍼 ---------- */
 
     private static String key(String name) {
-        return name.trim().toLowerCase();
+        return name.trim().toLowerCase(Locale.ROOT);
     }
 
     private static Map<String, DdlContent.Table> tablesByKey(List<DdlContent.Table> tables) {
@@ -484,7 +494,7 @@ public final class SchemaDiffer {
     private static List<String> opclasses(DdlContent.Index index) {
         List<String> out = new ArrayList<>();
         for (DdlContent.IndexColumn column : index.columns()) {
-            out.add(column.opclass() == null ? "" : column.opclass().toLowerCase(java.util.Locale.ROOT));
+            out.add(column.opclass() == null ? "" : column.opclass().toLowerCase(Locale.ROOT));
         }
         return out;
     }
@@ -500,7 +510,7 @@ public final class SchemaDiffer {
             String name = physicalName(table, indexColumn.columnId());
             if (name != null) {
                 String order = indexColumn.order() == null || indexColumn.order().isBlank()
-                        ? "ASC" : indexColumn.order().trim().toUpperCase();
+                        ? "ASC" : indexColumn.order().trim().toUpperCase(Locale.ROOT);
                 refs.add(name + " " + order);
             }
         }

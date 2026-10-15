@@ -80,12 +80,12 @@ public class InternalRefreshTokenService {
 
         Instant now = clock.instant();
         if (current.isRevoked()) {
-            return reuseDetected(current, now);
+            return reuseDetected(current);
         }
         if (current.getRotatedAt() != null) {
             boolean withinGrace = Duration.between(current.getRotatedAt(), now).compareTo(gracePeriod) <= 0;
             if (!withinGrace) {
-                return reuseDetected(current, now);
+                return reuseDetected(current);
             }
             // GRACE — 유예 내 구 Refresh 재사용은 최신 토큰으로 이어서 Rotation(멀티탭)
             RefreshToken latest = refreshTokenQueryRepository
@@ -121,7 +121,7 @@ public class InternalRefreshTokenService {
         refreshTokenQueryRepository.revokeBySessionId(UUID.fromString(sid), clock.instant());
     }
 
-    private RotateRefreshTokenResponse reuseDetected(RefreshToken current, Instant now) {
+    private RotateRefreshTokenResponse reuseDetected(RefreshToken current) {
         // 세션 전체 무효화 — 폐기는 별도 트랜잭션에서 커밋되므로 409 전파에도 롤백되지 않는다
         sessionRevoker.revokeSession(current.getSessionId(), current.getUserId(),
                 current.isRevoked() ? "revoked-token-reuse" : "grace-exceeded-reuse");

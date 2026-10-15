@@ -1,5 +1,8 @@
 package net.java21.crowfoot.api.connection.introspect;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import net.java21.crowfoot.api.connection.introspect.IntrospectionSupport.FkBuilder;
+import net.java21.crowfoot.api.connection.introspect.IntrospectionSupport.TableBuilder;
 import org.springframework.stereotype.Component;
 
 import java.sql.Connection;
@@ -9,8 +12,13 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+
+import static net.java21.crowfoot.api.connection.introspect.IntrospectionSupport.getInteger;
+import static net.java21.crowfoot.api.connection.introspect.IntrospectionSupport.normalizeComment;
+import static net.java21.crowfoot.api.connection.introspect.IntrospectionSupport.outerParensWrapAll;
 
 /**
  * MySQL introspection — database = schema라 접속 DB가 곧 대상이다.
@@ -78,8 +86,8 @@ public class MySqlIntrospector implements SchemaIntrospector {
 
     @Override
     public String commonTypeCode(String physicalType) {
-        String normalized = physicalType == null ? "" : physicalType.trim().toLowerCase();
-        return COMMON_TYPES.getOrDefault(normalized, physicalType == null ? "" : physicalType.trim().toUpperCase());
+        String normalized = physicalType == null ? "" : physicalType.trim().toLowerCase(Locale.ROOT);
+        return COMMON_TYPES.getOrDefault(normalized, physicalType == null ? "" : physicalType.trim().toUpperCase(Locale.ROOT));
     }
 
     @Override
@@ -87,22 +95,13 @@ public class MySqlIntrospector implements SchemaIntrospector {
         // MySQL은 database = schema — 접속 DB가 곧 대상이라 schemaName을 쓰지 않는다
         String schema = connection.getCatalog();
 
-        Map<String, TableBuilder> builders = new LinkedHashMap<>();
         String tableSql = """
                 SELECT TABLE_NAME, TABLE_COMMENT
                 FROM INFORMATION_SCHEMA.TABLES
                 WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
                 ORDER BY TABLE_NAME
                 """;
-        try (PreparedStatement ps = connection.prepareStatement(tableSql)) {
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String name = rs.getString(1);
-                    builders.put(name, new TableBuilder(name, normalizeComment(rs.getString(2))));
-                }
-            }
-        }
+        Map<String, TableBuilder> builders = IntrospectionSupport.readTables(connection, tableSql, schema);
 
         String columnSql = """
                 SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH,
@@ -122,13 +121,13 @@ public class MySqlIntrospector implements SchemaIntrospector {
                     }
                     String extra = rs.getString(9) == null ? "" : rs.getString(9);
                     String dataType = "tinyint(1)".equalsIgnoreCase(rs.getString(13)) ? "boolean" : rs.getString(3);
-                    String lowerExtra = extra.toLowerCase(java.util.Locale.ROOT);
+                    String lowerExtra = extra.toLowerCase(Locale.ROOT);
                     String generation = rs.getString(12);
                     boolean generated = lowerExtra.contains("generated") && !lowerExtra.contains("default_generated")
                             && generation != null && !generation.isBlank();
                     // 날짜시간의 소수 초는 precision에 — MySQL 기본값 0은 null로 둔다
                     Integer precision = getInteger(rs, 5);
-                    if (FRACTIONAL_TYPES.contains(dataType.toLowerCase(java.util.Locale.ROOT))) {
+                    if (FRACTIONAL_TYPES.contains(dataType.toLowerCase(Locale.ROOT))) {
                         Integer fsp = getInteger(rs, 11);
                         precision = fsp == null || fsp == 0 ? null : fsp;
                     }
@@ -160,37 +159,10 @@ public class MySqlIntrospector implements SchemaIntrospector {
                 WHERE tc.TABLE_SCHEMA = ? AND tc.CONSTRAINT_TYPE IN ('PRIMARY KEY', 'UNIQUE')
                 ORDER BY tc.TABLE_NAME, tc.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
                 """;
-        Map<String, KeyBuilder> keys = new LinkedHashMap<>();
-        try (PreparedStatement ps = connection.prepareStatement(keySql)) {
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String keyId = rs.getString(2) + ' ' + rs.getString(3);
-                    KeyBuilder key = keys.get(keyId);
-                    if (key == null) {
-                        key = new KeyBuilder("PRIMARY KEY".equals(rs.getString(1)), rs.getString(2), rs.getString(3));
-                        keys.put(keyId, key);
-                    }
-                    key.columns.add(rs.getString(4));
-                }
-            }
-        }
-        for (KeyBuilder key : keys.values()) {
-            TableBuilder builder = builders.get(key.table);
-            if (builder == null || key.columns.isEmpty()) {
-                continue;
-            }
-            if (key.primary) {
-                builder.primaryKeyName = key.name;
-                builder.primaryKeyColumns = List.copyOf(key.columns);
-            } else {
-                builder.uniques.add(new IntrospectedSchema.IntrospectedUnique(key.name, List.copyOf(key.columns)));
-            }
-        }
+        IntrospectionSupport.readKeys(connection, keySql, schema, builders, 1, 2, true);
 
         readChecks(connection, schema, builders);
 
-        List<IntrospectedSchema.IntrospectedFk> foreignKeys = new ArrayList<>();
         String fkSql = """
                 SELECT kcu.CONSTRAINT_NAME, kcu.TABLE_NAME, kcu.COLUMN_NAME,
                        kcu.REFERENCED_TABLE_NAME, kcu.REFERENCED_COLUMN_NAME,
@@ -202,40 +174,24 @@ public class MySqlIntrospector implements SchemaIntrospector {
                 WHERE kcu.TABLE_SCHEMA = ? AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
                 ORDER BY kcu.CONSTRAINT_NAME, kcu.ORDINAL_POSITION
                 """;
-        Map<String, FkBuilder> fkBuilders = new LinkedHashMap<>();
-        try (PreparedStatement ps = connection.prepareStatement(fkSql)) {
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String fkName = rs.getString(1);
-                    FkBuilder fk = fkBuilders.get(fkName);
-                    if (fk == null) {
-                        fk = new FkBuilder(fkName, rs.getString(2), rs.getString(4), rs.getString(6), rs.getString(7));
-                        fkBuilders.put(fkName, fk);
-                    }
-                    fk.childColumns.add(rs.getString(3));
-                    fk.parentColumns.add(rs.getString(5));
-                }
-            }
-        }
-        for (FkBuilder fk : fkBuilders.values()) {
-            if (!fk.childColumns.isEmpty()) {
-                foreignKeys.add(fk.build());
-            }
-        }
+        Map<String, FkBuilder> fkBuilders = IntrospectionSupport.readForeignKeys(connection, fkSql, schema);
         readIndexes(connection, schema, builders, fkBuilders.keySet());
 
-        return new IntrospectedSchema(
-                builders.values().stream().map(TableBuilder::build).toList(),
-                List.copyOf(foreignKeys));
+        return IntrospectionSupport.buildSchema(builders, fkBuilders);
     }
 
     /** 소수 초를 갖는 타입 */
     private static final java.util.Set<String> FRACTIONAL_TYPES = java.util.Set.of("time", "datetime", "timestamp");
 
     /** ON UPDATE 값 — EXTRA의 "on update CURRENT_TIMESTAMP(6)"에서 */
-    private static final java.util.regex.Pattern ON_UPDATE =
-            java.util.regex.Pattern.compile("(?i)on update (\\S+(?:\\([^)]*\\))?)");
+    private static final java.util.regex.Pattern ON_UPDATE = onUpdatePattern();
+
+    /** 정규식은 메서드에서 컴파일한다 — ReDoS 검토 결과를 이 정규식에만 한정해 억제하려고(필드 단위 억제는 SpotBugs가 받지 않는다) */
+    @SuppressFBWarnings(value = "REDOS",
+            justification = "끝 고정이 없는 find()이고 선택 그룹이 빈 매치로 바로 성공해 역추적이 없다 — 입력은 INFORMATION_SCHEMA.COLUMNS.EXTRA(짧은 서버 값)")
+    private static java.util.regex.Pattern onUpdatePattern() {
+        return java.util.regex.Pattern.compile("(?i)on update (\\S+(?:\\([^)]*\\))?)");
+    }
 
     /** 전문 검색 파서 — SHOW CREATE TABLE의 "FULLTEXT KEY `ft` (…) /*!50100 WITH PARSER `ngram` *&#47;" */
     private static final java.util.regex.Pattern FULLTEXT_PARSER = java.util.regex.Pattern.compile(
@@ -243,7 +199,7 @@ public class MySqlIntrospector implements SchemaIntrospector {
 
     static String onUpdate(String extra) {
         java.util.regex.Matcher matcher = ON_UPDATE.matcher(extra == null ? "" : extra);
-        return matcher.find() ? matcher.group(1).toUpperCase(java.util.Locale.ROOT) : null;
+        return matcher.find() ? matcher.group(1).toUpperCase(Locale.ROOT) : null;
     }
 
     /** 기본값 — 식 기본값(EXTRA DEFAULT_GENERATED)은 괄호로 감싸 식임을 남긴다. 시각 키워드는 그대로 */
@@ -252,10 +208,10 @@ public class MySqlIntrospector implements SchemaIntrospector {
             return null;
         }
         if (lowerExtra.contains("default_generated")) {
-            String lower = value.toLowerCase(java.util.Locale.ROOT);
+            String lower = value.toLowerCase(Locale.ROOT);
             if (lower.startsWith("current_timestamp") || lower.startsWith("now(") || lower.startsWith("current_date")
                     || lower.startsWith("current_time") || lower.startsWith("localtime")) {
-                return value.toUpperCase(java.util.Locale.ROOT);
+                return value.toUpperCase(Locale.ROOT);
             }
             return "(" + cleanExpression(value) + ")";
         }
@@ -275,26 +231,6 @@ public class MySqlIntrospector implements SchemaIntrospector {
             cleaned = cleaned.substring(1, cleaned.length() - 1).strip();
         }
         return cleaned;
-    }
-
-    /** 맨 앞 괄호가 맨 끝 괄호와 짝인가 — (a) or (b) 같은 식은 아니다 */
-    private static boolean outerParensWrapAll(String text) {
-        int depth = 0;
-        boolean quoted = false;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c == '\'') {
-                quoted = !quoted;
-            } else if (!quoted && c == '(') {
-                depth++;
-            } else if (!quoted && c == ')') {
-                depth--;
-                if (depth == 0 && i < text.length() - 1) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
     /** CHECK 제약 — 8.0.16+의 CHECK_CONSTRAINTS. 그 전 버전(테이블 없음)은 읽지 않는다 */
@@ -319,13 +255,15 @@ public class MySqlIntrospector implements SchemaIntrospector {
                     }
                 }
             }
-        } catch (SQLException e) {
+        } catch (SQLException ignored) {
             // MySQL 8.0.16 이전·MariaDB 일부 — CHECK를 읽지 않고 진행한다
         }
     }
 
     /** 일반 인덱스 — STATISTICS. 유니크(UK로 읽힘)·PRIMARY·FK가 만든 인덱스(FK 이름과 같은 이름)는 뺀다.
      *  v1.37: 함수 키 조각(8.0.13+ EXPRESSION)은 식 인덱스로, 식이 든 유니크 인덱스는 유니크 인덱스로, HASH는 HASH로 읽는다 */
+    @SuppressFBWarnings(value = "SQL_INJECTION_JDBC",
+            justification = "SHOW CREATE TABLE은 바인드 변수를 받지 않는다 — 테이블명은 INFORMATION_SCHEMA에서 읽은 값이고 백틱으로 감싸며 안의 백틱은 두 겹으로 이스케이프한다")
     private static void readIndexes(Connection connection, String schema, Map<String, TableBuilder> builders,
                                     java.util.Set<String> foreignKeyNames) throws SQLException {
         Map<String, IndexBuilder> indexes = new LinkedHashMap<>();
@@ -374,13 +312,17 @@ public class MySqlIntrospector implements SchemaIntrospector {
         }
     }
 
+    /** STATISTICS 조회 — EXPRESSION 열(8.0.13+) 유무만 다르다 */
+    private static final String INDEX_ROWS_SQL = "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, COLLATION, INDEX_TYPE, NON_UNIQUE";
+    private static final String INDEX_ROWS_FROM = " FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = ? AND INDEX_NAME <> 'PRIMARY'"
+            + " ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX";
+    private static final String INDEX_ROWS_WITH_EXPRESSION_SQL = INDEX_ROWS_SQL + ", EXPRESSION" + INDEX_ROWS_FROM;
+    private static final String INDEX_ROWS_WITHOUT_EXPRESSION_SQL = INDEX_ROWS_SQL + INDEX_ROWS_FROM;
+
     private static void readIndexRows(Connection connection, String schema, Map<String, TableBuilder> builders,
                                       java.util.Set<String> foreignKeyNames, Map<String, IndexBuilder> indexes,
                                       boolean withExpression) throws SQLException {
-        String sql = "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME, COLLATION, INDEX_TYPE, NON_UNIQUE"
-                + (withExpression ? ", EXPRESSION" : "")
-                + " FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = ? AND INDEX_NAME <> 'PRIMARY'"
-                + " ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX";
+        String sql = withExpression ? INDEX_ROWS_WITH_EXPRESSION_SQL : INDEX_ROWS_WITHOUT_EXPRESSION_SQL;
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, schema);
             try (ResultSet rs = ps.executeQuery()) {
@@ -422,78 +364,6 @@ public class MySqlIntrospector implements SchemaIntrospector {
             this.name = name;
             this.type = type;
             this.unique = unique;
-        }
-    }
-
-    private static String normalizeComment(String comment) {
-        // MySQL은 빈 코멘트를 ''가 아니라 종종 NULL로 돌려준다
-        return comment == null || comment.isBlank() ? null : comment;
-    }
-
-    private static Integer getInteger(ResultSet rs, int index) throws SQLException {
-        int value = rs.getInt(index);
-        return rs.wasNull() ? null : value;
-    }
-
-    /** 테이블 조립 중간 상태 */
-    private static final class TableBuilder {
-        private final String name;
-        private final String comment;
-        private final List<IntrospectedSchema.IntrospectedColumn> columns = new ArrayList<>();
-        private final List<IntrospectedSchema.IntrospectedUnique> uniques = new ArrayList<>();
-        private final List<IntrospectedSchema.IntrospectedIndex> indexes = new ArrayList<>();
-        private final List<IntrospectedSchema.IntrospectedCheck> checks = new ArrayList<>();
-        private String primaryKeyName;
-        private List<String> primaryKeyColumns = List.of();
-
-        private TableBuilder(String name, String comment) {
-            this.name = name;
-            this.comment = comment;
-        }
-
-        private IntrospectedSchema.IntrospectedTable build() {
-            return new IntrospectedSchema.IntrospectedTable(
-                    name, comment, List.copyOf(columns), primaryKeyName, primaryKeyColumns, List.copyOf(uniques),
-                    List.copyOf(indexes), List.copyOf(checks));
-        }
-    }
-
-    /** PK·UK 조립 중간 상태 */
-    private static final class KeyBuilder {
-        private final boolean primary;
-        private final String table;
-        private final String name;
-        private final List<String> columns = new ArrayList<>();
-
-        private KeyBuilder(boolean primary, String table, String name) {
-            this.primary = primary;
-            this.table = table;
-            this.name = name;
-        }
-    }
-
-    /** FK 조립 중간 상태 — 행 순서(ordinal)대로 컬럼 쌍이 쌓인다 */
-    private static final class FkBuilder {
-        private final String name;
-        private final String childTable;
-        private final String parentTable;
-        private final String onDelete;
-        private final String onUpdate;
-        private final List<String> childColumns = new ArrayList<>();
-        private final List<String> parentColumns = new ArrayList<>();
-
-        private FkBuilder(String name, String childTable, String parentTable, String onDelete, String onUpdate) {
-            this.name = name;
-            this.childTable = childTable;
-            this.parentTable = parentTable;
-            this.onDelete = onDelete == null ? "NO ACTION" : onDelete;
-            this.onUpdate = onUpdate == null ? "NO ACTION" : onUpdate;
-        }
-
-        private IntrospectedSchema.IntrospectedFk build() {
-            return new IntrospectedSchema.IntrospectedFk(
-                    name, childTable, List.copyOf(childColumns), parentTable, List.copyOf(parentColumns),
-                    onDelete, onUpdate);
         }
     }
 }

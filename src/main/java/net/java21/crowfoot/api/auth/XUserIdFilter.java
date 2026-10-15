@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.auth;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * X-USER-ID 검증 필터 (08-core/00-overview.md Section 1).
@@ -137,10 +139,12 @@ public class XUserIdFilter extends OncePerRequestFilter {
         writeError(response, ErrorCode.AUTH_TOKEN_INVALID);
     }
 
+    @SuppressFBWarnings(value = "XSS_SERVLET",
+            justification = "application/json 응답이고 본문은 ErrorCode 상수의 코드·기본 문구를 Jackson으로 직렬화한 것 — 요청 입력이 섞이지 않는다")
     private void writeError(HttpServletResponse response, ErrorCode code) throws IOException {
         response.setStatus(code.getStatus().value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setCharacterEncoding("UTF-8");
+        response.setCharacterEncoding(StandardCharsets.UTF_8);
         response.getWriter().write(
                 objectMapper.writeValueAsString(ErrorResponse.of(code.getCode(), code.getDefaultMessage())));
     }

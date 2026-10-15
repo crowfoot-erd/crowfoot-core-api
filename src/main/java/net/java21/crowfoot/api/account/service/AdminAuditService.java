@@ -54,6 +54,7 @@ public class AdminAuditService {
                 row.actorEmail(), row.action(), row.targetType(), row.targetId(), parseDetail(row.detail()), row.ip());
     }
 
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // 미기록·깨진 detail은 응답에서 null로 구분한다
     private Map<String, Object> parseDetail(String detail) {
         if (detail == null || detail.isBlank()) {
             return null;
@@ -65,6 +66,7 @@ public class AdminAuditService {
         }
     }
 
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // 조건이 없으면 감사 detail 컬럼을 NULL로 남긴다(빈 객체와 구분)
     private static Map<String, Object> auditDetail(String keyword, String action) {
         if (keyword == null && action == null) {
             return null;

@@ -37,7 +37,7 @@ public class InternalConnectionAccessController {
         try {
             return Long.parseLong(value.trim());
         } catch (NumberFormatException ex) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST);
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, ex);
         }
     }
 }

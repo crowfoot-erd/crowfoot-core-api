@@ -82,7 +82,7 @@ public record IntrospectedSchema(List<IntrospectedTable> tables, List<Introspect
         }
     }
 
-    /** 인덱스 컬럼 — order는 ASC·DESC */
+    /* 인덱스 컬럼 — order는 ASC·DESC */
     /** 인덱스 키 컬럼 — opclass는 PostgreSQL 연산자 클래스(v1.37) */
     public record IndexColumn(String name, String order, String opclass) {
 

@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.model.service;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
 import net.java21.crowfoot.api.connection.service.ConnectionEndpointResolver;
@@ -35,6 +36,8 @@ public class DdlStatementExecutor {
     private final ConnectionCrypto crypto;
 
     /** 문장별 실행 — 호출부가 만든 문장 리스트를 커넥션 DB에서 순서대로 실행한다 */
+    @SuppressFBWarnings(value = "SQL_INJECTION_JDBC",
+            justification = "배포·마이그레이션 기능 자체가 사용자 문서에서 생성한 DDL을 그 사용자가 등록한 커넥션(그 계정의 권한)으로 실행하는 것이다 — 문장 실행이 목적이라 매개변수화할 수 없다")
     public List<ModelDeployResponse.Statement> execute(DbConnection connection, List<String> statements) {
         SchemaIntrospector introspector = introspectors.forDbmsType(connection.getDbmsType());
         if (introspector == null) {

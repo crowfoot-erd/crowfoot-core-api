@@ -3,6 +3,7 @@ package net.java21.crowfoot.api.managed.provision;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -23,6 +24,6 @@ public class ManagedProvisioners {
 
     /** 등록된 전략이 없으면 null — 호출부가 INVALID_REQUEST로 판정한다 */
     public ManagedProvisioner forDbmsType(String dbmsType) {
-        return byDbmsType.get(dbmsType == null ? "" : dbmsType.trim().toLowerCase());
+        return byDbmsType.get(dbmsType == null ? "" : dbmsType.trim().toLowerCase(Locale.ROOT));
     }
 }

@@ -1,7 +1,6 @@
 package net.java21.crowfoot.api.model.service;
 
 import lombok.RequiredArgsConstructor;
-import net.java21.crowfoot.api.model.domain.DatabaseType;
 import net.java21.crowfoot.api.model.dto.DatabaseTypeResponse;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import org.springframework.stereotype.Service;

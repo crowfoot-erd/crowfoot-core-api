@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SpotBugs 제외 필터 — 원천 crowfoot-docs 00-environment/static-analysis.md Section 3.3 -->
+<FindBugsFilter
+        xmlns="https://github.com/spotbugs/filter/3.0.0"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="https://github.com/spotbugs/filter/3.0.0 https://raw.githubusercontent.com/spotbugs/spotbugs/master/spotbugs/etc/findbugsfilter.xsd">
+    <!-- Querydsl APT가 만든 Q 클래스 -->
+    <Match>
+        <Class name="~.*\.Q[A-Z][A-Za-z0-9]*"/>
+    </Match>
+    <!-- 가변 객체 참조 노출 — 엔티티·DTO·Spring 빈 주입 전반에서 오탐이 대부분이다 -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+</FindBugsFilter>

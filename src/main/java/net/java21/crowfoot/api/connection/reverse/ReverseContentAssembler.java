@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -100,11 +101,11 @@ public class ReverseContentAssembler {
             tablesNode.add(tableNode);
             tableNodes.put(table.name(), tableNode);
             if (tableNode.hasNonNull("primaryKey")) {
-                usedKeyNames.add(tableNode.get("primaryKey").get("name").asText().toLowerCase());
+                usedKeyNames.add(tableNode.get("primaryKey").get("name").asText().toLowerCase(Locale.ROOT));
             }
-            tableNode.get("uniques").forEach(u -> usedKeyNames.add(u.get("name").asText().toLowerCase()));
-            tableNode.get("indexes").forEach(i -> usedKeyNames.add(i.get("name").asText().toLowerCase()));
-            tableNode.get("checks").forEach(c -> usedKeyNames.add(c.get("name").asText().toLowerCase()));
+            tableNode.get("uniques").forEach(u -> usedKeyNames.add(u.get("name").asText().toLowerCase(Locale.ROOT)));
+            tableNode.get("indexes").forEach(i -> usedKeyNames.add(i.get("name").asText().toLowerCase(Locale.ROOT)));
+            tableNode.get("checks").forEach(c -> usedKeyNames.add(c.get("name").asText().toLowerCase(Locale.ROOT)));
         }
 
         ArrayNode relationshipsNode = modelNode.putArray("relationships");
@@ -170,7 +171,7 @@ public class ReverseContentAssembler {
             ObjectNode primaryKey = node.putObject("primaryKey");
             String name = table.primaryKeyName();
             if (name == null || name.isBlank() || MYSQL_PRIMARY.equals(name)) {
-                name = table.name().toLowerCase(java.util.Locale.ROOT) + "_pk"; // 에디터 기본 이름과 같다
+                name = table.name().toLowerCase(Locale.ROOT) + "_pk"; // 에디터 기본 이름과 같다
             }
             primaryKey.put("name", name);
             ArrayNode columnIdArray = primaryKey.putArray("columnIds");
@@ -251,25 +252,35 @@ public class ReverseContentAssembler {
         List<String> columnIdList = new ArrayList<>();
         for (String name : fk.childColumns()) {
             String id = childColumnIds.get(name);
-            if (id == null) return; // 관계는 만들어졌지만 컬럼을 못 찾으면 인덱스도 만들지 않는다
+            if (id == null) {
+                return; // 관계는 만들어졌지만 컬럼을 못 찾으면 인덱스도 만들지 않는다
+            }
             columnIdList.add(id);
         }
         String leading = columnIdList.get(0);
         if (childTable.hasNonNull("primaryKey")) {
-            if (leading.equals(childTable.get("primaryKey").get("columnIds").get(0).asText())) return;
+            if (leading.equals(childTable.get("primaryKey").get("columnIds").get(0).asText())) {
+                return;
+            }
         }
         for (JsonNode unique : childTable.get("uniques")) {
-            if (leading.equals(unique.get("columnIds").get(0).asText())) return;
+            if (leading.equals(unique.get("columnIds").get(0).asText())) {
+                return;
+            }
         }
         for (JsonNode index : childTable.get("indexes")) {
             // 부분·식 인덱스는 FK를 덮지 못한다(v1.37)
-            if (index.hasNonNull("where") || index.hasNonNull("expression") || index.path("columns").isEmpty()) continue;
-            if (leading.equals(index.get("columns").get(0).get("columnId").asText())) return;
+            if (index.hasNonNull("where") || index.hasNonNull("expression") || index.path("columns").isEmpty()) {
+                continue;
+            }
+            if (leading.equals(index.get("columns").get(0).get("columnId").asText())) {
+                return;
+            }
         }
 
-        String tableName = childTable.get("physicalName").asText().toLowerCase();
+        String tableName = childTable.get("physicalName").asText().toLowerCase(Locale.ROOT);
         String base = "idx_" + tableName + "_" + fk.childColumns().stream()
-                .map(name -> name.toLowerCase()).collect(Collectors.joining("_"));
+                .map(name -> name.toLowerCase(Locale.ROOT)).collect(Collectors.joining("_"));
         String name = base;
         int suffix = 2;
         while (!usedKeyNames.add(name)) {
@@ -394,7 +405,7 @@ public class ReverseContentAssembler {
 
     /** 카탈로그 원문("SET NULL" 등) → content enum("SET_NULL") */
     private static String referentialAction(String rule) {
-        String normalized = rule == null ? "" : rule.trim().toUpperCase().replace(' ', '_');
+        String normalized = rule == null ? "" : rule.trim().toUpperCase(Locale.ROOT).replace(' ', '_');
         return switch (normalized) {
             case "CASCADE", "RESTRICT", "SET_NULL", "SET_DEFAULT" -> normalized;
             default -> "NO_ACTION";

@@ -47,7 +47,7 @@ public class AccountService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND));
         List<UserIdentity> identities = userIdentityQueryRepository.findByUserId(userId);
         List<String> providers = identities.stream()
-                .map(identity -> identity.getProvider())
+                .map(UserIdentity::getProvider)
                 .toList();
         return new MeResponse(Long.toString(user.getId()), user.getEmail(), user.getName(),
                 githubAvatarUrl(identities), githubLogin(identities), providers, user.isAdmin(),

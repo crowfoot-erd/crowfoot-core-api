@@ -23,6 +23,11 @@ public class BusinessException extends RuntimeException {
         this(errorCode, null, null, false, errorCode.getDefaultMessage(), null);
     }
 
+    /** 원인 예외를 보존한다 — 응답 문구는 기본 문구 그대로이고 원인은 로그 스택에만 남는다 */
+    public BusinessException(ErrorCode errorCode, Throwable cause) {
+        this(errorCode, null, null, false, errorCode.getDefaultMessage(), cause);
+    }
+
     public BusinessException(ErrorCode errorCode, String message) {
         this(errorCode, null, null, true, message, null);
     }
@@ -34,6 +39,11 @@ public class BusinessException extends RuntimeException {
     /** 번들 키 생성 — resultMessage를 Accept-Language 로케일(ko/en/ja/zh)로 해석한다. args는 {0} 치환값 */
     public static BusinessException of(ErrorCode errorCode, String messageKey, Object... args) {
         return new BusinessException(errorCode, messageKey, args, false, errorCode.getDefaultMessage(), null);
+    }
+
+    /** {@link #of(ErrorCode, String, Object...)}에 원인 예외를 더한다 — 응답에는 영향이 없고 로그 스택에만 남는다 */
+    public static BusinessException of(ErrorCode errorCode, Throwable cause, String messageKey, Object... args) {
+        return new BusinessException(errorCode, messageKey, args, false, errorCode.getDefaultMessage(), cause);
     }
 
     private BusinessException(ErrorCode errorCode, String messageKey, Object[] args,

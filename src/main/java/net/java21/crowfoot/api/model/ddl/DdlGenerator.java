@@ -241,7 +241,7 @@ public final class DdlGenerator {
     }
 
     private static String key(String name) {
-        return name.trim().toLowerCase();
+        return name.trim().toLowerCase(Locale.ROOT);
     }
 
     /* ---------- CREATE TABLE ---------- */

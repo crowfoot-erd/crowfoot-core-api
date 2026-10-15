@@ -14,6 +14,7 @@ public class DailyMetricRollupId implements Serializable {
     private String metricKey;
 
     public DailyMetricRollupId() {
+        // JPA 복합 키(@IdClass)가 요구하는 기본 생성자
     }
 
     public DailyMetricRollupId(LocalDate dateKst, String dimension, String metricKey) {

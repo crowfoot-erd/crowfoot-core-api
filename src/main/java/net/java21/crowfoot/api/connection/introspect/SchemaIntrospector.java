@@ -22,6 +22,7 @@ public interface SchemaIntrospector {
 
     /** 접속 타임아웃 등 드라이버 속성 — 사용자 자격 증명은 호출부가 채운다 */
     default void applyDriverProperties(Properties props) {
+        // 기본은 추가 속성 없음 — 필요한 DBMS만 재정의한다
     }
 
     /**
@@ -36,6 +37,7 @@ public interface SchemaIntrospector {
      * 없는 스키마면 {@code SQLException}. 스키마 개념이 없는 DBMS·미지정(null)은 아무 것도 하지 않는다.
      */
     default void applySessionSchema(Connection connection, String schemaName) throws SQLException {
+        // 기본은 아무 것도 하지 않는다 — 스키마가 DB 하위 개념인 DBMS(PostgreSQL)만 재정의한다
     }
 
     /** 물리 타입 표기 → 공용 논리 타입 코드(DbmsTemplates 정방향 매핑의 역).

@@ -1,5 +1,7 @@
 package net.java21.crowfoot.api.model.ddl;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -37,7 +39,14 @@ public final class DefaultLiterals {
     /** 함수 호출 꼴 — NOW(), CURRENT_TIMESTAMP(6), gen_random_uuid(), nextval('s'::regclass) */
     private static final Pattern FUNCTION_CALL = Pattern.compile("^[A-Za-z_][A-Za-z0-9_.]*\\s*\\(.*\\)$", Pattern.DOTALL);
 
-    private static final Pattern NUMBER = Pattern.compile("^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$");
+    private static final Pattern NUMBER = numberPattern();
+
+    /** 정규식은 메서드에서 컴파일한다 — ReDoS 검토 결과를 이 정규식에만 한정해 억제하려고(필드 단위 억제는 SpotBugs가 받지 않는다) */
+    @SuppressFBWarnings(value = "REDOS",
+            justification = "반복이 중첩되지 않고 각 갈래가 . 과 e로 갈려 매치 방법이 하나뿐이다 — 선형")
+    private static Pattern numberPattern() {
+        return Pattern.compile("^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$");
+    }
 
     /** PostgreSQL 캐스트가 붙은 문자열 — 'x'::type */
     private static final Pattern QUOTED_WITH_CAST = Pattern.compile("^'(?:[^']|'')*'::.+$", Pattern.DOTALL);
@@ -123,10 +132,7 @@ public final class DefaultLiterals {
         if (isQuoted(value) || QUOTED_WITH_CAST.matcher(value).matches()) {
             return true;
         }
-        if (value.startsWith("(") && value.endsWith(")")) {
-            return true;
-        }
-        return FUNCTION_CALL.matcher(value).matches();
+        return (value.startsWith("(") && value.endsWith(")")) || FUNCTION_CALL.matcher(value).matches();
     }
 
     private static boolean isQuoted(String value) {

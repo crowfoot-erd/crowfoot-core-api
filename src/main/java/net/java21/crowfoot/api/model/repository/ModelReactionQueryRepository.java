@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -59,7 +60,7 @@ public class ModelReactionQueryRepository {
                     return new MyReactionRow(base.reactedAt(),
                             representative == null ? null : representative.get(share.shareToken),
                             base.modelName(), base.description(), base.databaseType(),
-                            representative == null ? 0L : representative.get(share.viewCount),
+                            representative == null ? 0L : Objects.requireNonNullElse(representative.get(share.viewCount), 0L),
                             base.reactionCount(), base.commentCount());
                 })
                 .toList();

@@ -132,36 +132,14 @@ public class DocumentSyncService {
         try {
             db = objectMapper.readTree(schemaIntrospectionService.introspectContentForComparison(connection));
         } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.REVERSE_FAILED);
+            throw new BusinessException(ErrorCode.REVERSE_FAILED, e);
         }
         return new Computed(model, document, db, DocumentSync.sync(document, db, false));
     }
 
     /** 본체를 읽는다 — 구조가 어긋난 문서는 고치지 않는다(문서 편집 API와 같은 기준) */
     private JsonNode read(String content) {
-        JsonNode root;
-        try {
-            root = objectMapper.readTree(content);
-        } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.CONTENT_UNREADABLE);
-        }
-        // 1차 구현 이전의 빈 문서({"tables":[],"relationships":[]}) — 에디터가 열 때와 같이 지금 구조로 옮긴다
-        if (root.isObject() && !root.has("model") && root.path("tables").isArray() && root.path("tables").isEmpty()) {
-            ObjectNode normalized = objectMapper.createObjectNode();
-            normalized.put("schemaVersion", 1);
-            ObjectNode modelNode = normalized.putObject("model");
-            modelNode.putArray("tables");
-            modelNode.putArray("relationships");
-            ObjectNode diagram = normalized.putObject("diagram");
-            diagram.putObject("nodes");
-            diagram.putArray("notes");
-            diagram.putNull("viewport");
-            root = normalized;
-        }
-        if (!DocumentEditor.readable(root)) {
-            throw new BusinessException(ErrorCode.CONTENT_UNREADABLE);
-        }
-        return root;
+        return DocumentEditor.readEditable(objectMapper, content);
     }
 
     /** 버전 기록의 변경 요약 — 구조 diff형(08-core/13-model-versions.md Section 1.1)에 출처(source: sync)를 더한다 */

@@ -156,7 +156,7 @@ public class MigrationDdlService {
                 : modelVersionRepository.findTop50ByModelIdOrderByVersionDesc(model.getId())) {
             try {
                 contents.add(ErdContentParser.parse(objectMapper.readTree(version.getContent())));
-            } catch (JacksonException e) {
+            } catch (JacksonException ignored) {
                 // 읽지 못한 버전은 건너뛴다 — 이름 변경 감지는 보조 정보다
             }
         }
@@ -185,7 +185,7 @@ public class MigrationDdlService {
         try {
             return ErdContentParser.parse(objectMapper.readTree(content));
         } catch (JacksonException e) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.parse");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, e, "detail.model.parse");
         }
     }
 }

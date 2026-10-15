@@ -106,7 +106,7 @@ public class AdminSessionService {
         try {
             return Long.parseLong(userId.trim());
         } catch (NumberFormatException ex) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.user-id.not-numeric");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, ex, "detail.user-id.not-numeric");
         }
     }
 
@@ -114,7 +114,7 @@ public class AdminSessionService {
         try {
             return UUID.fromString(sid);
         } catch (IllegalArgumentException ex) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.sid.format");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, ex, "detail.sid.format");
         }
     }
 }

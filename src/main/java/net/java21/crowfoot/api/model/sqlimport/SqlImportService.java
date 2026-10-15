@@ -2,8 +2,6 @@ package net.java21.crowfoot.api.model.sqlimport;
 
 import net.java21.crowfoot.api.model.ddl.DbmsTemplates;
 import lombok.RequiredArgsConstructor;
-import net.java21.crowfoot.api.account.domain.User;
-import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.connection.introspect.Introspectors;
@@ -207,21 +205,6 @@ public class SqlImportService {
     }
 
     private ModelResponse toResponse(Model model) {
-        User creator = userRepository.findById(model.getCreatedBy()).orElse(null);
-        UserRefResponse createdBy = creator == null
-                ? null
-                : new UserRefResponse(Long.toString(creator.getId()), creator.getName());
-        return new ModelResponse(
-                Long.toString(model.getId()),
-                Long.toString(model.getWorkspaceId()),
-                model.getName(),
-                model.getDescription(),
-                model.getDatabaseType(),
-                model.getSourceConnectionId() == null ? null : Long.toString(model.getSourceConnectionId()),
-                model.getContent(),
-                (int) model.getVersion(),
-                createdBy,
-                model.getCreatedAt(),
-                model.getUpdatedAt());
+        return ModelResponse.of(model, userRepository.findById(model.getCreatedBy()).orElse(null));
     }
 }

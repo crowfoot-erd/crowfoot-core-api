@@ -114,7 +114,7 @@ public class SiteShowcaseService {
                 captured = captureClient.capture(url);
             } catch (CaptureException e) {
                 if (e.rejectsUrl()) {
-                    throw BusinessException.of(ErrorCode.SITE_URL_BLOCKED, "detail.showcase.url-blocked");
+                    throw BusinessException.of(ErrorCode.SITE_URL_BLOCKED, e, "detail.showcase.url-blocked");
                 }
                 captureError = e.getMessage();
             }
@@ -405,12 +405,12 @@ public class SiteShowcaseService {
         try {
             URI uri = new URI(url);
             String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-            if (url.length() > 2000 || !(scheme.equals("http") || scheme.equals("https"))
+            if (url.length() > 2000 || !("http".equals(scheme) || "https".equals(scheme))
                     || uri.getHost() == null || uri.getRawUserInfo() != null) {
                 throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.showcase.url-invalid");
             }
         } catch (URISyntaxException e) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.showcase.url-invalid");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, e, "detail.showcase.url-invalid");
         }
         return url;
     }

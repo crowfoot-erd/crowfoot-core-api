@@ -204,19 +204,10 @@ public class ManagedDatabaseService {
     @Transactional
     public void revoke(long userId, long workspaceId, long databaseId) {
         roleChecker.requireEditor(userId, workspaceId);
-        ManagedDatabase managed = databaseRepository.findByIdAndWorkspaceId(databaseId, workspaceId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_DATABASE_NOT_FOUND));
-        // 타인 발급은 존재 은닉 — 404로 동일하게 감춘다
-        if (!managed.getUserId().equals(userId)) {
-            throw new BusinessException(ErrorCode.MANAGED_DATABASE_NOT_FOUND);
-        }
-        ManagedInstance instance = instanceRepository.findById(managed.getInstanceId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_INSTANCE_NOT_FOUND));
-        ManagedProvisioner provisioner = provisioners.forDbmsType(instance.getDbmsType());
-        if (provisioner == null) {
-            throw new BusinessException(ErrorCode.MANAGED_PROVISION_FAILED,
-                    "이 인스턴스의 DBMS는 프로비저닝을 지원하지 않습니다");
-        }
+        Owned owned = requireOwned(userId, workspaceId, databaseId);
+        ManagedDatabase managed = owned.managed();
+        ManagedInstance instance = owned.instance();
+        ManagedProvisioner provisioner = owned.provisioner();
 
         provisioner.withdraw(endpoints.instanceHost(instance), instance.getPort(), instance.getDatabaseName(),
                 instance.getUsername(), crypto.decrypt(instance.getPassword()),
@@ -238,19 +229,10 @@ public class ManagedDatabaseService {
     @Transactional(readOnly = true)
     public ManagedCredentialResponse credential(long userId, long workspaceId, long databaseId) {
         roleChecker.requireMember(userId, workspaceId);
-        ManagedDatabase managed = databaseRepository.findByIdAndWorkspaceId(databaseId, workspaceId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_DATABASE_NOT_FOUND));
-        // 타인 발급은 존재 은닉 — 404로 동일하게 감춘다(철회와 같은 처리)
-        if (!managed.getUserId().equals(userId)) {
-            throw new BusinessException(ErrorCode.MANAGED_DATABASE_NOT_FOUND);
-        }
-        ManagedInstance instance = instanceRepository.findById(managed.getInstanceId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_INSTANCE_NOT_FOUND));
-        ManagedProvisioner provisioner = provisioners.forDbmsType(instance.getDbmsType());
-        if (provisioner == null) {
-            throw new BusinessException(ErrorCode.MANAGED_PROVISION_FAILED,
-                    "이 인스턴스의 DBMS는 프로비저닝을 지원하지 않습니다");
-        }
+        Owned owned = requireOwned(userId, workspaceId, databaseId);
+        ManagedDatabase managed = owned.managed();
+        ManagedInstance instance = owned.instance();
+        ManagedProvisioner provisioner = owned.provisioner();
         // 구방식(스키마-only) 이력에는 전용 계정이 없다 — 루트 자격을 내주지 않도록 거부한다
         if (managed.getUsername() == null || managed.getPassword() == null) {
             throw new BusinessException(ErrorCode.MANAGED_PROVISION_FAILED,
@@ -272,6 +254,27 @@ public class ManagedDatabaseService {
                 provisioner.connectionSchemaName(managed.getSchemaName()),
                 managed.getUsername(),
                 crypto.decrypt(managed.getPassword()));
+    }
+
+    /** 본인 발급 이력과 그 인스턴스·프로비저너 — 철회·접속 정보 조회가 같은 규칙으로 찾는다 */
+    private record Owned(ManagedDatabase managed, ManagedInstance instance, ManagedProvisioner provisioner) {
+    }
+
+    /** 본인 발급만 — 타인 발급은 존재 은닉(404로 동일하게 감춘다). 인스턴스 DBMS가 프로비저닝을 지원해야 한다 */
+    private Owned requireOwned(long userId, long workspaceId, long databaseId) {
+        ManagedDatabase managed = databaseRepository.findByIdAndWorkspaceId(databaseId, workspaceId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_DATABASE_NOT_FOUND));
+        if (!managed.getUserId().equals(userId)) {
+            throw new BusinessException(ErrorCode.MANAGED_DATABASE_NOT_FOUND);
+        }
+        ManagedInstance instance = instanceRepository.findById(managed.getInstanceId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.MANAGED_INSTANCE_NOT_FOUND));
+        ManagedProvisioner provisioner = provisioners.forDbmsType(instance.getDbmsType());
+        if (provisioner == null) {
+            throw new BusinessException(ErrorCode.MANAGED_PROVISION_FAILED,
+                    "이 인스턴스의 DBMS는 프로비저닝을 지원하지 않습니다");
+        }
+        return new Owned(managed, instance, provisioner);
     }
 
     /** 발급 인스턴스 결정 — 지정이 없으면 활성 첫 번째(등록순) */

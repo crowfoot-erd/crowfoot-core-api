@@ -10,6 +10,7 @@ import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 검증 실행 기록 (08-core/02-model.md §1.13, 05-editor/05-validation.md §5) — 에디터 린터가
@@ -35,6 +36,6 @@ public class ValidationRunService {
                 "errors", request.errorCount(),
                 "warnings", request.warningCount(),
                 "infos", request.infoCount(),
-                "exceptions", request.exceptionCount() == null ? 0 : request.exceptionCount()));
+                "exceptions", Objects.requireNonNullElse(request.exceptionCount(), 0)));
     }
 }

@@ -1,6 +1,7 @@
 package net.java21.crowfoot.api.model.ddl;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -110,7 +111,7 @@ public final class DbmsTemplates {
     /** 서버 database_types 코드 → 템플릿 id. 알 수 없는 코드는 공용(논리) 폴백 —
      *  코드 테이블이 템플릿보다 앞서 늘어나도 생성이 깨지지 않게(경고로 안내). */
     public static String templateIdForDatabase(String databaseType) {
-        String code = databaseType == null ? "" : databaseType.trim().toLowerCase();
+        String code = databaseType == null ? "" : databaseType.trim().toLowerCase(Locale.ROOT);
         if ("postgresql".equals(code)) {
             return "postgres";
         }

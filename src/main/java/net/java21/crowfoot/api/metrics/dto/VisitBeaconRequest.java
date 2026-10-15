@@ -9,10 +9,10 @@ import jakarta.validation.constraints.Size;
  */
 public record VisitBeaconRequest(
 
-        /** 방문 경로(쿼리 제외, 언어 prefix 포함 원문) — 서버가 path_group으로 정규화 */
+        /* 방문 경로(쿼리 제외, 언어 prefix 포함 원문) — 서버가 path_group으로 정규화 */
         @NotBlank @Size(max = 2000) String path,
 
-        /** document.referrer 원문 — 서버가 도메인만 추출 후 폐기 */
+        /* document.referrer 원문 — 서버가 도메인만 추출 후 폐기 */
         @Size(max = 2000) String referrer
 ) {
 }

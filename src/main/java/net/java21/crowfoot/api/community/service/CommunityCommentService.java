@@ -3,6 +3,7 @@ package net.java21.crowfoot.api.community.service;
 import net.java21.crowfoot.common.i18n.LocalizedTexts;
 import net.java21.crowfoot.api.notification.service.NotificationRecorder;
 import lombok.RequiredArgsConstructor;
+import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AdminGuard;
@@ -114,7 +115,7 @@ public class CommunityCommentService {
     }
 
     private String authorName(long userId) {
-        return userRepository.findById(userId).map(user -> user.getName()).orElse(null);
+        return userRepository.findById(userId).map(User::getName).orElse(null);
     }
 
     private static CommunityCommentResponse toResponse(CommentRow row) {

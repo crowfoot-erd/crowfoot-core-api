@@ -880,6 +880,7 @@ public final class DocumentSync {
         }
 
         /** DB 컬럼 id 목록 → 병합 문서 컬럼 id 목록. 하나라도 못 찾으면 null */
+        @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null은 매핑 실패 표시 — 빈 목록(빈 PK)과 구분한다
         private List<String> mapColumnIds(JsonNode dbColumnIds) {
             List<String> ids = new ArrayList<>();
             for (JsonNode id : dbColumnIds) {
@@ -1096,7 +1097,7 @@ public final class DocumentSync {
 
     private static void removeIdentical(ArrayNode array, JsonNode target) {
         for (int i = array.size() - 1; i >= 0; i--) {
-            if (array.get(i) == target) {
+            if (array.get(i) == target) { // NOPMD - 같은 값이 아니라 바로 그 노드만 지운다(동일성 비교가 의도)
                 array.remove(i);
             }
         }

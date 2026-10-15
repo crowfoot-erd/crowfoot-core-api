@@ -86,7 +86,7 @@ public class DeployService {
         try {
             content = ErdContentParser.parse(objectMapper.readTree(model.getContent()));
         } catch (JacksonException e) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.parse");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, e, "detail.model.parse");
         }
         return DdlGenerator.generate(content, dialect, DbmsTemplates.byId(templateId).label(), model.getName());
     }

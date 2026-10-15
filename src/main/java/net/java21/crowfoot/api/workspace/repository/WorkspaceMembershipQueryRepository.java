@@ -15,6 +15,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -97,10 +98,10 @@ public class WorkspaceMembershipQueryRepository {
     /** 마지막 Owner 보호 검사용 — 해당 Workspace의 OWNER 부여 행 수 */
     public long countOwnerGrants(Long workspaceId) {
         QWorkspaceMembership membership = QWorkspaceMembership.workspaceMembership;
-        return query.select(membership.count())
+        return Objects.requireNonNullElse(query.select(membership.count())
                 .from(membership)
                 .where(membership.workspaceId.eq(workspaceId), membership.role.eq(RoleCode.OWNER))
-                .fetchOne();
+                .fetchOne(), 0L);
     }
 
     /**

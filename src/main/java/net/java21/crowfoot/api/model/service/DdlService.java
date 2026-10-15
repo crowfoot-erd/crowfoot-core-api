@@ -86,7 +86,7 @@ public class DdlService {
             JsonNode root = objectMapper.readTree(content);
             return ErdContentParser.parse(root);
         } catch (JacksonException e) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.model.parse");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, e, "detail.model.parse");
         }
     }
 }

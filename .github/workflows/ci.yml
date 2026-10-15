@@ -27,6 +27,10 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      # 정적 분석(SpotBugs·FindSecBugs·PMD·CPD) — 위반이 1건이라도 있으면 이미지를 만들기 전에 멈춘다 (crowfoot-docs 00-environment/static-analysis.md)
+      - name: Static analysis
+        run: mvn -B clean compile spotbugs:check pmd:check pmd:cpd-check
+
       - name: Package with Maven
         run: mvn -B package -DskipTests
 

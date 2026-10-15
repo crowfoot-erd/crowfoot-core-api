@@ -1,5 +1,6 @@
 package net.java21.crowfoot.api.managed.provision;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.java21.crowfoot.api.connection.dto.ConnectionTestResponse;
 import net.java21.crowfoot.api.connection.introspect.Introspectors;
 import net.java21.crowfoot.api.connection.introspect.JdbcDiagnostics;
@@ -83,6 +84,8 @@ abstract class AbstractSchemaProvisioner implements ManagedProvisioner {
     /** 전용 계정 회수 문장 — 스키마 선행 DROP으로 소유 객체가 없는 상태에서 실행된다 */
     protected abstract List<String> dropAccountStatements(String issuedUsername);
 
+    @SuppressFBWarnings(value = "SQL_INJECTION_JDBC",
+            justification = "DDL(CREATE SCHEMA·ROLE·GRANT)은 바인드 변수를 못 받는다 — 스키마·계정명은 서버가 만들고 SERVER_NAMING(영소문자·숫자·밑줄)으로 검사한 뒤 인용하며, 비밀번호는 서버 생성값(고정 문자 집합)을 리터럴 이스케이프한다")
     private void execute(String host, int port, String databaseName, String username, String password,
                          List<String> statements) {
         try (Connection connection = open(host, port, databaseName, username, password);

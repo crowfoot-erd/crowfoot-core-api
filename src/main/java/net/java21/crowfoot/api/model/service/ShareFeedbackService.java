@@ -1,6 +1,7 @@
 package net.java21.crowfoot.api.model.service;
 
 import lombok.RequiredArgsConstructor;
+import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.account.repository.UserRepository;
@@ -362,7 +363,7 @@ public class ShareFeedbackService {
         if (comment.getAuthorUserId() == null) {
             return comment.getNickname();
         }
-        return userRepository.findById(comment.getAuthorUserId()).map(user -> user.getName()).orElse(null);
+        return userRepository.findById(comment.getAuthorUserId()).map(User::getName).orElse(null);
     }
 
     private static boolean isBlank(String value) {

@@ -6,9 +6,6 @@ import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
 import net.java21.crowfoot.api.connection.domain.DbConnection;
 import net.java21.crowfoot.api.connection.dto.ConnectionSchemaResponse;
 import net.java21.crowfoot.api.connection.introspect.Introspectors;
-import net.java21.crowfoot.api.connection.introspect.IntrospectedSchema;
-import net.java21.crowfoot.api.connection.introspect.JdbcDiagnostics;
-import net.java21.crowfoot.api.connection.introspect.SchemaIntrospector;
 import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.connection.reverse.ReverseContentAssembler;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
@@ -16,9 +13,6 @@ import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.util.Map;
 
 /**
@@ -33,9 +27,6 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class SchemaIntrospectionService {
-
-    /** 리버스(3.6)와 같은 상한 — 비교 원천도 문서와 같은 크기 한계를 둔다 */
-    private static final int MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
     private final ConnectionEndpointResolver endpoints;
     private final DbConnectionRepository connectionRepository;
@@ -72,26 +63,6 @@ public class SchemaIntrospectionService {
 
     /** 접속 → introspect → Canonical 조립 본문 — 읽기 절반(리버스 3.6과 같은 규칙) */
     private ReverseContentAssembler.AssembledContent doIntrospect(DbConnection connection, boolean synthesizeFkIndexes) {
-        SchemaIntrospector introspector = introspectors.forDbmsType(connection.getDbmsType());
-        if (introspector == null) {
-            throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
-        }
-
-        IntrospectedSchema schema;
-        try (Connection jdbc = introspectors.open(introspector, endpoints.resolve(connection).host(), endpoints.resolve(connection).port(),
-                connection.getDatabaseName(), connection.getUsername(), crypto.decrypt(connection.getPassword()))) {
-            schema = introspector.introspect(jdbc, connection.getSchemaName());
-        } catch (SQLException e) {
-            // 원문이 사용자에게 더 실용적인 계열(스키마 없음 등)은 diagnoseStatement가 골라 준다 — 접속·인증은 분류 문구 유지
-            throw new BusinessException(ErrorCode.CONNECTION_UNREACHABLE, JdbcDiagnostics.diagnoseStatement(e));
-        }
-
-        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(schema, introspector, connection.getDbmsType(),
-                synthesizeFkIndexes);
-        if (assembled.content().getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
-            throw new BusinessException(ErrorCode.REVERSE_FAILED,
-                    "스키마가 너무 커 문서 상한(5MB)을 초과했습니다 — 대상 스키마를 줄여 다시 시도하세요");
-        }
-        return assembled;
+        return ConnectionSchemaReader.read(connection, endpoints, crypto, introspectors, assembler, synthesizeFkIndexes);
     }
 }

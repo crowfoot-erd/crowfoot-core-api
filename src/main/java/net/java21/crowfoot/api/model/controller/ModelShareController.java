@@ -115,7 +115,7 @@ public class ModelShareController {
         return ListApiResponse.of(shareService.gallery());
     }
 
-    /** 사이트맵 원료 — 무인증(1.10.10), 토큰(22자)과 경로가 겹치지 않는 리터럴 경로.
+    /* 사이트맵 원료 — 무인증(1.10.10), 토큰(22자)과 경로가 겹치지 않는 리터럴 경로.
      *  활성 공유 문서 전부(문서당 최신 링크, updated_at desc, 상한 5,000) — 빌드 시
      *  sitemap.xml 생성 스크립트가 소비한다 */
     /**
@@ -128,7 +128,7 @@ public class ModelShareController {
             @RequestParam(name = "sort", defaultValue = "recent") String sort,
             @RequestParam(name = "page", defaultValue = "1") int page,
             @RequestParam(name = "size", defaultValue = "12") int size) {
-        if (page < 1 || size < 1 || size > 50 || !(sort.equals("recent") || sort.equals("popular"))
+        if (page < 1 || size < 1 || size > 50 || !("recent".equals(sort) || "popular".equals(sort))
                 || (query != null && query.length() > 100)) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }

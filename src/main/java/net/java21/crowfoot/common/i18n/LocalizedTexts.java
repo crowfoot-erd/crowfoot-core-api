@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SequencedMap;
 
 /**
  * 언어→텍스트 JSONB 맵 공용 유틸 (01-architecture/api-design.md · 08-core/08-community.md §2.1) —
@@ -23,20 +24,20 @@ public final class LocalizedTexts {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final TypeReference<LinkedHashMap<String, String>> MAP_TYPE = new TypeReference<>() {
+    private static final TypeReference<Map<String, String>> MAP_TYPE = new TypeReference<>() {
     };
 
     private LocalizedTexts() {
     }
 
     /** JSON 문자열 → 삽입 순 맵. null·빈 값·깨진 JSON은 빈 맵(폴백이 첫값으로 이어진다) */
-    public static LinkedHashMap<String, String> fromJson(String json) {
+    public static SequencedMap<String, String> fromJson(String json) {
         if (json == null || json.isBlank()) {
             return new LinkedHashMap<>();
         }
         try {
-            LinkedHashMap<String, String> raw = MAPPER.readValue(json, MAP_TYPE);
-            LinkedHashMap<String, String> sanitized = new LinkedHashMap<>();
+            Map<String, String> raw = MAPPER.readValue(json, MAP_TYPE);
+            SequencedMap<String, String> sanitized = new LinkedHashMap<>();
             for (String lang : SUPPORTED_LANGS) {
                 String value = raw.get(lang);
                 if (value != null && !value.isBlank()) {
@@ -84,7 +85,7 @@ public final class LocalizedTexts {
 
     /** 실제 존재하는 언어 키 — 지원 순서(ko,en,ja,zh)로 */
     public static List<String> availableLangs(String json) {
-        LinkedHashMap<String, String> values = fromJson(json);
+        Map<String, String> values = fromJson(json);
         List<String> langs = new ArrayList<>();
         for (String lang : SUPPORTED_LANGS) {
             if (values.containsKey(lang)) {
@@ -95,8 +96,8 @@ public final class LocalizedTexts {
     }
 
     /** 요청 맵 정제 — 지원 키만, 공백 값 제거. 빈 맵이면 검증 단계(서비스)에서 거부한다 */
-    public static LinkedHashMap<String, String> sanitize(Map<String, String> raw) {
-        LinkedHashMap<String, String> sanitized = new LinkedHashMap<>();
+    public static SequencedMap<String, String> sanitize(Map<String, String> raw) {
+        SequencedMap<String, String> sanitized = new LinkedHashMap<>();
         if (raw != null) {
             for (String lang : SUPPORTED_LANGS) {
                 String value = raw.get(lang);

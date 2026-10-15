@@ -1,5 +1,7 @@
 package net.java21.crowfoot.api.connection.introspect;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.util.regex.Pattern;
 
 /**
@@ -20,8 +22,15 @@ import java.util.regex.Pattern;
 final class PgDefaultNormalizer {
 
     /** 캐스트 대상 타입 이름 — {@code text}, {@code character varying(20)}, {@code timestamp(6) without time zone}, {@code text[]} */
-    private static final Pattern TYPE_NAME = Pattern.compile(
-            "[a-zA-Z_][a-zA-Z0-9_]*(?:\\s+[a-zA-Z_][a-zA-Z0-9_]*)*(?:\\s*\\(\\s*\\d+(?:\\s*,\\s*\\d+)?\\s*\\))?(?:\\s+[a-zA-Z_][a-zA-Z0-9_]*)*(?:\\[\\])*");
+    private static final Pattern TYPE_NAME = typeNamePattern();
+
+    /** 정규식은 메서드에서 컴파일한다 — ReDoS 검토 결과를 이 정규식에만 한정해 억제하려고(필드 단위 억제는 SpotBugs가 받지 않는다) */
+    @SuppressFBWarnings(value = "REDOS",
+            justification = "단어 사이를 공백(\\s+)이 가르고 중첩 반복 안에 겹치는 문자 집합이 없어 지수 역추적이 없다(최악 다항) — 입력은 pg_get_expr 기본값의 마지막 :: 뒤 타입 표기")
+    private static Pattern typeNamePattern() {
+        return Pattern.compile(
+                "[a-zA-Z_][a-zA-Z0-9_]*(?:\\s+[a-zA-Z_][a-zA-Z0-9_]*)*(?:\\s*\\(\\s*\\d+(?:\\s*,\\s*\\d+)?\\s*\\))?(?:\\s+[a-zA-Z_][a-zA-Z0-9_]*)*(?:\\[\\])*");
+    }
 
     /** 문자열 밖에서 지우는 문자열 타입 캐스트 */
     private static final Pattern TEXT_CAST = Pattern.compile(

@@ -88,7 +88,7 @@ public class AdminUserService {
         try {
             return Long.parseLong(userId);
         } catch (NumberFormatException ex) {
-            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND);
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, ex);
         }
     }
 }

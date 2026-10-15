@@ -4,6 +4,7 @@ import net.java21.crowfoot.common.i18n.ServerMessages;
 
 import java.sql.SQLException;
 import java.sql.SQLTimeoutException;
+import java.util.Locale;
 
 /**
  * JDBC 예외 분류 (08-core/06-connection.md Section 3.5) — 접속 테스트·리버스가
@@ -48,7 +49,7 @@ public final class JdbcDiagnostics {
             // 08001 접속 실패·08006 연결 끊김 등
             return unreachable();
         }
-        String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        String message = e.getMessage() == null ? "" : e.getMessage().toLowerCase(Locale.ROOT);
         if (message.contains("timeout") || message.contains("timed out")) {
             return timeout();
         }

@@ -31,6 +31,12 @@
         <!-- annotationProcessorPaths는 processor 경로를 별도 클래스패스로 만들므로
              JPA API도 processor 경로에 명시해야 APT가 엔티티를 읽을 수 있다 -->
         <jakarta-persistence.version>3.2.0</jakarta-persistence.version>
+        <!-- 정적 분석 (00-environment/static-analysis.md) — mvn clean compile spotbugs:check pmd:check pmd:cpd-check -->
+        <spotbugs-plugin.version>4.10.4.1</spotbugs-plugin.version>
+        <findsecbugs.version>1.14.0</findsecbugs.version>
+        <pmd-plugin.version>3.28.0</pmd-plugin.version>
+        <pmd.version>7.28.0</pmd.version>
+        <quality.failOnViolation>true</quality.failOnViolation>
     </properties>
 
     <dependencies>
@@ -45,6 +51,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- 정적 분석 억제 주석(@SuppressFBWarnings) — 컴파일 전용, 실행 jar에는 들어가지 않는다 -->
+        <dependency>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-annotations</artifactId>
+            <version>4.10.4</version>
+            <scope>provided</scope>
         </dependency>
         <!-- GeoIP 국가 판정 (08-core/10-metrics.md Section 6) — 클래스패스 번들 mmdb 읽기 전용.
              Jackson 2(fasterxml)를 끌어들이지만 패키지가 달라 앱의 Jackson 3(tools.jackson)과 공존한다 -->
@@ -184,6 +197,52 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>${spotbugs-plugin.version}</version>
+                <configuration>
+                    <effort>Max</effort>
+                    <threshold>Medium</threshold>
+                    <excludeFilterFile>config/quality/spotbugs-exclude.xml</excludeFilterFile>
+                    <failOnError>${quality.failOnViolation}</failOnError>
+                    <plugins>
+                        <plugin>
+                            <groupId>com.h3xstream.findsecbugs</groupId>
+                            <artifactId>findsecbugs-plugin</artifactId>
+                            <version>${findsecbugs.version}</version>
+                        </plugin>
+                    </plugins>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>${pmd-plugin.version}</version>
+                <configuration>
+                    <rulesets>
+                        <ruleset>config/quality/pmd-ruleset.xml</ruleset>
+                    </rulesets>
+                    <targetJdk>${java.version}</targetJdk>
+                    <printFailingErrors>true</printFailingErrors>
+                    <failOnViolation>${quality.failOnViolation}</failOnViolation>
+                    <excludeRoots>
+                        <excludeRoot>target/generated-sources</excludeRoot>
+                    </excludeRoots>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-java</artifactId>
+                        <version>${pmd.version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-core</artifactId>
+                        <version>${pmd.version}</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
     </build>

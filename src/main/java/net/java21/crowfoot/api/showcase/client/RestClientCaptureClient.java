@@ -40,9 +40,9 @@ public class RestClientCaptureClient implements CaptureClient {
                     .body(Map.of("url", url))
                     .exchange((request, response) -> objectMapper.readTree(response.getBody().readAllBytes()));
         } catch (ResourceAccessException e) {
-            throw new CaptureException(CaptureException.UNAVAILABLE, "캡처 서비스에 연결하지 못했습니다");
+            throw new CaptureException(CaptureException.UNAVAILABLE, "캡처 서비스에 연결하지 못했습니다", e);
         } catch (RuntimeException e) {
-            throw new CaptureException(CaptureException.UNAVAILABLE, "캡처 서비스 응답을 읽지 못했습니다");
+            throw new CaptureException(CaptureException.UNAVAILABLE, "캡처 서비스 응답을 읽지 못했습니다", e);
         }
         JsonNode header = body.path("header");
         if (!header.path("isSuccessful").asBoolean(false)) {

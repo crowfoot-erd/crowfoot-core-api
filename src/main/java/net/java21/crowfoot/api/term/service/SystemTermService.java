@@ -3,7 +3,6 @@ package net.java21.crowfoot.api.term.service;
 import lombok.RequiredArgsConstructor;
 import net.java21.crowfoot.api.account.service.AdminGuard;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
-import net.java21.crowfoot.api.model.domain.DatabaseType;
 import net.java21.crowfoot.api.model.repository.DatabaseTypeRepository;
 import net.java21.crowfoot.api.term.domain.SystemTerm;
 import net.java21.crowfoot.api.term.dto.SystemTermResponse;
@@ -16,14 +15,12 @@ import net.java21.crowfoot.common.error.ErrorCode;
 import net.java21.crowfoot.common.ListApiResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * 시스템 사전 API (08-core/01-workspace.md Section 4.5) — 전역 용어 사전의 조회·관리.
@@ -37,7 +34,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SystemTermService {
 
-    /** 전체 건수 상한은 두지 않는다(v1.15 — 대량 표준 사전 3.4만 토큰 시드).
+    /* 전체 건수 상한은 두지 않는다(v1.15 — 대량 표준 사전 3.4만 토큰 시드).
      *  등록은 관리자(AdminGuard) 전용이라 무분별한 증가 경로가 없고, 목록은 항상 페이징된다. */
 
     /** 언어→라벨 맵 엔트리 상한 — 관리 폼 로케일 후보(ko/en/ja/zh)보다 여유를 둔다 */
@@ -90,7 +87,7 @@ public class SystemTermService {
 
     /** 이니셜 정규화 — 소문자 단일 알파벳 또는 '#'(알파벳 외 이니셜). 그 외 값은 무시하고 전체로 본다 */
     private static String normalizeLetter(String raw) {
-        String letter = raw == null ? "" : raw.trim().toLowerCase();
+        String letter = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         if (letter.length() == 1) {
             char c = letter.charAt(0);
             if (c >= 'a' && c <= 'z') {
@@ -108,7 +105,7 @@ public class SystemTermService {
         Map<String, String> labels = normalizeLabels(request.labels());
         Map<String, String> types = normalizeTypes(request.types());
         String labelsJson = writeMap(labels);
-        String typesJson = types == null ? null : writeMap(types);
+        String typesJson = types.isEmpty() ? null : writeMap(types);
 
         SystemTerm entity = termRepository.findByTerm(term).orElse(null);
         if (entity == null) {
@@ -136,7 +133,7 @@ public class SystemTermService {
 
     /** 물리명 토큰 정규화 — 워크스페이스 용어와 같은 규칙(trim + 소문자, 공백 금지) */
     private String normalizeTerm(String raw) {
-        String term = raw == null ? "" : raw.trim().toLowerCase();
+        String term = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
         if (term.isEmpty() || term.chars().anyMatch(Character::isWhitespace)) {
             throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.token");
         }
@@ -162,58 +159,23 @@ public class SystemTermService {
         return labels;
     }
 
-    /** DBMS 종류별 타입 맵 검증·정규화 — 키는 database_types 등록 코드(활성 여부 불문 — 비활성 전환돼도
-     *  기존 값을 보존한다), 값은 trim 후 빈 값은 그 종류 칸을 비운 것으로 버린다. 전부 비면 null */
     private Map<String, String> normalizeTypes(Map<String, String> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return null;
-        }
-        Set<String> codes = databaseTypeRepository.findAllByOrderByCodeAsc().stream()
-                .map(DatabaseType::getCode)
-                .collect(Collectors.toSet());
-        Map<String, String> types = new LinkedHashMap<>();
-        raw.forEach((code, value) -> {
-            String key = code == null ? "" : code.trim();
-            String type = value == null ? "" : value.trim();
-            if (type.isEmpty()) {
-                return;
-            }
-            if (key.isEmpty() || !codes.contains(key)) {
-                throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                        "지원하지 않는 데이터베이스 종류입니다: " + key);
-            }
-            if (type.length() > 100) {
-                throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.datatype.length");
-            }
-            types.put(key, type);
-        });
-        return types.isEmpty() ? null : types;
+        return TermTypeMaps.normalizeTypes(raw, databaseTypeRepository);
     }
 
     private String writeMap(Map<String, String> map) {
-        try {
-            return objectMapper.writeValueAsString(map);
-        } catch (Exception ex) {
-            // 맵을 직접 직렬화하는 것이라 실패 경로가 없다 — 저장 직전 변환 실패는 요청 오류로 돌린다
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.term.value.unsavable");
-        }
+        return TermTypeMaps.writeMap(objectMapper, map);
     }
 
     private Map<String, String> readMap(String json) {
-        try {
-            return objectMapper.readValue(json, new TypeReference<Map<String, String>>() {
-            });
-        } catch (Exception ex) {
-            // 우리가 쓴 JSON만 저장되므로 깨진 행은 없어야 한다 — 있다면 데이터 문제로 알리고 예외 처리한다
-            throw new IllegalStateException("시스템 사전 맵 파싱 실패: " + json, ex);
-        }
+        return TermTypeMaps.readMap(objectMapper, json, "시스템 사전");
     }
 
     private Map<String, Object> auditDetail(String term, Map<String, String> labels, Map<String, String> types) {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("term", term);
         detail.put("labels", labels);
-        if (types != null) {
+        if (!types.isEmpty()) {
             detail.put("types", types);
         }
         return detail;

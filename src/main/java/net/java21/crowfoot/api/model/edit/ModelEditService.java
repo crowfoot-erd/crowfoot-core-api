@@ -24,7 +24,6 @@ import net.java21.crowfoot.common.error.BusinessException;
 import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -75,12 +74,12 @@ public class ModelEditService {
         if (!(items instanceof List<?> list) || list.stream().noneMatch(i -> "PENDING".equals(((Map<String, Object>) i).get("state")))) {
             return;
         }
-        List<JsonNode> previous = new java.util.ArrayList<>();
-        for (net.java21.crowfoot.api.model.domain.ModelVersion version
+        List<JsonNode> previous = new ArrayList<>();
+        for (ModelVersion version
                 : modelVersionRepository.findTop50ByModelIdOrderByVersionDesc(model.getId())) {
             try {
                 previous.add(objectMapper.readTree(version.getContent()));
-            } catch (RuntimeException e) {
+            } catch (RuntimeException ignored) {
                 // 읽지 못한 버전은 건너뛴다
             }
         }
@@ -168,7 +167,7 @@ public class ModelEditService {
         try {
             applySyncPlan(dryRun, plan);
         } catch (DocumentEditor.RequirementLimitException e) {
-            throw new BusinessException(ErrorCode.REQUIREMENT_LIMIT_EXCEEDED);
+            throw new BusinessException(ErrorCode.REQUIREMENT_LIMIT_EXCEEDED, e);
         }
         dryRun.throwIfInvalid();
         return plan;
@@ -201,7 +200,7 @@ public class ModelEditService {
         try {
             action.accept(editor);
         } catch (DocumentEditor.RequirementLimitException e) {
-            throw new BusinessException(ErrorCode.REQUIREMENT_LIMIT_EXCEEDED);
+            throw new BusinessException(ErrorCode.REQUIREMENT_LIMIT_EXCEEDED, e);
         }
         editor.throwIfInvalid();
 
@@ -252,29 +251,7 @@ public class ModelEditService {
 
     /** 본체를 읽는다 — 구조가 어긋난 문서는 편집 API로 고치지 않는다 */
     private JsonNode read(Model model) {
-        JsonNode root;
-        try {
-            root = objectMapper.readTree(model.getContent());
-        } catch (JacksonException e) {
-            throw new BusinessException(ErrorCode.CONTENT_UNREADABLE);
-        }
-        // 1차 구현 이전의 문서({"tables":[],"relationships":[]}) — 에디터가 열 때와 같이 지금 구조로 옮긴다
-        if (root.isObject() && !root.has("model") && root.path("tables").isArray() && root.path("tables").isEmpty()) {
-            ObjectNode normalized = objectMapper.createObjectNode();
-            normalized.put("schemaVersion", 1);
-            ObjectNode modelNode = normalized.putObject("model");
-            modelNode.putArray("tables");
-            modelNode.putArray("relationships");
-            ObjectNode diagram = normalized.putObject("diagram");
-            diagram.putObject("nodes");
-            diagram.putArray("notes");
-            diagram.putNull("viewport");
-            root = normalized;
-        }
-        if (!DocumentEditor.readable(root)) {
-            throw new BusinessException(ErrorCode.CONTENT_UNREADABLE);
-        }
-        return root;
+        return DocumentEditor.readEditable(objectMapper, model.getContent());
     }
 
     /** 워크스페이스 도메인 타입 — 컬럼 입력의 domainType 이름(대소문자 무시)으로 찾는다 */

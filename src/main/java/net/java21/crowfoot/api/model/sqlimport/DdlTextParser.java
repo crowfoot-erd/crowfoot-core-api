@@ -563,7 +563,7 @@ public class DdlTextParser {
                 }
                 String name = constraintName != null ? constraintName : c.nextOptionalIndexName();
                 String method = readUsing(table, name, c);
-                IndexKeys keys = indexKeys(table, name, c.nextKeyParts());
+                IndexKeys keys = indexKeys(table, c.nextKeyParts());
                 if (keys.columns().isEmpty() && keys.expression() == null) {
                     throw new ParseException(summary("UNIQUE 컬럼 없음", item));
                 }
@@ -618,7 +618,7 @@ public class DdlTextParser {
     private void addIndex(TableBuilder table, String type, String name, Cursor c, List<Token> item) {
         String indexName = name != null ? name : c.nextOptionalIndexName();
         String method = readUsing(table, indexName, c);
-        IndexKeys keys = indexKeys(table, indexName, c.nextKeyParts());
+        IndexKeys keys = indexKeys(table, c.nextKeyParts());
         if (keys.columns().isEmpty() && keys.expression() == null) {
             throw new ParseException(summary("인덱스 컬럼 없음", item));
         }
@@ -693,7 +693,7 @@ public class DdlTextParser {
     }
 
     /** 인덱스 키 — 컬럼 조각만이면 컬럼 목록(연산자 클래스 포함), 식 조각이 있으면 목록 전체를 원문으로 담는다(v1.37) */
-    private static IndexKeys indexKeys(TableBuilder table, String indexName, List<KeyPart> parts) {
+    private static IndexKeys indexKeys(TableBuilder table, List<KeyPart> parts) {
         if (parts.stream().anyMatch(part -> part.name() == null)) {
             return new IndexKeys(List.of(), String.join(", ", parts.stream().map(KeyPart::raw).toList()));
         }
@@ -744,7 +744,7 @@ public class DdlTextParser {
         if (method != null && "BTREE".equals(type)) {
             type = method;
         }
-        IndexKeys keys = indexKeys(table, indexName, c.nextKeyParts());
+        IndexKeys keys = indexKeys(table, c.nextKeyParts());
         if (keys.columns().isEmpty() && keys.expression() == null) {
             skipped.add(summary("CREATE INDEX (컬럼 없음)", tokens));
             return;

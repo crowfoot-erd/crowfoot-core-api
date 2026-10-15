@@ -2,6 +2,7 @@ package net.java21.crowfoot.api.community.service;
 
 import net.java21.crowfoot.api.notification.service.NotificationRecorder;
 import lombok.RequiredArgsConstructor;
+import net.java21.crowfoot.api.account.domain.User;
 import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AdminGuard;
@@ -26,7 +27,6 @@ import net.java21.crowfoot.common.i18n.LocalizedTexts;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -152,11 +152,11 @@ public class CommunityPostService {
     public CommunityPostDetailResponse patch(long userId, long postId, UpdateCommunityPostRequest request) {
         CommunityPost post = requirePost(postId);
         requireAuthorOrAdmin(userId, post.getCreatedBy());
-        LinkedHashMap<String, String> mergedTitle = LocalizedTexts.fromJson(post.getTitleI18n());
+        Map<String, String> mergedTitle = LocalizedTexts.fromJson(post.getTitleI18n());
         if (request.title() != null) {
             mergedTitle.putAll(validated(request.title(), TITLE_MAX, false));
         }
-        LinkedHashMap<String, String> mergedContent = LocalizedTexts.fromJson(post.getContentI18n());
+        Map<String, String> mergedContent = LocalizedTexts.fromJson(post.getContentI18n());
         if (request.content() != null) {
             mergedContent.putAll(validated(request.content(), CONTENT_MAX, false));
         }
@@ -244,7 +244,7 @@ public class CommunityPostService {
     /** 상세 응답 조립 — 생성·수정 직후 엔티티에는 작성자 이름이 없어 별도 조회(FK로 항상 존재) */
     private CommunityPostDetailResponse toDetail(CommunityPost post, String lang) {
         String authorName = userRepository.findById(post.getCreatedBy())
-                .map(user -> user.getName())
+                .map(User::getName)
                 .orElse(null);
         return new CommunityPostDetailResponse(post.getId().toString(), post.getBoard().name(),
                 LocalizedTexts.resolve(post.getTitleI18n(), lang), LocalizedTexts.availableLangs(post.getTitleI18n()),

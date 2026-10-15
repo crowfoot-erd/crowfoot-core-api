@@ -3,6 +3,8 @@ package net.java21.crowfoot.common.error;
 import lombok.Getter;
 import org.springframework.http.HttpStatus;
 
+import java.util.Locale;
+
 /**
  * 에러 코드 체계 (01-architecture/api-design.md Section 5.4 + 08-core/00-overview.md Section 4
  * + 08-core/03-membership.md Section 2 + 08-core/04-team.md Section 2).
@@ -117,6 +119,6 @@ public enum ErrorCode {
 
     /** 다국어 번들 키 — messages_{ko,en,ja,zh}.properties의 error.* (api-design.md §5.7) */
     public String messageKey() {
-        return "error." + code.toLowerCase();
+        return "error." + code.toLowerCase(Locale.ROOT);
     }
 }

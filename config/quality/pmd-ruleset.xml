@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PMD 규칙 — 원천 crowfoot-docs 00-environment/static-analysis.md Section 3 -->
+<ruleset name="crowfoot"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>Crowfoot 서버 공통 PMD 규칙 — PMD quickstart 기반</description>
+    <exclude-pattern>.*/generated-sources/.*</exclude-pattern>
+
+    <rule ref="rulesets/java/quickstart.xml">
+        <!-- SLF4J {} 자리표시자 로그는 인자 평가 비용이 작아 가드가 필요 없다 -->
+        <exclude name="GuardLogStatement"/>
+        <!-- 연산 순서를 드러내는 괄호는 읽기를 돕는다 -->
+        <exclude name="UselessParentheses"/>
+        <!-- 한 번 쓰고 여러 스레드가 읽는 참조에 volatile은 올바른 선택이다 -->
+        <exclude name="AvoidUsingVolatile"/>
+        <!-- 중첩 record를 묶는 네임스페이스 클래스(XxxDtos·XxxRequests)를 오탐한다 -->
+        <exclude name="MissingStaticMethodInNonInstantiatableClass"/>
+        <exclude name="AssignmentInOperand"/>
+    </rule>
+
+    <!-- 손으로 쓴 파서의 s.charAt(i++)·while ((line = r.readLine()) != null) 관용구는 허용한다 -->
+    <rule ref="category/java/errorprone.xml/AssignmentInOperand">
+        <properties>
+            <property name="allowIncrementDecrement" value="true"/>
+            <property name="allowWhile" value="true"/>
+        </properties>
+    </rule>
+</ruleset>

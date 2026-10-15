@@ -14,7 +14,6 @@ import net.java21.crowfoot.api.model.dto.RestoreModelVersionRequest;
 import net.java21.crowfoot.api.model.dto.SaveContentResponse;
 import net.java21.crowfoot.api.model.repository.ModelRepository;
 import net.java21.crowfoot.api.model.repository.ModelVersionQueryRepository;
-import net.java21.crowfoot.api.model.repository.ModelVersionQueryRepository.VersionRow;
 import net.java21.crowfoot.api.model.repository.ModelVersionRepository;
 import net.java21.crowfoot.api.workspace.service.RoleChecker;
 import net.java21.crowfoot.common.ListApiResponse;

@@ -16,11 +16,11 @@ public record CreateConnectionRequest(
         @NotBlank @Size(max = 255) String host,
         @NotNull @Min(1) @Max(65535) Integer port,
         @NotBlank @Size(max = 100) String databaseName,
-        /** PostgreSQL 스키마(선택) — 다른 DBMS는 스키마 개념이 DB 자체라 무시된다 */
+        /* PostgreSQL 스키마(선택) — 다른 DBMS는 스키마 개념이 DB 자체라 무시된다 */
         @Size(max = 100) String schemaName,
         @NotBlank @Size(max = 100) String username,
         @NotBlank @Size(max = 255) String password,
-        /** MCP 반영 허용(선택) — 생략하면 꺼짐 (Section 2.1) */
+        /* MCP 반영 허용(선택) — 생략하면 꺼짐 (Section 2.1) */
         Boolean mcpApplyAllowed
 ) {
 }

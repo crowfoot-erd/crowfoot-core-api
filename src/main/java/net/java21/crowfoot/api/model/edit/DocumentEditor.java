@@ -12,6 +12,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.java21.crowfoot.api.model.edit.EditRequests.AreaItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.CheckRef;
@@ -28,7 +29,11 @@ import net.java21.crowfoot.api.model.edit.EditRequests.RequirementItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.TableItem;
 import net.java21.crowfoot.api.model.edit.EditRequests.UniqueItem;
 import net.java21.crowfoot.common.ErrorResponse;
+import net.java21.crowfoot.common.error.BusinessException;
+import net.java21.crowfoot.common.error.ErrorCode;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -63,7 +68,14 @@ public final class DocumentEditor {
     static final Set<String> INDEX_TYPES = Set.of("BTREE", "FULLTEXT", "SPATIAL", "HASH", "GIN", "GIST", "BRIN", "SPGIST");
 
     /** 연산자 클래스 이름 — 스키마 한정 가능(public.gin_trgm_ops) */
-    private static final Pattern OPCLASS = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?");
+    private static final Pattern OPCLASS = opclassPattern();
+
+    /** 정규식은 메서드에서 컴파일한다 — ReDoS 검토 결과를 이 정규식에만 한정해 억제하려고(필드 단위 억제는 SpotBugs가 받지 않는다) */
+    @SuppressFBWarnings(value = "REDOS",
+            justification = "반복이 중첩되지 않고 선택 그룹은 마침표로 시작해 앞 반복과 겹치지 않는다 — 선형")
+    private static Pattern opclassPattern() {
+        return Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?");
+    }
     static final Set<String> PRECISION_TYPES = Set.of("DECIMAL", "NUMERIC");
     static final Set<String> INTEGER_TYPES = Set.of("INT", "BIGINT", "SMALLINT", "TINYINT");
     static final Set<String> STATUSES = Set.of("draft", "confirmed", "dropped");
@@ -131,6 +143,33 @@ public final class DocumentEditor {
         this.databaseType = databaseType == null ? "" : databaseType;
         this.domainTypes = domainTypes;
         this.ids = ids;
+    }
+
+    /** 본체를 읽는다 — 구조가 어긋난 문서는 고치지 않는다(409 CONTENT_UNREADABLE). 문서 편집 API와 DB 동기화가 같은 기준으로 읽는다 */
+    public static JsonNode readEditable(ObjectMapper objectMapper, String content) {
+        JsonNode root;
+        try {
+            root = objectMapper.readTree(content);
+        } catch (JacksonException e) {
+            throw new BusinessException(ErrorCode.CONTENT_UNREADABLE, e);
+        }
+        // 1차 구현 이전의 빈 문서({"tables":[],"relationships":[]}) — 에디터가 열 때와 같이 지금 구조로 옮긴다
+        if (root.isObject() && !root.has("model") && root.path("tables").isArray() && root.path("tables").isEmpty()) {
+            ObjectNode normalized = objectMapper.createObjectNode();
+            normalized.put("schemaVersion", 1);
+            ObjectNode modelNode = normalized.putObject("model");
+            modelNode.putArray("tables");
+            modelNode.putArray("relationships");
+            ObjectNode diagram = normalized.putObject("diagram");
+            diagram.putObject("nodes");
+            diagram.putArray("notes");
+            diagram.putNull("viewport");
+            root = normalized;
+        }
+        if (!readable(root)) {
+            throw new BusinessException(ErrorCode.CONTENT_UNREADABLE);
+        }
+        return root;
     }
 
     /** 편집 API가 고칠 수 있는 본체인가 — 구조가 어긋난 문서는 고치지 않는다(409 CONTENT_UNREADABLE) */
@@ -524,6 +563,7 @@ public final class DocumentEditor {
     }
 
     /** 테이블 물리명 목록 → id 목록. 없는 이름이 있으면 사유를 남기고 null */
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null은 해석 실패 표시 — 빈 목록(입력이 비었음)과 구분한다
     private List<String> resolveTableIds(String at, List<String> names) {
         List<String> out = new ArrayList<>();
         boolean ok = true;
@@ -1200,7 +1240,7 @@ public final class DocumentEditor {
                     return;
                 }
                 String order = column.order() == null ? "ASC" : column.order();
-                if (!order.equals("ASC") && !order.equals("DESC")) {
+                if (!"ASC".equals(order) && !"DESC".equals(order)) {
                     error(at + ".columns[" + i + "].order", "정렬은 ASC 또는 DESC입니다: " + order);
                     return;
                 }
@@ -1543,6 +1583,7 @@ public final class DocumentEditor {
     }
 
     /** columnMappings 입력 → [부모 컬럼 id, 자식 컬럼 id] (부모 PK 순서). 틀리면 사유를 남기고 null */
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null은 해석 실패 표시 — 빈 목록과 구분한다
     private List<String[]> resolveMappings(String at, ObjectNode parent, ObjectNode child, List<String> parentPk, List<ColumnMappingItem> items) {
         Map<String, String> byParent = new HashMap<>();
         Set<String> usedChildren = new HashSet<>();
@@ -2397,6 +2438,7 @@ public final class DocumentEditor {
     }
 
     /** 컬럼 물리명 목록 → id 목록. 없는 이름이 있으면 사유를 남기고 null */
+    @SuppressWarnings("PMD.ReturnEmptyCollectionRatherThanNull") // null은 해석 실패 표시 — 빈 목록(입력이 비었음)과 구분한다
     private List<String> resolveColumnIds(String at, ObjectNode table, List<String> names) {
         List<String> out = new ArrayList<>();
         boolean ok = true;

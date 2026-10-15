@@ -9,7 +9,6 @@ import net.java21.crowfoot.api.account.repository.UserQueryRepository;
 import net.java21.crowfoot.api.account.repository.UserQueryRepository.UserCandidateResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
-import net.java21.crowfoot.api.team.domain.Team;
 import net.java21.crowfoot.api.team.repository.TeamMemberQueryRepository;
 import net.java21.crowfoot.api.team.repository.TeamRepository;
 import net.java21.crowfoot.api.workspace.domain.GranteeType;
@@ -207,7 +206,7 @@ public class MembershipService {
         try {
             return GranteeType.valueOf(granteeType);
         } catch (IllegalArgumentException e) {
-            throw BusinessException.of(ErrorCode.INVALID_REQUEST, "detail.grantee-type");
+            throw BusinessException.of(ErrorCode.INVALID_REQUEST, e, "detail.grantee-type");
         }
     }
 
@@ -226,7 +225,7 @@ public class MembershipService {
         try {
             return Long.valueOf(id);
         } catch (NumberFormatException e) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, message);
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, message, e);
         }
     }
 

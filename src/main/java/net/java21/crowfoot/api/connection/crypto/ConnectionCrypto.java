@@ -22,7 +22,7 @@ import java.util.Base64;
  * 운영에서 키를 바꾸면 기존 암호문을 더는 풀 수 없다(커넥션 재등록 필요).
  */
 @Component
-public class ConnectionCrypto {
+public final class ConnectionCrypto {
 
     private static final int IV_BYTES = 12;
     private static final int TAG_BITS = 128;

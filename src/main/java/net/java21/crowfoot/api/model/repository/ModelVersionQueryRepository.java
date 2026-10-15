@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 /** 문서 버전 기록 목록 조회(Querydsl) — 08-core/02-model.md Section 1.11 (최신순·페이징). */
 @Repository
@@ -48,10 +49,10 @@ public class ModelVersionQueryRepository {
     /** 검색 조건에 맞는 총 스냅샷 수 */
     public long count(long modelId, String keyword) {
         QModelVersion version = QModelVersion.modelVersion;
-        return query.select(version.count())
+        return Objects.requireNonNullElse(query.select(version.count())
                 .from(version)
                 .where(version.modelId.eq(modelId), memoLike(keyword))
-                .fetchFirst();
+                .fetchFirst(), 0L);
     }
 
     /** 메모 검색 조건 — null이면 조건 없음(전체). memo가 NULL인 행은 키워드 지정 시 제외된다 */

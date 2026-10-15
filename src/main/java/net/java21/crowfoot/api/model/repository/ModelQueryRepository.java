@@ -10,6 +10,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 /** 모델 목록 조회(Querydsl) — 08-core/02-model.md Section 1.1 (keyword·페이징·updatedAt desc). */
 @Repository
@@ -54,10 +55,10 @@ public class ModelQueryRepository {
     /** 검색 조건에 맞는 총 개수 */
     public long count(long workspaceId, String keyword) {
         QModel model = QModel.model;
-        return query.select(model.count())
+        return Objects.requireNonNullElse(query.select(model.count())
                 .from(model)
                 .where(workspaceEq(workspaceId), keywordLike(keyword))
-                .fetchFirst();
+                .fetchFirst(), 0L);
     }
 
     private static BooleanExpression workspaceEq(long workspaceId) {

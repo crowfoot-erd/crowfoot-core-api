@@ -1,8 +1,6 @@
 package net.java21.crowfoot.api.connection.service;
 
 import lombok.RequiredArgsConstructor;
-import net.java21.crowfoot.api.account.domain.User;
-import net.java21.crowfoot.api.account.dto.UserRefResponse;
 import net.java21.crowfoot.api.account.repository.UserRepository;
 import net.java21.crowfoot.api.account.service.AuditRecorder;
 import net.java21.crowfoot.api.connection.crypto.ConnectionCrypto;
@@ -10,9 +8,6 @@ import net.java21.crowfoot.api.connection.domain.DbConnection;
 import net.java21.crowfoot.api.connection.dto.ReverseEngineeringRequest;
 import net.java21.crowfoot.api.connection.dto.ReverseEngineeringResponse;
 import net.java21.crowfoot.api.connection.introspect.Introspectors;
-import net.java21.crowfoot.api.connection.introspect.IntrospectedSchema;
-import net.java21.crowfoot.api.connection.introspect.JdbcDiagnostics;
-import net.java21.crowfoot.api.connection.introspect.SchemaIntrospector;
 import net.java21.crowfoot.api.connection.repository.DbConnectionRepository;
 import net.java21.crowfoot.api.connection.reverse.ReverseContentAssembler;
 import net.java21.crowfoot.api.model.domain.Model;
@@ -29,9 +24,6 @@ import net.java21.crowfoot.common.error.ErrorCode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.util.Map;
 
 /**
@@ -50,7 +42,6 @@ public class ReverseEngineeringService {
     /** main 다이어그램 초기 레이아웃 — ModelService와 같은 형태 */
     private static final String EMPTY_LAYOUT = "{\"nodes\":[],\"edges\":[],\"viewport\":{\"x\":0,\"y\":0,\"zoom\":1}}";
     private static final String MAIN_DIAGRAM_NAME = "main";
-    private static final int MAX_CONTENT_BYTES = 5 * 1024 * 1024;
 
     private final ConnectionEndpointResolver endpoints;
     private final DbConnectionRepository connectionRepository;
@@ -76,25 +67,9 @@ public class ReverseEngineeringService {
         if (modelRepository.existsByWorkspaceIdAndName(workspaceId, modelName)) {
             throw BusinessException.of(ErrorCode.DUPLICATED_NAME, "detail.doc-name.duplicated");
         }
-        SchemaIntrospector introspector = introspectors.forDbmsType(connection.getDbmsType());
-        if (introspector == null) {
-            throw new BusinessException(ErrorCode.INVALID_DBMS_TYPE);
-        }
-
-        IntrospectedSchema schema;
-        try (Connection jdbc = introspectors.open(introspector, endpoints.resolve(connection).host(), endpoints.resolve(connection).port(),
-                connection.getDatabaseName(), connection.getUsername(), crypto.decrypt(connection.getPassword()))) {
-            schema = introspector.introspect(jdbc, connection.getSchemaName());
-        } catch (SQLException e) {
-            // 원문이 사용자에게 더 실용적인 계열(스키마 없음 등)은 diagnoseStatement가 골라 준다 — 접속·인증은 분류 문구 유지
-            throw new BusinessException(ErrorCode.CONNECTION_UNREACHABLE, JdbcDiagnostics.diagnoseStatement(e));
-        }
-
-        ReverseContentAssembler.AssembledContent assembled = assembler.assemble(schema, introspector, connection.getDbmsType());
-        if (assembled.content().getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
-            throw new BusinessException(ErrorCode.REVERSE_FAILED,
-                    "스키마가 너무 커 문서 상한(5MB)을 초과했습니다 — 대상 스키마를 줄여 다시 시도하세요");
-        }
+        // 리버스는 FK 인덱스를 문서에 채워 넣는다(assemble 3인자 기본과 같다)
+        ReverseContentAssembler.AssembledContent assembled = ConnectionSchemaReader.read(
+                connection, endpoints, crypto, introspectors, assembler, true);
 
         Model model = modelRepository.save(new Model(workspaceId, modelName, request.description(),
                 connection.getDbmsType(), assembled.content(), userId));
@@ -135,21 +110,6 @@ public class ReverseEngineeringService {
     }
 
     private ModelResponse toResponse(Model model) {
-        User creator = userRepository.findById(model.getCreatedBy()).orElse(null);
-        UserRefResponse createdBy = creator == null
-                ? null
-                : new UserRefResponse(Long.toString(creator.getId()), creator.getName());
-        return new ModelResponse(
-                Long.toString(model.getId()),
-                Long.toString(model.getWorkspaceId()),
-                model.getName(),
-                model.getDescription(),
-                model.getDatabaseType(),
-                model.getSourceConnectionId() == null ? null : Long.toString(model.getSourceConnectionId()),
-                model.getContent(),
-                (int) model.getVersion(),
-                createdBy,
-                model.getCreatedAt(),
-                model.getUpdatedAt());
+        return ModelResponse.of(model, userRepository.findById(model.getCreatedBy()).orElse(null));
     }
 }

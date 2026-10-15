@@ -58,7 +58,7 @@ public class SystemTermQueryRepository {
         if (letter == null || letter.isBlank()) {
             return null;
         }
-        if (letter.equals("#")) {
+        if ("#".equals(letter)) {
             return term.term.substring(0, 1).lower().notBetween("a", "z");
         }
         return term.term.startsWith(letter);
