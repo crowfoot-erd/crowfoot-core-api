@@ -36,6 +36,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -100,14 +101,14 @@ class ModelVersionServiceTest {
     @DisplayName("목록은 content 없는 요약 행을 최신순 페이징 포맷으로 내린다 — 기록자 이름은 조인 결과")
     void listReturnsPagedEntriesWithoutContent() {
         stubModelInWorkspace();
-        given(modelVersionQueryRepository.count(501L, null)).willReturn(3L);
-        given(modelVersionQueryRepository.search(501L, null, 1, 2)).willReturn(List.of(
+        given(modelVersionQueryRepository.count(501L, null, false)).willReturn(3L);
+        given(modelVersionQueryRepository.search(501L, null, false, 1, 2)).willReturn(List.of(
                 new VersionRow(3L, "{\"layoutOnly\":true}", null, "1.0", "1차 오픈", 7L, "marco",
                         Instant.parse("2026-09-20T05:00:00Z")),
                 new VersionRow(2L, null, "초안 메모", null, null, 7L, "marco",
                         Instant.parse("2026-09-19T05:00:00Z"))));
 
-        ListApiResponse<ModelVersionEntryResponse> response = service.list(7L, 77L, 501L, null, 1, 2);
+        ListApiResponse<ModelVersionEntryResponse> response = service.list(7L, 77L, 501L, null, false, 1, 2);
 
         verify(roleChecker).requireMember(7L, 77L);
         assertThat(response.totalCount()).isEqualTo(3);
@@ -118,26 +119,26 @@ class ModelVersionServiceTest {
         assertThat(response.responses().get(0).tagDescription()).isEqualTo("1차 오픈");
         assertThat(response.responses().get(1).memo()).isEqualTo("초안 메모");
         // 페이지 정규화 — 미지정은 1·20, 상한 100
-        service.list(7L, 77L, 501L, null, null, null);
-        verify(modelVersionQueryRepository).search(501L, null, 1, 20);
+        service.list(7L, 77L, 501L, null, false, null, null);
+        verify(modelVersionQueryRepository).search(501L, null, false, 1, 20);
     }
 
     @Test
     @DisplayName("목록 keyword는 trim·빈값을 null로 정규화해 리포지토리에 위임한다 — 메모 검색")
     void listNormalizesKeyword() {
         stubModelInWorkspace();
-        given(modelVersionQueryRepository.count(501L, "등급")).willReturn(1L);
-        given(modelVersionQueryRepository.search(501L, "등급", 1, 20)).willReturn(List.of(
+        given(modelVersionQueryRepository.count(501L, "등급", false)).willReturn(1L);
+        given(modelVersionQueryRepository.search(501L, "등급", false, 1, 20)).willReturn(List.of(
                 new VersionRow(1L, null, "등급 컬럼 추가", null, null, 7L, "marco",
                         Instant.parse("2026-09-20T05:00:00Z"))));
 
-        service.list(7L, 77L, 501L, "  등급  ", 1, 20);
-        verify(modelVersionQueryRepository).search(501L, "등급", 1, 20);
+        service.list(7L, 77L, 501L, "  등급  ", false, 1, 20);
+        verify(modelVersionQueryRepository).search(501L, "등급", false, 1, 20);
 
         // 빈·공백 keyword는 전체 목록(null 위임)
-        given(modelVersionQueryRepository.count(501L, null)).willReturn(3L);
-        service.list(7L, 77L, 501L, "   ", null, null);
-        verify(modelVersionQueryRepository).search(501L, null, 1, 20);
+        given(modelVersionQueryRepository.count(501L, null, false)).willReturn(3L);
+        service.list(7L, 77L, 501L, "   ", false, null, null);
+        verify(modelVersionQueryRepository).search(501L, null, false, 1, 20);
     }
 
     @Test
@@ -145,11 +146,11 @@ class ModelVersionServiceTest {
     void listRejectsUnknownModel() {
         given(modelRepository.findVersionRowByIdAndWorkspaceId(501L, 77L)).willReturn(List.of());
 
-        assertThatThrownBy(() -> service.list(7L, 77L, 501L, null, null, null))
+        assertThatThrownBy(() -> service.list(7L, 77L, 501L, null, false, null, null))
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MODEL_NOT_FOUND));
 
-        verify(modelVersionQueryRepository, never()).count(anyLong(), anyString());
+        verify(modelVersionQueryRepository, never()).count(anyLong(), anyString(), anyBoolean());
     }
 
     @Test

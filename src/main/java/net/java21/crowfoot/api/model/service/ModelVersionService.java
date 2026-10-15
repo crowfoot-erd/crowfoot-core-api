@@ -46,10 +46,10 @@ public class ModelVersionService {
     private final RoleChecker roleChecker;
     private final AuditRecorder auditRecorder;
 
-    /** 목록(Viewer 이상 — 1.11) — content 없는 요약 행, 최신순 페이징. keyword는 메모 부분 일치(대소문자 무시) */
+    /** 목록(Viewer 이상 — 1.11) — content 없는 요약 행, 최신순 페이징. keyword는 메모·태그 부분 일치(대소문자 무시), tagged면 태그 버전만 */
     @Transactional(readOnly = true)
     public ListApiResponse<ModelVersionEntryResponse> list(long userId, long workspaceId, long modelId,
-                                                           String keyword, Integer page, Integer size) {
+                                                           String keyword, boolean tagged, Integer page, Integer size) {
         roleChecker.requireMember(userId, workspaceId);
         requireModelInWorkspace(modelId, workspaceId);
         String trimmed = keyword == null ? null : keyword.trim();
@@ -59,12 +59,12 @@ public class ModelVersionService {
         int normalizedPage = page == null || page < 1 ? 1 : page;
         int normalizedSize = size == null || size < 1 ? 20 : Math.min(size, 100);
 
-        long totalCount = modelVersionQueryRepository.count(modelId, trimmed);
+        long totalCount = modelVersionQueryRepository.count(modelId, trimmed, tagged);
         if (totalCount == 0) {
             return ListApiResponse.paged(List.of(), normalizedPage, normalizedSize, 0);
         }
         List<ModelVersionEntryResponse> responses = modelVersionQueryRepository
-                .search(modelId, trimmed, normalizedPage, normalizedSize)
+                .search(modelId, trimmed, tagged, normalizedPage, normalizedSize)
                 .stream()
                 .map(row -> new ModelVersionEntryResponse((int) row.version(), row.changeSummary(),
                         row.memo(), row.tag(), row.tagDescription(),

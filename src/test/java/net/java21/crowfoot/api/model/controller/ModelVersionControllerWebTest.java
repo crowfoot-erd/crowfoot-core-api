@@ -49,7 +49,7 @@ class ModelVersionControllerWebTest {
     @Test
     @DisplayName("목록은 최신순 요약 행(content 없음)을 페이징 포맷으로 응답한다")
     void listReturnsPagedEntries() throws Exception {
-        given(modelVersionService.list(7L, 77L, 501L, null, 1, 20)).willReturn(ListApiResponse.paged(List.of(
+        given(modelVersionService.list(7L, 77L, 501L, null, false, 1, 20)).willReturn(ListApiResponse.paged(List.of(
                 new ModelVersionEntryResponse(3, "{\"items\":[]}", "member 테이블 추가", "1.0", "1차 오픈",
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z")),
                 new ModelVersionEntryResponse(2, null, null, null, null,
@@ -74,7 +74,7 @@ class ModelVersionControllerWebTest {
     @DisplayName("목록 keyword 파라미터는 메모 검색어로 서비스에 전달된다")
     void listBindsKeywordParam() throws Exception {
         // page·size 정규화(1·20)는 서비스 몫 — 컨트롤러는 null 그대로 넘긴다
-        given(modelVersionService.list(7L, 77L, 501L, "grade", null, null)).willReturn(ListApiResponse.paged(List.of(
+        given(modelVersionService.list(7L, 77L, 501L, "grade", false, null, null)).willReturn(ListApiResponse.paged(List.of(
                 new ModelVersionEntryResponse(1, null, "grade 컬럼 추가", null, null,
                         new UserRefResponse("7", "marco"), Instant.parse("2026-09-20T05:00:00Z"))),
                 1, 20, 1));
@@ -84,6 +84,23 @@ class ModelVersionControllerWebTest {
                         .queryParam("keyword", "grade"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.responses[0].memo").value("grade 컬럼 추가"))
+                .andExpect(jsonPath("$.totalCount").value(1));
+    }
+
+    @Test
+    @DisplayName("목록 tagged=true는 태그 버전만 달라는 조건으로 서비스에 전달된다(태그 간 비교 후보)")
+    void listBindsTaggedParam() throws Exception {
+        given(modelVersionService.list(7L, 77L, 501L, null, true, 1, 100)).willReturn(ListApiResponse.paged(List.of(
+                new ModelVersionEntryResponse(5, null, null, "1.1", null,
+                        new UserRefResponse("7", "marco"), Instant.parse("2026-09-21T05:00:00Z"))),
+                1, 100, 1));
+
+        mockMvc.perform(get("/core/workspaces/77/models/501/versions")
+                        .header("X-USER-ID", "7")
+                        .queryParam("tagged", "true")
+                        .queryParam("page", "1").queryParam("size", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.responses[0].tag").value("1.1"))
                 .andExpect(jsonPath("$.totalCount").value(1));
     }
 

@@ -102,16 +102,16 @@ class ModelVersionRepositoryTest {
         modelVersionRepository.save(new ModelVersion(999L, 9L, "{}", null, null,
                 marcoId, Instant.now())); // 다른 문서 — 경계 밖
 
-        List<VersionRow> page1 = modelVersionQueryRepository.search(modelId, null, 1, 2);
+        List<VersionRow> page1 = modelVersionQueryRepository.search(modelId, null, false, 1, 2);
 
-        assertThat(modelVersionQueryRepository.count(modelId, null)).isEqualTo(3);
+        assertThat(modelVersionQueryRepository.count(modelId, null, false)).isEqualTo(3);
         assertThat(page1).hasSize(2);
         assertThat(page1).extracting(VersionRow::version).containsExactly(3L, 2L); // 최신순 + 페이징
         assertThat(page1.get(0).createdByName()).isEqualTo("marco");
         assertThat(page1.get(0).changeSummary()).isEqualTo("{\"layoutOnly\":true}");
         assertThat(page1.get(1).memo()).isEqualTo("초안 메모");
         // 투영에는 content가 없다 — 행 객체에 content 필드 자체가 없음(컴파일 타임 보장)
-        List<VersionRow> page2 = modelVersionQueryRepository.search(modelId, null, 2, 2);
+        List<VersionRow> page2 = modelVersionQueryRepository.search(modelId, null, false, 2, 2);
         assertThat(page2).extracting(VersionRow::version).containsExactly(1L);
     }
 
@@ -122,17 +122,17 @@ class ModelVersionRepositoryTest {
         snapshot(2L, null, "등급 컬럼 추가");
         snapshot(3L, null, "GRADE 정리");
 
-        List<VersionRow> hits = modelVersionQueryRepository.search(modelId, "등급", 1, 20);
+        List<VersionRow> hits = modelVersionQueryRepository.search(modelId, "등급", false, 1, 20);
 
-        assertThat(modelVersionQueryRepository.count(modelId, "등급")).isEqualTo(1);
+        assertThat(modelVersionQueryRepository.count(modelId, "등급", false)).isEqualTo(1);
         assertThat(hits).extracting(VersionRow::version).containsExactly(2L);
         // 대소문자 무시 — 소문자로도 잡힌다
-        assertThat(modelVersionQueryRepository.search(modelId, "grade", 1, 20))
+        assertThat(modelVersionQueryRepository.search(modelId, "grade", false, 1, 20))
                 .extracting(VersionRow::version).containsExactly(3L);
         // 빈·공백 keyword는 전체(조건 없음)
-        assertThat(modelVersionQueryRepository.search(modelId, "  ", 1, 20)).hasSize(3);
+        assertThat(modelVersionQueryRepository.search(modelId, "  ", false, 1, 20)).hasSize(3);
         // 다른 메모 키워드 — memo NULL(v1)은 어느 keyword에도 잡히지 않는다
-        assertThat(modelVersionQueryRepository.search(modelId, "정리", 1, 20))
+        assertThat(modelVersionQueryRepository.search(modelId, "정리", false, 1, 20))
                 .extracting(VersionRow::version).containsExactly(3L);
     }
 
@@ -207,11 +207,26 @@ class ModelVersionRepositoryTest {
         snapshot(1L, null, null);
         tagged(2L, "v1.0");
 
-        List<VersionRow> hits = modelVersionQueryRepository.search(modelId, "V1", 1, 20);
+        List<VersionRow> hits = modelVersionQueryRepository.search(modelId, "V1", false, 1, 20);
 
         assertThat(hits).extracting(VersionRow::version).containsExactly(2L);
         assertThat(hits.get(0).tag()).isEqualTo("v1.0");
         assertThat(hits.get(0).tagDescription()).isEqualTo("1차 오픈");
-        assertThat(modelVersionQueryRepository.count(modelId, "v1")).isEqualTo(1);
+        assertThat(modelVersionQueryRepository.count(modelId, "v1", false)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("taggedOnly면 태그 붙은 버전만 최신순으로 — keyword와 함께 걸린다")
+    void searchTaggedOnly() {
+        snapshot(1L, null, "초안");
+        tagged(2L, "1.0");
+        snapshot(3L, null, null);
+        tagged(4L, "1.1");
+
+        assertThat(modelVersionQueryRepository.search(modelId, null, true, 1, 20))
+                .extracting(VersionRow::version).containsExactly(4L, 2L);
+        assertThat(modelVersionQueryRepository.count(modelId, null, true)).isEqualTo(2);
+        assertThat(modelVersionQueryRepository.search(modelId, "1.1", true, 1, 20))
+                .extracting(VersionRow::version).containsExactly(4L);
     }
 }

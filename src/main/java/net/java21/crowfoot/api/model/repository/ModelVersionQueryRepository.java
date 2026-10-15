@@ -32,8 +32,8 @@ public class ModelVersionQueryRepository {
     ) {
     }
 
-    /** 버전 기록 목록 — 정렬 version desc(최신 먼저). keyword는 메모·태그 부분 일치(대소문자 무시) */
-    public List<VersionRow> search(long modelId, String keyword, int page, int size) {
+    /** 버전 기록 목록 — 정렬 version desc(최신 먼저). keyword는 메모·태그 부분 일치(대소문자 무시), taggedOnly면 태그 붙은 버전만 */
+    public List<VersionRow> search(long modelId, String keyword, boolean taggedOnly, int page, int size) {
         QModelVersion version = QModelVersion.modelVersion;
         QUser creator = QUser.user;
         return query.select(Projections.constructor(VersionRow.class,
@@ -42,7 +42,7 @@ public class ModelVersionQueryRepository {
                         version.createdBy, creator.name, version.createdAt))
                 .from(version)
                 .leftJoin(creator).on(version.createdBy.eq(creator.id))
-                .where(version.modelId.eq(modelId), memoLike(keyword))
+                .where(version.modelId.eq(modelId), memoLike(keyword), taggedOnly(taggedOnly))
                 .orderBy(version.version.desc())
                 .offset((long) (page - 1) * size)
                 .limit(size)
@@ -50,12 +50,17 @@ public class ModelVersionQueryRepository {
     }
 
     /** 검색 조건에 맞는 총 스냅샷 수 */
-    public long count(long modelId, String keyword) {
+    public long count(long modelId, String keyword, boolean taggedOnly) {
         QModelVersion version = QModelVersion.modelVersion;
         return Objects.requireNonNullElse(query.select(version.count())
                 .from(version)
-                .where(version.modelId.eq(modelId), memoLike(keyword))
+                .where(version.modelId.eq(modelId), memoLike(keyword), taggedOnly(taggedOnly))
                 .fetchFirst(), 0L);
+    }
+
+    /** 태그 버전만 — 태그 간 비교의 후보 목록(13-model-versions.md 1.7). false면 조건 없음 */
+    private static BooleanExpression taggedOnly(boolean taggedOnly) {
+        return taggedOnly ? QModelVersion.modelVersion.tag.isNotNull() : null;
     }
 
     /** 메모·태그 검색 조건 — null이면 조건 없음(전체). 메모와 태그가 모두 NULL인 행은 키워드 지정 시 제외된다 */

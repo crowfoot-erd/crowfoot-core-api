@@ -32,16 +32,17 @@ public class ModelVersionController {
     private final ModelVersionService modelVersionService;
     private final MigrationDdlService migrationDdlService;
 
-    /** 버전 기록 목록(요약 — content 제외, 최신순) — Viewer. keyword는 메모 부분 일치 */
+    /** 버전 기록 목록(요약 — content 제외, 최신순) — Viewer. keyword는 메모·태그 부분 일치, tagged=true면 태그 버전만 */
     @GetMapping("/core/workspaces/{workspace-id}/models/{model-id}/versions")
     public ListApiResponse<ModelVersionEntryResponse> list(
             @PathVariable("workspace-id") long workspaceId,
             @PathVariable("model-id") long modelId,
             @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "tagged", defaultValue = "false") boolean tagged,
             @RequestParam(name = "page", required = false) Integer page,
             @RequestParam(name = "size", required = false) Integer size) {
         return modelVersionService.list(CurrentUserHolder.get().userId(), workspaceId, modelId,
-                keyword, page, size);
+                keyword, tagged, page, size);
     }
 
     /** 버전 상세(해당 시점 content 전문) — Viewer, 버전 뷰어가 여는 호출 */
